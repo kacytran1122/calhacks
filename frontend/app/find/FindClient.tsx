@@ -141,7 +141,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           <SmileWord />
         </a>
         <span className="dk-desk">Find events</span>
-        <div className="dk-co">Official MLH hackathons and local tech events, clearly separated.</div>
+        <div className="dk-co" />
         <a className="dk-btn ghost" href="/chat">
           @smile group chat
         </a>
@@ -178,12 +178,12 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           <div className="fd-type-heading"><b>What do you want to find?</b><span>Choose one or both</span></div>
           <div className="fd-types" role="group" aria-label="Event types">
             <button type="button" aria-pressed={groups.has("mlh")} className={groups.has("mlh") ? "on mlh" : "mlh"} onClick={() => toggle("mlh")}>
-              <span className="fd-type-icon" aria-hidden="true">⌁</span>
+              <span className="fd-type-icon" aria-hidden="true"><img src="/mlh-logo.png" alt="" /></span>
               <span><b>MLH events</b><small>Official student hackathons from MLH</small></span>
               <i aria-hidden="true">✓</i>
             </button>
             <button type="button" aria-pressed={groups.has("tech")} className={groups.has("tech") ? "on tech" : "tech"} onClick={() => toggle("tech")}>
-              <span className="fd-type-icon" aria-hidden="true">✦</span>
+              <span className="fd-type-icon" aria-hidden="true"><img src="/tech-events-icon.png" alt="" /></span>
               <span><b>Tech events</b><small>Local meetups, talks and workshops</small></span>
               <i aria-hidden="true">✓</i>
             </button>

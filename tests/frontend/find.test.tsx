@@ -16,6 +16,15 @@ const result = {
   classifiedBy: "keywords",
 };
 
+test("shows branded event type icons without the old header description", () => {
+  vi.stubGlobal("fetch", vi.fn(() => response(result)));
+  render(<FindClient initialZip="" />);
+
+  expect(screen.getByRole("button", { name: /MLH events/ }).querySelector('img[src="/mlh-logo.png"]')).not.toBeNull();
+  expect(screen.getByRole("button", { name: /Tech events/ }).querySelector('img[src="/tech-events-icon.png"]')).not.toBeNull();
+  expect(screen.queryByText("Official MLH hackathons and local tech events, clearly separated.")).not.toBeInTheDocument();
+});
+
 test("resolves a typed city and places event search below the result count", async () => {
   const fetcher = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
