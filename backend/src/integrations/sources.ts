@@ -169,6 +169,14 @@ export interface MlhEvent {
   physical: boolean;
 }
 
+export function resolveMlhEventUrl(event: { slug: string; url?: string; websiteUrl?: string }): string {
+  const website = event.websiteUrl?.trim();
+  if (website && /^https?:\/\//i.test(website)) return website;
+  const listing = event.url?.trim();
+  if (listing && /^https?:\/\//i.test(listing)) return listing;
+  return `https://www.mlh.com${listing || `/events/${event.slug}`}`;
+}
+
 function decodeAttr(s: string): string {
   return s.replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
@@ -186,7 +194,7 @@ export async function fetchMlh(now = new Date()): Promise<SourceResult<MlhEvent>
   const attr = tag ? null : r.body.match(/data-page="(\{[^"]+)"/);
   const raw = tag ? tag[1]! : attr ? decodeAttr(attr[1]!) : null;
   if (!raw) return { source: "mlh", status: "empty", via: r.via, items: [], ms: Date.now() - t0, note: "MLH page layout changed: no embedded event data" };
-  type E = { id: string; slug: string; name: string; startsAt: string; endsAt?: string; url?: string; location?: string; formatType?: string };
+  type E = { id: string; slug: string; name: string; startsAt: string; endsAt?: string; url?: string; websiteUrl?: string; location?: string; formatType?: string };
   let props: { upcomingEvents?: E[] };
   try {
     props = (JSON.parse(raw) as { props?: { upcomingEvents?: E[] } }).props ?? {};
@@ -198,7 +206,7 @@ export async function fetchMlh(now = new Date()): Promise<SourceResult<MlhEvent>
     name: e.name.trim(),
     startsAt: e.startsAt,
     endsAt: e.endsAt,
-    url: `https://www.mlh.com${e.url ?? `/events/${e.slug}`}`,
+    url: resolveMlhEventUrl(e),
     location: e.location ?? "",
     physical: e.formatType !== "digital",
   }));

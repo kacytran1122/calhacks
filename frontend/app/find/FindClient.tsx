@@ -68,7 +68,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
   const [zip, setZip] = useState(initialZip);
   const [radius, setRadius] = useState(200);
   const [q, setQ] = useState("");
-  const [kinds, setKinds] = useState<Set<"hackathon" | "tech">>(new Set(["hackathon", "tech"]));
+  const [groups, setGroups] = useState<Set<"mlh" | "tech">>(new Set(["mlh", "tech"]));
   const [res, setRes] = useState<Discover | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
     setErr(null);
     setPicked(null);
     try {
-      const p = new URLSearchParams({ zip: z, radius: String(radius), kinds: [...kinds].join(",") });
+      const p = new URLSearchParams({ zip: z, radius: String(radius), groups: [...groups].join(",") });
       if (q.trim()) p.set("q", q.trim());
       setRes(await api<Discover>(`/api/events?${p}`));
       history.replaceState(null, "", `/find?zip=${z}`);
@@ -89,17 +89,17 @@ export function FindClient({ initialZip }: { initialZip: string }) {
     } finally {
       setLoading(false);
     }
-  }, [zip, radius, q, kinds]);
+  }, [zip, radius, q, groups]);
 
   useEffect(() => {
     if (initialZip) search(initialZip);
   }, []);
 
-  const toggle = (k: "hackathon" | "tech") => {
-    const n = new Set(kinds);
+  const toggle = (k: "mlh" | "tech") => {
+    const n = new Set(groups);
     if (n.has(k)) n.delete(k);
     else n.add(k);
-    if (n.size) setKinds(n);
+    if (n.size) setGroups(n);
   };
 
   return (
@@ -109,7 +109,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           <SmileWord />
         </a>
         <span className="dk-desk">Find events</span>
-        <div className="dk-co">Hackathons and tech events near you, from live public listings.</div>
+        <div className="dk-co">Official MLH hackathons and local tech events, clearly separated.</div>
         <a className="dk-btn ghost" href="/chat">
           @smile group chat
         </a>
@@ -131,12 +131,14 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           <span>Max distance</span>
           <span className="fd-number"><input className="dk-in" type="number" min={1} max={3000} value={radius} onChange={(e) => setRadius(Math.min(3000, Math.max(1, Number(e.target.value) || 1)))} aria-label="Maximum route distance in miles" /><b>mi</b></span>
         </label>
-        <div className="dk-seg">
-          <button type="button" className={kinds.has("hackathon") ? "on" : ""} onClick={() => toggle("hackathon")}>
-            Hackathons
+        <div className="dk-seg fd-types" aria-label="Event types">
+          <button type="button" aria-pressed={groups.has("mlh")} className={groups.has("mlh") ? "on" : ""} onClick={() => toggle("mlh")}>
+            <span>MLH events</span>
+            <small>Official student hackathons</small>
           </button>
-          <button type="button" className={kinds.has("tech") ? "on" : ""} onClick={() => toggle("tech")}>
-            Tech events
+          <button type="button" aria-pressed={groups.has("tech")} className={groups.has("tech") ? "on" : ""} onClick={() => toggle("tech")}>
+            <span>Tech events</span>
+            <small>Meetups, talks &amp; workshops</small>
           </button>
         </div>
         <button className="dk-btn primary" disabled={loading}>
@@ -166,7 +168,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
                     <b>{w.day}</b>
                   </div>
                   <div className="fd-tags">
-                    <span className={`fd-kind ${e.kind}`}>{e.kind === "hackathon" ? "Hackathon" : "Tech"}</span>
+                    <span className={`fd-kind ${e.kind}`}>{e.source === "mlh" || e.alsoOn?.includes("mlh") ? "MLH event" : "Tech event"}</span>
                     {[e.source, ...(e.alsoOn ?? [])].map((s) => (
                       <span key={s} className="fd-srcbadge">
                         {SOURCE[s as keyof typeof SOURCE] ?? s}
@@ -194,7 +196,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
               </article>
             );
           })}
-          {res && res.events.length === 0 && <p className="dk-mut">No hackathons or tech events found in that radius in the next 90 days. Try a wider radius.</p>}
+          {res && res.events.length === 0 && <p className="dk-mut">No MLH or tech events found in that radius in the next 90 days. Try a wider radius.</p>}
           {res && res.unplaced.length > 0 && (
             <p className="dk-mut">
               {res.unplaced.length} more match your search but list only a venue name we can’t place on a map: {res.unplaced.map((u) => u.name).join(", ")}.

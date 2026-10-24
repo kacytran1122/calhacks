@@ -14,7 +14,7 @@ export { explain, defend, auditorChallenge, traceFor } from "./agents/auditor";
 export { scoutEvent, eventFromJsonLd, jsonLdBlocks, type LensHints, type EventFacts } from "./agents/scout";
 export { gatherEvidence, buyWithX402 } from "./agents/evidence";
 export { compareRoutes, missRate } from "./agents/route";
-export { discoverEvents, type DiscoverResult, type DiscoverOptions } from "./agents/discover";
+export { discoverEvents, type DiscoverResult, type DiscoverOptions, type EventGroup } from "./agents/discover";
 export { eventStore, type EventListing } from "./eventStore";
 export { chargeTrip } from "./agents/payments";
 export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, type PickedEvent } from "./orchestrator";

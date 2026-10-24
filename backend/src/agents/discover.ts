@@ -9,8 +9,20 @@ export interface DiscoverOptions {
   radiusMiles?: number;
   query?: string;
   kinds?: EventListing["kind"][];
+  groups?: EventGroup[];
   days?: number;
   now?: Date;
+}
+
+export type EventGroup = "mlh" | "tech";
+
+export function isMlhEvent(event: Pick<EventListing, "source" | "alsoOn">): boolean {
+  return event.source === "mlh" || event.alsoOn?.includes("mlh") === true;
+}
+
+export function matchesEventGroups(event: Pick<EventListing, "source" | "alsoOn" | "kind">, groups?: EventGroup[]): boolean {
+  if (!groups?.length) return true;
+  return (groups.includes("mlh") && isMlhEvent(event)) || (groups.includes("tech") && event.kind === "tech");
 }
 
 export interface DiscoverResult {
@@ -158,6 +170,7 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     const m = merged.find((o) => sameEvent(o, l));
     if (m) {
       if (l.source !== m.source) m.alsoOn = [...new Set([...(m.alsoOn ?? []), l.source])];
+      if (l.source === "mlh") m.url = l.url;
       if (l.source === "devpost" && l.venue && !m.venue) m.venue = l.venue;
       if (l.kind === "hackathon") m.kind = "hackathon";
     } else merged.push({ ...l });
@@ -175,9 +188,9 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     return t >= now.getTime() - 86_400_000 && new Date(e.startsAt).getTime() <= now.getTime() + days * 86_400_000;
   };
   const events = merged
-    .filter((e) => kinds.includes(e.kind) && inWindow(e) && matches(e) && e.distanceMiles !== undefined && e.distanceMiles <= radiusMiles)
+    .filter((e) => kinds.includes(e.kind) && matchesEventGroups(e, opts.groups) && inWindow(e) && matches(e) && e.distanceMiles !== undefined && e.distanceMiles <= radiusMiles)
     .sort((a, b) => (a.startsAt ?? "").localeCompare(b.startsAt ?? "") || (a.distanceMiles ?? 0) - (b.distanceMiles ?? 0));
-  const unplaced = terms.length ? merged.filter((e) => e.locationPrecision === "unknown" && kinds.includes(e.kind) && inWindow(e) && matches(e)).slice(0, 10) : [];
+  const unplaced = terms.length ? merged.filter((e) => e.locationPrecision === "unknown" && kinds.includes(e.kind) && matchesEventGroups(e, opts.groups) && inWindow(e) && matches(e)).slice(0, 10) : [];
 
   const store = eventStore();
   let storeNote: string | undefined;
