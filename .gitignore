@@ -1,0 +1,13 @@
+**/node_modules/
+**/.next/
+backend/.data/
+backend/.env
+frontend/.env.local
+frontend/extension/dist/
+cache/
+*.log
+.DS_Store
+next-env.d.ts
+*.tsbuildinfo
+coverage/
+test-results/
