@@ -83,6 +83,20 @@ async function pool<T>(items: T[], limit: number, fn: (x: T) => Promise<void>) {
   }));
 }
 
+export function mergeLumaSources(results: Awaited<ReturnType<typeof fetchLuma>>[], hubNames: string[]) {
+  const seen = new Set<string>();
+  const items = results.flatMap((result) => result.items).filter((event) => !seen.has(event.id) && seen.add(event.id));
+  const failed = results.find((result) => result.status !== "ok" && result.status !== "empty");
+  return {
+    ...results[0]!,
+    status: items.length ? "ok" as const : failed?.status ?? "empty" as const,
+    via: results.some((result) => result.via === "bright-data") ? "bright-data" as const : "direct" as const,
+    items,
+    ms: Math.max(...results.map((result) => result.ms)),
+    note: [results.map((result) => result.note).filter(Boolean).join("; ") || undefined, hubNames.length ? `also searched from ${hubNames.join(", ")}` : undefined].filter(Boolean).join("; ") || undefined,
+  };
+}
+
 export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverResult> {
   const now = opts.now ?? new Date();
   const radiusMiles = opts.radiusMiles ?? 150;
@@ -106,13 +120,7 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     fetchMlh(now),
     ...hubs.map((h) => fetchLuma(h.lat, h.lon, 2)),
   ]);
-  const seenLuma = new Set<string>();
-  const luma = {
-    ...lumaHome,
-    items: [lumaHome, ...lumaHubs].flatMap((r) => r.items).filter((e) => !seenLuma.has(e.id) && seenLuma.add(e.id)),
-    ms: Math.max(lumaHome.ms, ...lumaHubs.map((r) => r.ms)),
-    note: [lumaHome.note, hubs.length ? `also searched from ${hubs.map((h) => h.name).join(", ")}` : undefined].filter(Boolean).join("; ") || undefined,
-  };
+  const luma = mergeLumaSources([lumaHome, ...lumaHubs], hubs.map((hub) => hub.name));
   const sources = [luma, devpost, mlh].map((r: SourceResult<unknown>) => ({ source: r.source, status: r.status, via: r.via, count: r.items.length, ms: r.ms, note: r.note }));
 
   const all: EventListing[] = [];
