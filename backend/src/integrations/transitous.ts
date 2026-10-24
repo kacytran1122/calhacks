@@ -42,6 +42,7 @@ export interface TransitStep {
 export interface TransitOption {
   mode: "train" | "bus";
   title: string;
+  durationMinutes: number;
   durationText: string;
   sourceUrl: string;
   sourceQuote: string;
@@ -121,6 +122,7 @@ function toOption(itinerary: Itinerary): TransitOption | null {
   return {
     mode: rail ? "train" : "bus",
     title: `Public transit via ${lines.slice(0, 4).join(" + ")}`.slice(0, 120),
+    durationMinutes: minutes(itinerary.duration),
     durationText: `${durationText(itinerary.duration)} · ${itinerary.transfers} transfer${itinerary.transfers === 1 ? "" : "s"}`,
     sourceUrl: ATTRIBUTION_URL,
     sourceQuote: `Live GTFS itinerary with ${realtime} real-time transit leg${realtime === 1 ? "" : "s"}; remaining times are scheduled.`,
@@ -146,7 +148,7 @@ export function transitOptionsFrom(body: TransitPlanPayload) {
     .slice(0, 4);
 }
 
-export async function planPublicTransit(args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; startsAt?: string }): Promise<TransitPlanResult> {
+export async function planPublicTransit(args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; startsAt?: string; includeFares?: boolean }): Promise<TransitPlanResult> {
   const now = new Date();
   const kickoff = args.startsAt ? new Date(args.startsAt) : undefined;
   const futureKickoff = kickoff && Number.isFinite(kickoff.getTime()) && kickoff.getTime() > now.getTime() + 45 * 60_000;
@@ -156,7 +158,7 @@ export async function planPublicTransit(args: { from: { lat: number; lon: number
     toPlace: `${args.to.lat},${args.to.lon}`,
     time: targetTime.toISOString(),
     arriveBy: String(Boolean(futureKickoff)),
-    withFares: "true",
+    withFares: String(args.includeFares !== false),
     numItineraries: "6",
     maxTransfers: "5",
     detailedTransfers: "true",

@@ -26,6 +26,7 @@ test("Transitous turns GTFS legs into detailed live route instructions", () => {
 
   assert.equal(options.length, 1);
   assert.equal(options[0].mode, "train");
+  assert.equal(options[0].durationMinutes, 120);
   assert.deepEqual(options[0].agencies, ["Metro - Los Angeles", "Metrolink"]);
   assert.match(options[0].steps[0].instruction, /Walk to Westwood/);
   assert.match(options[0].steps[1].detail ?? "", /live timing/);

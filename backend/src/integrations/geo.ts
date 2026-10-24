@@ -107,6 +107,26 @@ const STATE_ANCHORS: Record<string, [string, string]> = {
 
 const cityCache = new Map<string, GeoResult>();
 const placeCache = new Map<string, GeoResult>();
+const globalPlaceCache = new Map<string, GeoResult>();
+
+export async function globalPlaceToPoint(location: string): Promise<GeoResult> {
+  const key = location.trim().toLowerCase();
+  if (/^\d{5}$/.test(key)) return zipToPoint(key);
+  const cached = globalPlaceCache.get(key);
+  if (cached) return cached;
+  const source = "OpenStreetMap place lookup";
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=${encodeURIComponent(location)}`;
+  if (key.length < 2) return { status: "empty", source, url, error: "location is too short" };
+  const r = await getJson(url, 5_000);
+  type Place = { lat: string; lon: string; display_name: string; address?: { postcode?: string } };
+  const places = r.ok && Array.isArray(r.json) ? r.json as Place[] : [];
+  const place = places.find((candidate) => Number.isFinite(Number(candidate.lat)) && Number.isFinite(Number(candidate.lon)));
+  const out: GeoResult = place
+    ? { status: "ok", lat: Number(place.lat), lon: Number(place.lon), label: place.display_name, postalCode: place.address?.postcode, source, url }
+    : { status: r.ok ? "empty" : r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? (r.ok ? "no matching place" : `HTTP ${r.status}`) };
+  globalPlaceCache.set(key, out);
+  return out;
+}
 
 async function arcGisPlaceToPoint(location: string): Promise<GeoResult> {
   const source = "ArcGIS World Geocoding service";

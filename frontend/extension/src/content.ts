@@ -1,104 +1,201 @@
+import { mlhEvents, pageEvents, type EventChoice } from "./events";
+
+type RoutePlan = {
+  event: EventChoice;
+  originLabel: string;
+  destinationLabel: string;
+  fastestRouteId?: string;
+  routes: {
+    id: string;
+    mode: "train" | "bus" | "drive";
+    title: string;
+    durationMinutes: number;
+    durationText: string;
+    distanceMiles?: number;
+    sourceUrl: string;
+    sourceLabel: string;
+    liveStatus: string;
+    steps: { instruction: string; detail: string | null }[];
+  }[];
+  messages: string[];
+  generatedAt: string;
+};
+
 declare global {
   interface Window {
-    __smileLens?: boolean;
+    __smileTripPlanner?: { open: (event?: EventChoice) => void };
   }
 }
 
-const SERVER = "http://127.0.0.1:3000";
+const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
-function readHints() {
-  const jsonLd: unknown[] = [];
-  document.querySelectorAll('script[type="application/ld+json"]').forEach((s) => {
-    try {
-      jsonLd.push(JSON.parse(s.textContent ?? ""));
-    } catch {}
+function isMlhSchedule() {
+  return /(^|\.)mlh\.(com|io)$/i.test(location.hostname) && /\/seasons\/[^/]+\/events/i.test(location.pathname);
+}
+
+function addMlhButtons(events: EventChoice[], open: (event?: EventChoice) => void) {
+  const cards = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[itemtype="https://schema.org/Event"]'));
+  cards.forEach((card, index) => {
+    if (card.querySelector(".smile-plan-trip")) return;
+    card.style.position = "relative";
+    const button = document.createElement("button");
+    button.className = "smile-plan-trip";
+    button.type = "button";
+    button.textContent = "Plan trip with S’mile";
+    button.style.cssText = "position:absolute;right:14px;top:14px;z-index:30;border:0;border-radius:999px;padding:10px 14px;background:#2b173f;color:#fff;font:700 13px/1 system-ui,sans-serif;box-shadow:0 8px 22px rgba(43,23,63,.28);cursor:pointer";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      open(events[index]);
+    });
+    card.appendChild(button);
   });
-  return { url: location.href, title: document.title, jsonLd };
 }
 
 const CSS = `
-:host{all:initial}
-.p{position:fixed;top:16px;right:16px;z-index:2147483647;width:320px;font:14px/1.45 system-ui,sans-serif;color:#2B1B3D;background:#FFF8EF;border-radius:20px;border-top:6px solid #FF6B5B;box-shadow:0 30px 60px -24px rgba(43,27,61,.45),0 4px 12px rgba(43,27,61,.12);padding:16px 18px}
-.k{font:700 11px system-ui;letter-spacing:.1em;text-transform:uppercase;color:#C93A2C}
-h1{font:800 22px/1.1 system-ui;margin:8px 0 6px;letter-spacing:-.02em}
-.m{color:#7F6A5C;font-size:12.5px}
-.row{display:flex;gap:8px;margin-top:10px}
-input{flex:1;min-width:0;font:600 16px system-ui;padding:9px 12px;border:2px solid #2B1B3D;border-radius:99px;background:#fff;color:#2B1B3D}
-button{border:0;border-radius:99px;padding:10px 14px;font:700 14px system-ui;background:#FF6B5B;color:#fff;cursor:pointer}
-button:disabled{opacity:.55}
-.x{position:absolute;top:10px;right:12px;background:none;color:#7F6A5C;padding:4px 8px;font-size:18px}
-.r{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F0E2D2;font-size:13px}
-.r:last-child{border:0}
-.err{color:#C93A2C;font-weight:600;margin-top:8px}
-a{color:#C93A2C;font-weight:700}
-.tag{font:800 10px system-ui;letter-spacing:.08em;padding:2px 6px;border-radius:99px;background:#E3F6EC;color:#14583F;margin-left:6px}
-.tag.w{background:#FFF6D1;color:#7A5B00}`;
+:host{all:initial;color-scheme:light}*{box-sizing:border-box}
+.shell{position:fixed;top:18px;right:18px;z-index:2147483647;width:min(390px,calc(100vw - 24px));max-height:calc(100vh - 36px);overflow:auto;font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;color:#29163d;background:#fffaf2;border:1px solid #eadfce;border-radius:26px;box-shadow:0 30px 80px rgba(43,23,63,.24),0 6px 18px rgba(43,23,63,.12)}
+.top{padding:18px 20px 15px;background:linear-gradient(135deg,#fff7d7,#ffe49a);border-bottom:1px solid #ead8a5;border-radius:25px 25px 0 0}.brand{font:900 16px/1 system-ui;color:#29163d;letter-spacing:-.02em}.brand span{color:#ef5f55}
+h1{font:900 25px/1.08 system-ui;margin:9px 34px 6px 0;letter-spacing:-.04em}.sub{color:#705f76;font-size:12.5px}.close{position:absolute;right:12px;top:12px;width:34px;height:34px;border:0;border-radius:50%;background:rgba(255,255,255,.72);color:#29163d;font-size:22px;cursor:pointer}
+.body{padding:18px 20px 20px}.label{display:block;margin:0 0 7px;font:800 11px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;color:#6e5e73}select,input{width:100%;border:1.5px solid #d9ccbb;border-radius:14px;background:#fff;color:#29163d;padding:11px 12px;font:650 14px/1.25 system-ui;outline:none}select:focus,input:focus{border-color:#745095;box-shadow:0 0 0 3px rgba(116,80,149,.13)}
+.field{margin-bottom:14px}.event{display:flex;gap:11px;align-items:center;margin:0 0 16px;padding:11px;border-radius:17px;background:#f4ecfb}.thumb{width:46px;height:46px;flex:0 0 46px;border-radius:12px;object-fit:contain;background:#fff}.event-name{font-weight:850}.event-meta{color:#755f7d;font-size:12px;margin-top:2px}
+.consent{padding:13px;border-radius:16px;background:#fff4cf;border:1px solid #efd67b;color:#574726;font-size:12px;margin-bottom:10px}.consent b{display:block;color:#29163d;margin-bottom:3px}.primary,.secondary,.choice{width:100%;border:0;border-radius:14px;padding:12px 14px;font:800 14px/1 system-ui;cursor:pointer}.primary{background:#ef675b;color:#fff;box-shadow:0 7px 0 #321a45}.primary:active{transform:translateY(2px);box-shadow:0 5px 0 #321a45}.primary:disabled{opacity:.58;cursor:wait}.secondary{background:#29163d;color:#fff}.divider{display:flex;align-items:center;gap:10px;margin:13px 0;color:#9a8995;font-size:11px}.divider:before,.divider:after{content:"";height:1px;background:#e7ddd2;flex:1}
+.row{display:flex;gap:8px}.row input{flex:1;min-width:0}.row button{width:auto;white-space:nowrap}.status{min-height:18px;margin:8px 1px 0;color:#5f4f68;font-size:12px}.status.ok{color:#176247}.status.err{color:#af342b;font-weight:700}.choices{display:grid;grid-template-columns:1fr 1fr;gap:8px}.choice{border:1.5px solid #d9ccbb;background:#fff;color:#29163d;text-align:left;line-height:1.25}.choice b{display:block;margin-bottom:3px}.choice span{font-weight:500;color:#7b697f;font-size:11px}.choice.on{border-color:#29163d;background:#f3e9fb;box-shadow:0 0 0 2px #29163d inset}.plan{margin-top:15px}
+.error{margin-top:12px;padding:11px 12px;border-radius:13px;background:#fff0ed;color:#a52d25;font-weight:700}.loading{padding:18px 3px;text-align:center;color:#735f77}.spinner{width:26px;height:26px;margin:0 auto 10px;border:3px solid #eee2d6;border-top-color:#ef675b;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.summary{padding:12px 13px;border-radius:15px;background:#f5edfb;margin-bottom:12px}.summary b{display:block}.summary span{font-size:12px;color:#705e77}.route{border:1.5px solid #ddd0c2;border-radius:17px;background:#fff;margin-top:10px;overflow:hidden}.route.fast{border-color:#ef675b;box-shadow:0 0 0 2px rgba(239,103,91,.13)}.route-head{padding:13px 14px}.route-line{display:flex;gap:10px;align-items:flex-start}.mode{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:#2b173f;color:#fff;font-size:16px;flex:0 0 auto}.route-title{font-weight:850;line-height:1.25}.time{font:900 17px/1 system-ui;margin-left:auto;white-space:nowrap}.badge{display:inline-block;border-radius:999px;padding:3px 7px;background:#ffe2dd;color:#9d2d25;font:850 9px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}.route-meta{margin:6px 0 0 44px;color:#756479;font-size:11px}.steps{border-top:1px solid #eee4d9;padding:4px 14px 12px}.step{display:grid;grid-template-columns:22px 1fr;gap:8px;padding-top:9px}.num{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:#f1e7f7;color:#5e3e77;font:800 10px/1 system-ui}.step b{display:block;font-size:12.5px}.step small{display:block;color:#7c697d}.source{display:inline-block;margin:11px 0 0;color:#9a3b34;font-weight:750;font-size:11px;text-decoration:none}.note{margin-top:11px;color:#856f7e;font-size:11px}.again{margin-top:12px;background:#f1e8f7;color:#29163d;box-shadow:none}
+@media(max-width:520px){.shell{top:8px;right:8px;width:calc(100vw - 16px);max-height:calc(100vh - 16px);border-radius:21px}.top{border-radius:20px 20px 0 0}.body{padding:15px}.choices{grid-template-columns:1fr}.row{flex-direction:column}.row button{width:100%}}
+`;
 
-function mount() {
-  const host = document.createElement("div");
-  host.id = "smile-lens";
-  document.documentElement.appendChild(host);
-  const root = host.attachShadow({ mode: "closed" });
-  const hints = readHints();
-  const ldCount = hints.jsonLd.length;
-  root.innerHTML = `<style>${CSS}</style>
-    <div class="p" role="dialog" aria-label="S'mile Lens">
-      <button class="x" aria-label="Close">×</button>
-      <div class="k">S'mile Lens</div>
-      <h1>Plan this page</h1>
-      <div class="m">${ldCount ? `Event details found on this page.` : `No event markup here — S'mile will read the page itself.`} Reads public details only; never cookies or form fields.</div>
-      <div class="row"><input id="zip" inputmode="numeric" maxlength="5" placeholder="Your ZIP" aria-label="Home ZIP"><button id="go">Plan</button></div>
-      <div id="out"></div>
-    </div>`;
-  const $ = <T extends Element>(s: string) => root.querySelector(s) as T;
-  const zip = $<HTMLInputElement>("#zip");
-  const go = $<HTMLButtonElement>("#go");
-  const out = $<HTMLDivElement>("#out");
-  $<HTMLButtonElement>(".x").onclick = () => {
-    host.remove();
-    window.__smileLens = false;
-  };
-  chrome.storage.local.get("zip").then((v) => (zip.value = (v.zip as string) ?? ""));
+function createPlanner(events: EventChoice[]) {
+  let host: HTMLDivElement | undefined;
+  let root: ShadowRoot | undefined;
+  let currentCoordinates: { lat: number; lon: number } | undefined;
+  let includeSelfDrive: boolean | undefined;
+  let selected = events[0] ?? pageEvents()[0]!;
+  const selectedIndex = () => Math.max(0, events.findIndex((event) => event.url === selected.url && event.name === selected.name));
+  const eventOptions = () => events.length > 1 ? `<div class="field"><label class="label" for="event">Choose an MLH event</label><select id="event">${events.map((event, index) => `<option value="${index}" ${index === selectedIndex() ? "selected" : ""}>${esc(event.name)} · ${esc(event.location)}</option>`).join("")}</select></div>` : "";
+  const eventCard = () => `<div class="event">${selected.imageUrl ? `<img class="thumb" src="${esc(selected.imageUrl)}" alt="">` : `<div class="thumb" style="display:grid;place-items:center;font-size:22px">↗</div>`}<div><div class="event-name">${esc(selected.name)}</div><div class="event-meta">${esc(selected.startsAt ? `${new Date(selected.startsAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} · ` : "")}${esc(selected.location || "Add the event location below")}</div></div></div>`;
 
-  const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-  const money = (c: number) => `$${(c / 100).toFixed(2)}`;
+  function renderForm() {
+    if (!root) return;
+    root.innerHTML = `<style>${CSS}</style><section class="shell" role="dialog" aria-label="S’mile trip planner"><button class="close" aria-label="Close">×</button><header class="top"><div class="brand">s’<span>☺</span>mile</div><h1>Let’s get you there.</h1><div class="sub">The fastest route first. Clear alternatives after it.</div></header><main class="body">${eventOptions()}<div id="eventCard">${eventCard()}</div><div class="field"><label class="label" for="destination">Event destination</label><input id="destination" value="${esc(selected.location)}" placeholder="Venue, city, state or country"></div><div class="consent"><b>Use your location only to build this route?</b>Your precise location and this public event’s details are sent securely to S’mile’s routing service. Precise coordinates are used for this request and are not saved by the extension.</div><button id="geo" class="secondary">Allow &amp; use my current location</button><div class="divider">or enter a starting point</div><div class="row"><input id="origin" autocomplete="postal-code" placeholder="ZIP, city or address"><button id="typed" class="secondary">Use this</button></div><div id="locationStatus" class="status">Choose one option before planning.</div><div class="field" style="margin-top:17px"><span class="label">Will you self-drive?</span><div class="choices"><button class="choice" id="driveYes"><b>Yes, include driving</b><span>Compare a road route too</span></button><button class="choice" id="driveNo"><b>No self-drive</b><span>Show public transit only</span></button></div></div><button id="plan" class="primary plan">Find my fastest route →</button><div id="output"></div></main></section>`;
+    wireForm();
+  }
 
-  go.onclick = async () => {
-    const z = zip.value.trim();
-    if (!/^\d{5}$/.test(z)) {
-      out.innerHTML = `<div class="err">Enter a 5-digit ZIP.</div>`;
+  function setLocationStatus(message: string, kind = "") {
+    const element = root?.querySelector<HTMLDivElement>("#locationStatus");
+    if (!element) return;
+    element.textContent = message;
+    element.className = `status ${kind}`;
+  }
+
+  function wireForm() {
+    if (!root || !host) return;
+    const query = <T extends Element>(selector: string) => root!.querySelector(selector) as T;
+    query<HTMLButtonElement>(".close").onclick = () => host!.remove();
+    const eventSelect = root.querySelector<HTMLSelectElement>("#event");
+    if (eventSelect) eventSelect.onchange = () => {
+      selected = events[Number(eventSelect.value)] ?? selected;
+      currentCoordinates = undefined;
+      renderForm();
+    };
+    const originInput = query<HTMLInputElement>("#origin");
+    chrome.storage.local.get(["originText", "includeSelfDrive"]).then((stored) => {
+      originInput.value = typeof stored.originText === "string" ? stored.originText : "";
+      if (typeof stored.includeSelfDrive === "boolean") {
+        includeSelfDrive = stored.includeSelfDrive;
+        query<HTMLButtonElement>(includeSelfDrive ? "#driveYes" : "#driveNo").classList.add("on");
+      }
+    });
+    query<HTMLButtonElement>("#geo").onclick = () => {
+      setLocationStatus("Waiting for Chrome’s location permission…");
+      navigator.geolocation.getCurrentPosition((position) => {
+        currentCoordinates = { lat: position.coords.latitude, lon: position.coords.longitude };
+        setLocationStatus(`Current location ready · accuracy about ${Math.round(position.coords.accuracy)} m`, "ok");
+      }, (error) => {
+        currentCoordinates = undefined;
+        const message = error.code === error.PERMISSION_DENIED ? "Location wasn’t allowed. Enter a ZIP, city or address instead." : "We couldn’t read your location. Enter a ZIP, city or address instead.";
+        setLocationStatus(message, "err");
+      }, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 });
+    };
+    query<HTMLButtonElement>("#typed").onclick = async () => {
+      const value = originInput.value.trim();
+      if (value.length < 2) return setLocationStatus("Enter a ZIP code, city or address.", "err");
+      currentCoordinates = undefined;
+      await chrome.storage.local.set({ originText: value });
+      setLocationStatus(`Starting from ${value}.`, "ok");
+    };
+    const chooseDrive = async (value: boolean) => {
+      includeSelfDrive = value;
+      query<HTMLButtonElement>("#driveYes").classList.toggle("on", value);
+      query<HTMLButtonElement>("#driveNo").classList.toggle("on", !value);
+      await chrome.storage.local.set({ includeSelfDrive: value });
+    };
+    query<HTMLButtonElement>("#driveYes").onclick = () => void chooseDrive(true);
+    query<HTMLButtonElement>("#driveNo").onclick = () => void chooseDrive(false);
+    query<HTMLButtonElement>("#plan").onclick = async () => {
+      const originText = originInput.value.trim();
+      const destination = query<HTMLInputElement>("#destination").value.trim();
+      const output = query<HTMLDivElement>("#output");
+      if (!currentCoordinates && originText.length < 2) return setLocationStatus("Choose current location or enter your starting point.", "err");
+      if (includeSelfDrive === undefined) {
+        output.innerHTML = `<div class="error">Choose whether to include self-driving.</div>`;
+        return;
+      }
+      if (destination.length < 2) {
+        output.innerHTML = `<div class="error">Add the event’s venue or city so S’mile knows where to route you.</div>`;
+        return;
+      }
+      selected = { ...selected, location: destination };
+      output.innerHTML = `<div class="loading"><div class="spinner"></div>Checking live routes to ${esc(selected.name)}…</div>`;
+      const planButton = query<HTMLButtonElement>("#plan");
+      planButton.disabled = true;
+      const response = await chrome.runtime.sendMessage({ type: "route", body: { originText: originText || undefined, originCoordinates: currentCoordinates, includeSelfDrive, event: selected } }) as { ok: boolean; json: RoutePlan & { error?: string } };
+      planButton.disabled = false;
+      if (!response.ok) {
+        output.innerHTML = `<div class="error">${esc(response.json?.error || "Route planning failed. Please try again.")}</div>`;
+        return;
+      }
+      renderResults(response.json);
+    };
+  }
+
+  function renderResults(plan: RoutePlan) {
+    if (!root) return;
+    const icon = (mode: string) => mode === "drive" ? "⌁" : mode === "train" ? "▰" : "▣";
+    const routes = plan.routes.map((route) => {
+      const fastest = route.id === plan.fastestRouteId;
+      return `<article class="route ${fastest ? "fast" : ""}"><div class="route-head">${fastest ? `<span class="badge">Fastest route</span>` : `<span class="badge" style="background:#eee7f3;color:#5b416e">Alternative</span>`}<div class="route-line"><div class="mode">${icon(route.mode)}</div><div class="route-title">${esc(route.title)}</div><div class="time">${esc(route.durationText)}</div></div><div class="route-meta">${esc(route.mode === "drive" && route.distanceMiles ? `${route.distanceMiles} miles · ` : "")}${esc(route.sourceLabel)}</div></div><div class="steps">${route.steps.map((step, index) => `<div class="step"><span class="num">${index + 1}</span><div><b>${esc(step.instruction)}</b>${step.detail ? `<small>${esc(step.detail)}</small>` : ""}</div></div>`).join("")}<a class="source" href="${esc(route.sourceUrl)}" target="_blank" rel="noreferrer">Open live source ↗</a></div></article>`;
+    }).join("");
+    root.querySelector<HTMLElement>(".body")!.innerHTML = `<div class="summary"><b>${esc(plan.event.name)}</b><span>${esc(plan.originLabel)} → ${esc(plan.destinationLabel)}</span></div>${routes || `<div class="error">No route is available right now. ${esc(plan.messages.join(" "))}</div>`}${plan.messages.length && routes ? `<div class="note">${esc(plan.messages.join(" "))}</div>` : ""}<button id="again" class="primary again">Change trip details</button>`;
+    root.querySelector<HTMLButtonElement>("#again")!.onclick = renderForm;
+  }
+
+  function open(event?: EventChoice) {
+    if (event) selected = event;
+    if (host?.isConnected) {
+      renderForm();
       return;
     }
-    await chrome.storage.local.set({ zip: z });
-    go.disabled = true;
-    go.textContent = "Collecting…";
-    out.innerHTML = `<div class="m" style="margin-top:10px">Fetching the page, fares, weather and stops. Live web pages can take 2–40 s.</div>`;
-    const res = (await chrome.runtime.sendMessage({ type: "plan", body: { zip: z, eventUrl: hints.url, hints } })) as { ok: boolean; json: any };
-    go.disabled = false;
-    go.textContent = "Plan";
-    if (!res.ok) {
-      out.innerHTML = `<div class="err">${esc(res.json?.error ?? "Planning failed")}</div>`;
-      return;
-    }
-    const p = res.json;
-    const page = (p.evidence as any[]).find((e) => e.kind === "event_page");
-    const verified = page?.data?.verified;
-    const pick = p.routes?.pick;
-    out.innerHTML = `
-      <div style="margin-top:10px">
-        <div class="r"><span>${esc(p.event.name)}</span><span class="tag ${verified ? "" : "w"}">${verified ? "VERIFIED" : "UNVERIFIED"}</span></div>
-        <div class="r"><span>Kickoff</span><b>${esc(new Date(p.event.startsAt).toLocaleString())}</b></div>
-        ${pick ? `<div class="r"><span>Best: ${esc(pick.mode)}</span><b>${money(pick.costCents)} · ${Math.round(pick.pMiss * 100)}% miss</b></div>` : `<div class="err">No option under the policy cap.</div>`}
-        <div class="r"><span>Distance</span><b>${esc(p.trip.distanceMiles)} mi</b></div>
-      </div>
-      <div class="m" style="margin-top:8px">Nothing is charged until you approve the exact amount.</div>
-      <div style="margin-top:8px"><a href="${SERVER}/desk#approve=${encodeURIComponent(p.approvalToken)}&trip=${encodeURIComponent(p.trip.id)}" target="_blank" rel="noreferrer">Review &amp; approve in S'mile →</a></div>`;
-  };
+    host = document.createElement("div");
+    host.id = "smile-trip-planner";
+    document.documentElement.appendChild(host);
+    root = host.attachShadow({ mode: "open" });
+    renderForm();
+  }
+
+  return { open };
 }
 
-if (!window.__smileLens) {
-  window.__smileLens = true;
-  mount();
+if (!window.__smileTripPlanner) {
+  const events = isMlhSchedule() ? mlhEvents() : pageEvents();
+  const planner = createPlanner(events);
+  window.__smileTripPlanner = planner;
+  chrome.runtime.onMessage.addListener((message: { type?: string }) => {
+    if (message.type === "open") planner.open();
+  });
+  if (isMlhSchedule()) addMlhButtons(events, planner.open);
+  else planner.open();
 }
 
 export {};

@@ -1,14 +1,17 @@
-const SERVER = "http://127.0.0.1:3000";
+const SERVER = "https://calhacks-beta.vercel.app";
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !tab.url?.startsWith("http")) return;
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["dist/content.js"] });
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["dist/content.js"] });
+    await chrome.tabs.sendMessage(tab.id, { type: "open" });
+  } catch {}
 });
 
-chrome.runtime.onMessage.addListener((msg: { type: string; body: unknown }, _sender, reply) => {
-  if (msg.type !== "plan") return false;
-  fetch(`${SERVER}/api/plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.body) })
-    .then(async (r) => reply({ ok: r.ok, json: await r.json() }))
-    .catch((e: Error) => reply({ ok: false, json: { error: `Can't reach the S'mile server at ${SERVER} — is it running? (${e.message})` } }));
+chrome.runtime.onMessage.addListener((message: { type: string; body: unknown }, _sender, reply) => {
+  if (message.type !== "route") return false;
+  fetch(`${SERVER}/api/extension/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(message.body) })
+    .then(async (response) => reply({ ok: response.ok, json: await response.json() }))
+    .catch((error: Error) => reply({ ok: false, json: { error: `S’mile’s routing service is unavailable. ${error.message}` } }));
   return true;
 });

@@ -21,5 +21,7 @@ export { chargeTrip } from "./agents/payments";
 export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";
-export { cityToPoint, coordinatesToPoint, placeToPoint, zipToPoint, type GeoResult } from "./integrations/geo";
+export { cityToPoint, coordinatesToPoint, globalPlaceToPoint, placeToPoint, zipToPoint, type GeoResult } from "./integrations/geo";
+export { driveRoutesFrom, planDrivingRoutes, type DriveRoute, type OsrmPayload } from "./integrations/osrm";
+export { planExtensionRoute, type ExtensionEvent, type ExtensionRoute, type ExtensionRoutePlan } from "./extension-route";
 export { x402Configured, X402_NETWORK } from "./integrations/x402";
