@@ -1,0 +1,31 @@
+{
+  "name": "@smile/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 3000",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p 3000",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p extension/tsconfig.json",
+    "test": "npm run test:frontend --prefix ../tests",
+    "extension:build": "esbuild extension/src/background.ts extension/src/content.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist"
+  },
+  "dependencies": {
+    "@coinbase/cdp-sdk": "^1.60.0",
+    "@smile/core": "file:../backend",
+    "@x402/next": "^2.28.0",
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.32",
+    "@types/node": "^22",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}
