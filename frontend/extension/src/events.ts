@@ -24,8 +24,23 @@ const hackathonLocations: Array<[RegExp, string]> = [
   [/\btechnica\b/i, "College Park, MD"],
 ];
 
+const hackathonCoordinates: Array<[RegExp, number, number]> = [
+  [/\bhacktx\b/i, 30.2672, -97.7431],
+  [/\bcal\s*hacks?\b/i, 37.7749, -122.4194],
+  [/\bla\s*hacks?\b/i, 34.0522, -118.2437],
+  [/\btamuhack\b/i, 30.6279, -96.3344],
+  [/\bhackutd\b/i, 32.9483, -96.7299],
+  [/\browdyhacks\b/i, 29.4241, -98.4936],
+  [/\bhackrice\b/i, 29.7604, -95.3698],
+];
+
 export function locationFromHackathonName(name: string) {
   return hackathonLocations.find(([pattern]) => pattern.test(name))?.[1] ?? "";
+}
+
+export function coordinatesFromHackathonName(name: string) {
+  const match = hackathonCoordinates.find(([pattern]) => pattern.test(name));
+  return match ? { lat: match[1], lon: match[2] } : undefined;
 }
 
 function absoluteImageUrl(value: string | undefined, pageUrl: string) {
@@ -112,10 +127,14 @@ export function pageEvents(source: Document = document, pageUrl = location.href)
     } satisfies EventChoice;
   }).filter((event) => event.name && event.url);
   if (events.length) return events;
+  const name = source.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || source.title || "This hackathon";
+  const coordinates = coordinatesFromHackathonName(name);
   return [{
-    name: source.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || source.title || "This hackathon",
+    name,
     url: pageUrl,
-    location: locationFromHackathonName(source.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || source.title || ""),
+    location: locationFromHackathonName(name),
     imageUrl: pageImage(source, pageUrl),
+    lat: coordinates?.lat,
+    lon: coordinates?.lon,
   } satisfies EventChoice];
 }
