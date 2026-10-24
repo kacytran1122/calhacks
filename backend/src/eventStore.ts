@@ -86,7 +86,10 @@ let poolP: Promise<PgPool> | undefined;
 async function tigerPool(url: string): Promise<PgPool> {
   poolP ??= (async () => {
     const { default: pg } = await import("pg");
-    const pool = new pg.Pool({ connectionString: url, max: 4, idleTimeoutMillis: 30_000 });
+    const connection = new URL(url);
+    const ssl = connection.searchParams.get("sslmode") === "require" ? { rejectUnauthorized: false } : undefined;
+    connection.searchParams.delete("sslmode");
+    const pool = new pg.Pool({ connectionString: connection.toString(), ssl, max: 4, idleTimeoutMillis: 30_000 });
     await pool.query(`CREATE TABLE IF NOT EXISTS event_snapshots (
       fetched_at TIMESTAMPTZ NOT NULL, event_key TEXT NOT NULL, source TEXT NOT NULL, name TEXT NOT NULL,
       starts_at TIMESTAMPTZ, venue TEXT, city TEXT, lat DOUBLE PRECISION, lon DOUBLE PRECISION, url TEXT, kind TEXT, payload JSONB NOT NULL)`);
