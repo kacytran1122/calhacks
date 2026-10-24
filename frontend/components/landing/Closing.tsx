@@ -27,9 +27,6 @@ export function Footer() {
           </b>
           , Every mile ends in a smile.
         </span>
-        <a href="/desk" style={{ color: "inherit" }}>
-          Organizer desk →
-        </a>
       </div>
     </footer>
   );

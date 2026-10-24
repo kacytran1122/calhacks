@@ -1,10 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import { Smile } from "./Smile";
 
 function Shot({ file, placeholder }: { file: string; placeholder: string }) {
-  const exists = fs.existsSync(path.join(process.cwd(), "public", file));
-  return exists ? <img src={`/${file}`} alt={placeholder} /> : <div className="slot">{placeholder}</div>;
+  return <img src={`/${file}`} alt={placeholder} />;
 }
 
 export function Why() {

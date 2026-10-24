@@ -56,7 +56,6 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
     <section className="hero">
       <div className="wrap hero-grid">
         <div className="hero-l">
-          <div className="kick">Event travel + reimbursement, one continuous system</div>
           <h1 className="disp" style={{ marginTop: 22 }}>
             Every mile ends in a{" "}
             <em>
