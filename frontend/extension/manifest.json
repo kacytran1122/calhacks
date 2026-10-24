@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "S'mile Lens",
+  "version": "0.1.0",
+  "description": "Plan the trip to the event page you're reading. Reads only public event details — never cookies, accounts or form fields.",
+  "action": { "default_title": "Plan this page with S'mile" },
+  "background": { "service_worker": "dist/background.js" },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1:3000/*"]
+}
