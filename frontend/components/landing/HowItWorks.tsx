@@ -115,9 +115,9 @@ export function HowItWorks() {
         <div className="reveal">
           <div className="kick">How it works</div>
           <h2 className="disp" style={{ fontSize: "clamp(48px,6.5vw,96px)", marginTop: 18 }}>
-            Every moving part.
+            You choose the event.
             <br />
-            <em>One</em> clear plan.
+            We’ll help you <em>get there.</em>
           </h2>
         </div>
         <div className="line reveal">

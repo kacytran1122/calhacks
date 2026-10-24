@@ -13,7 +13,7 @@ describe("landing story", () => {
 
   test("uses the clearer workflow headline", () => {
     render(<HowItWorks />);
-    expect(screen.getByRole("heading", { name: "Every moving part.One clear plan." })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "You choose the event.We’ll help you get there." })).toBeVisible();
   });
 
   test("keeps the landing footer focused on travelers", () => {
