@@ -74,7 +74,7 @@ function createPlanner(events: EventChoice[]) {
   let selected = events[0] ?? pageEvents()[0]!;
   const selectedIndex = () => Math.max(0, events.findIndex((event) => event.url === selected.url && event.name === selected.name));
   const eventOptions = () => events.length > 1 ? `<div class="field"><label class="label" for="event">Choose an MLH event</label><select id="event">${events.map((event, index) => `<option value="${index}" ${index === selectedIndex() ? "selected" : ""}>${esc(event.name)} · ${esc(event.location)}</option>`).join("")}</select></div>` : "";
-  const eventCard = () => `<div class="event">${selected.imageUrl ? `<img class="thumb" src="${esc(selected.imageUrl)}" alt="">` : `<div class="thumb" style="display:grid;place-items:center;font-size:22px">↗</div>`}<div><div class="event-name">${esc(selected.name)}</div><div class="event-meta">${esc(selected.startsAt ? `${new Date(selected.startsAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} · ` : "")}${esc(selected.location || "Add the event location below")}</div></div></div>`;
+  const eventCard = () => `<div class="event"><img class="thumb" src="${esc(selected.imageUrl || new URL("/favicon.ico", selected.url).href)}" alt="${esc(`${selected.name} artwork`)}"><div><div class="event-name">${esc(selected.name)}</div><div class="event-meta">${esc(selected.startsAt ? `${new Date(selected.startsAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} · ` : "")}${esc(selected.location || "Event location unavailable")}</div></div></div>`;
 
   function renderForm() {
     if (!root) return;

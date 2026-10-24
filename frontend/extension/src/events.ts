@@ -28,6 +28,26 @@ export function locationFromHackathonName(name: string) {
   return hackathonLocations.find(([pattern]) => pattern.test(name))?.[1] ?? "";
 }
 
+function absoluteImageUrl(value: string | undefined, pageUrl: string) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value, pageUrl);
+    return /^(https?:|data:)/.test(url.protocol) ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function pageImage(source: Document, pageUrl: string) {
+  const preferred = source.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content
+    || source.querySelector<HTMLMetaElement>('meta[name="twitter:image"]')?.content
+    || source.querySelector<HTMLMetaElement>('meta[property="twitter:image"]')?.content;
+  const eventImage = Array.from(source.images).find((image) => /hack|event|logo|landing|hero/i.test(`${image.alt} ${image.className} ${image.id}`) && image.currentSrc)
+    || Array.from(source.images).find((image) => image.currentSrc && image.naturalWidth >= 160 && image.naturalHeight >= 90);
+  const icon = source.querySelector<HTMLLinkElement>('link[rel~="apple-touch-icon"], link[rel~="icon"]')?.getAttribute("href") || undefined;
+  return absoluteImageUrl(preferred || eventImage?.currentSrc || eventImage?.src || icon || "/favicon.ico", pageUrl);
+}
+
 function metaContent(scope: ParentNode, property: string) {
   return scope.querySelector<HTMLMetaElement>(`meta[itemprop="${property}"]`)?.content?.trim();
 }
@@ -86,7 +106,7 @@ export function pageEvents(source: Document = document, pageUrl = location.href)
       url: eventUrl,
       location: locationText,
       startsAt: typeof node.startDate === "string" ? node.startDate : undefined,
-      imageUrl: typeof rawImage === "string" ? rawImage : undefined,
+      imageUrl: absoluteImageUrl(typeof rawImage === "string" ? rawImage : undefined, pageUrl) || pageImage(source, pageUrl),
       lat: geo?.latitude !== undefined ? Number(geo.latitude) : undefined,
       lon: geo?.longitude !== undefined ? Number(geo.longitude) : undefined,
     } satisfies EventChoice;
@@ -96,6 +116,6 @@ export function pageEvents(source: Document = document, pageUrl = location.href)
     name: source.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || source.title || "This hackathon",
     url: pageUrl,
     location: locationFromHackathonName(source.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || source.title || ""),
-    imageUrl: source.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content,
+    imageUrl: pageImage(source, pageUrl),
   } satisfies EventChoice];
 }

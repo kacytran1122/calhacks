@@ -20,8 +20,15 @@ test("reads a collegiate hackathon JSON-LD venue without page-wide access", () =
 });
 
 test("detects a known hackathon destination from its page name", () => {
-  document.head.innerHTML = `<meta property="og:title" content="HackTX 26 — Freetail Hackers">`;
+  document.head.innerHTML = `<meta property="og:title" content="HackTX 26 — Freetail Hackers"><meta property="og:image" content="/hacktx-card.png">`;
   document.body.innerHTML = "";
   const events = pageEvents(document, "https://hacktx.com/");
-  expect(events[0]).toMatchObject({ name: "HackTX 26 — Freetail Hackers", location: "Austin, TX" });
+  expect(events[0]).toMatchObject({ name: "HackTX 26 — Freetail Hackers", location: "Austin, TX", imageUrl: "https://hacktx.com/hacktx-card.png" });
+});
+
+test("uses the event site's icon when no event artwork is available", () => {
+  document.head.innerHTML = `<title>Technica</title><link rel="icon" href="/icon.png">`;
+  document.body.innerHTML = "";
+  const events = pageEvents(document, "https://gotechnica.org/");
+  expect(events[0]).toMatchObject({ name: "Technica", location: "College Park, MD", imageUrl: "https://gotechnica.org/icon.png" });
 });
