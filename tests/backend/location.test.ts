@@ -20,3 +20,30 @@ test("place lookup keeps an exact landmark coordinate", async (t) => {
   assert.equal(result.lat, 34.0708777);
   assert.equal(result.lon, -118.4468503);
 });
+
+test("place lookup falls back to ArcGIS when OpenStreetMap is unavailable", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (input) => String(input).includes("nominatim")
+    ? new Response("rate limited", { status: 429 })
+    : new Response(JSON.stringify({ candidates: [{ address: "UCLA", score: 100, location: { x: -118.4511766, y: 34.0711778 }, attributes: { Postal: "90024", CountryCode: "USA" } }] }));
+  const result = await placeToPoint("UCLA Westwood campus");
+  assert.equal(result.status, "ok");
+  assert.equal(result.source, "ArcGIS World Geocoding service");
+  assert.equal(result.postalCode, "90024");
+  assert.equal(result.lat, 34.0711778);
+  assert.equal(result.lon, -118.4511766);
+});
+
+test("city resolver preserves a landmark coordinate through the fallback", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (input) => String(input).includes("nominatim")
+    ? new Response("rate limited", { status: 429 })
+    : new Response(JSON.stringify({ candidates: [{ address: "UCI", score: 100, location: { x: -117.8443, y: 33.6405 }, attributes: { Postal: "92697", CountryCode: "USA" } }] }));
+  const result = await cityToPoint("UCI Irvine campus");
+  assert.equal(result.status, "ok");
+  assert.equal(result.postalCode, "92697");
+  assert.equal(result.lat, 33.6405);
+  assert.equal(result.lon, -117.8443);
+});

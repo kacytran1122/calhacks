@@ -108,6 +108,18 @@ const STATE_ANCHORS: Record<string, [string, string]> = {
 const cityCache = new Map<string, GeoResult>();
 const placeCache = new Map<string, GeoResult>();
 
+async function arcGisPlaceToPoint(location: string): Promise<GeoResult> {
+  const source = "ArcGIS World Geocoding service";
+  const url = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?SingleLine=${encodeURIComponent(location)}&countryCode=USA&maxLocations=5&outFields=Addr_type,City,Region,Postal,CountryCode&f=json`;
+  const r = await getJson(url, 5_000);
+  type Candidate = { address: string; score: number; location: { x: number; y: number }; attributes?: { Postal?: string; CountryCode?: string } };
+  const candidates = r.ok ? ((r.json as { candidates?: Candidate[] }).candidates ?? []) : [];
+  const candidate = candidates.find((item) => item.score >= 70 && Number.isFinite(item.location?.x) && Number.isFinite(item.location?.y));
+  return candidate
+    ? { status: "ok", lat: candidate.location.y, lon: candidate.location.x, label: candidate.address, postalCode: candidate.attributes?.Postal?.match(/\b\d{5}\b/)?.[0], source, url }
+    : { status: r.ok ? "empty" : r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? (r.ok ? "no such U.S. place" : `HTTP ${r.status}`) };
+}
+
 export async function placeToPoint(location: string): Promise<GeoResult> {
   const key = location.trim().toLowerCase();
   const cached = placeCache.get(key);
@@ -121,7 +133,7 @@ export async function placeToPoint(location: string): Promise<GeoResult> {
   const place = places.find((candidate) => candidate.address?.country_code?.toLowerCase() === "us") ?? places[0];
   const out: GeoResult = place
     ? { status: "ok", lat: Number(place.lat), lon: Number(place.lon), label: place.display_name, postalCode: place.address?.postcode?.match(/\b\d{5}\b/)?.[0], source, url }
-    : { status: r.ok ? "empty" : r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? (r.ok ? "no such U.S. place" : `HTTP ${r.status}`) };
+    : await arcGisPlaceToPoint(location);
   placeCache.set(key, out);
   return out;
 }
@@ -156,6 +168,11 @@ export async function cityToPoint(location: string): Promise<GeoResult> {
     const out = await cityInState(cityRaw, st);
     cityCache.set(key, out);
     return out;
+  }
+  const exactPlace = await placeToPoint(location);
+  if (exactPlace.status === "ok" && exactPlace.postalCode) {
+    cityCache.set(key, exactPlace);
+    return exactPlace;
   }
   const source = "OpenStreetMap U.S. place lookup";
   if (key.length < 3) return { status: "empty", source, url: "", error: "location is too short" };
