@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     if (location.status !== "ok" || !location.postalCode) {
       return NextResponse.json({ error: "We couldn’t match your current location to a U.S. ZIP code." }, { status: 404 });
     }
-    return NextResponse.json({ zip: location.postalCode, label: location.label, source: location.source });
+    return NextResponse.json({ zip: location.postalCode, label: location.label, lat: location.lat, lon: location.lon, source: location.source });
   }
   const city = req.nextUrl.searchParams.get("city")?.trim() ?? "";
   if (city.length < 3 || city.length > 100) {
@@ -26,5 +26,5 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ zip: location.postalCode, label: location.label, source: location.source });
+  return NextResponse.json({ zip: location.postalCode, label: location.label, lat: location.lat, lon: location.lon, source: location.source });
 }

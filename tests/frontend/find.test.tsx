@@ -28,7 +28,7 @@ test("shows branded event type icons without the old header description", () => 
 test("resolves a typed city and places event search below the result count", async () => {
   const fetcher = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith("/api/location/resolve")) return response({ zip: "61401", label: "Galesburg, IL" });
+    if (url.startsWith("/api/location/resolve")) return response({ zip: "61401", label: "Galesburg, IL", lat: 40.9478, lon: -90.3712 });
     return response(result);
   });
   vi.stubGlobal("fetch", fetcher);
@@ -55,17 +55,23 @@ test("waits for confirmation before loading nearby events", async () => {
   expect(await screen.findByLabelText("Search events by name or topic")).toBeVisible();
 });
 
-test("keeps the resolved ZIP when the displayed origin is a place label", async () => {
-  const fetcher = vi.fn(() => response({ ...result, origin: { zip: "90095", label: "UCLA" } }));
+test("resolves a place label to precise coordinates before discovering events", async () => {
+  const fetcher = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/location/resolve")) return response({ zip: "90095", label: "UCLA", lat: 34.0709, lon: -118.4469 });
+    return response({ ...result, origin: { zip: "90095", label: "UCLA" } });
+  });
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<FindClient initialZip="90095" initialOrigin="UCLA" />);
 
   await user.click(screen.getByRole("button", { name: "Update nearby events" }));
 
-  expect(fetcher).toHaveBeenCalledTimes(1);
-  expect(String(fetcher.mock.calls[0]?.[0])).toContain("zip=90095");
-  expect(String(fetcher.mock.calls[0]?.[0])).not.toContain("/api/location/resolve");
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(String(fetcher.mock.calls[0]?.[0])).toContain("/api/location/resolve");
+  expect(String(fetcher.mock.calls[1]?.[0])).toContain("zip=90095");
+  expect(String(fetcher.mock.calls[1]?.[0])).toContain("lat=34.0709");
+  expect(String(fetcher.mock.calls[1]?.[0])).toContain("lon=-118.4469");
 });
 
 test("switches between miles and kilometers without changing the search radius", async () => {
@@ -241,7 +247,12 @@ test("keeps detailed live transit visible while its fare is being verified", asy
     inbox: null,
     buddies: [],
   };
-  const fetcher = vi.fn((input: RequestInfo | URL) => String(input) === "/api/plan" ? response(plan) : response({ ...result, origin: { zip: "90095", label: "UCLA" }, events: [event] }));
+  const fetcher = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/location/resolve")) return response({ zip: "90095", label: "UCLA", lat: 34.0709, lon: -118.4469 });
+    if (url === "/api/plan") return response(plan);
+    return response({ ...result, origin: { zip: "90095", label: "UCLA" }, events: [event] });
+  });
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<FindClient initialZip="90095" initialOrigin="UCLA" />);

@@ -180,7 +180,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
   const [err, setErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<Listing | null>(null);
 
-  const search = useCallback(async (z: string, nextRadius = radius, nextQuery = q, nextGroups = groups, originLabel = locationInput) => {
+  const search = useCallback(async (z: string, nextRadius = radius, nextQuery = q, nextGroups = groups, originLabel = locationInput, coordinates = originCoordinates) => {
     if (!/^\d{5}$/.test(z)) return setErr("Enter a 5-digit ZIP.");
     setLoading(true);
     setErr(null);
@@ -188,15 +188,15 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
     try {
       const query = nextQuery.trim();
       const p = new URLSearchParams({ zip: z, radius: String(nextRadius), groups: [...nextGroups].join(",") });
-      if (originCoordinates) {
-        p.set("lat", String(originCoordinates.lat));
-        p.set("lon", String(originCoordinates.lon));
+      if (coordinates) {
+        p.set("lat", String(coordinates.lat));
+        p.set("lon", String(coordinates.lon));
       }
       if (query) p.set("q", query);
       setRes(await api<Discover>(`/api/events?${p}`));
       setActiveQuery(query);
       setZip(z);
-      history.replaceState(null, "", `/find?zip=${z}&origin=${encodeURIComponent(originLabel || z)}${originCoordinates ? `&gps=1&lat=${originCoordinates.lat}&lon=${originCoordinates.lon}` : ""}`);
+      history.replaceState(null, "", `/find?zip=${z}&origin=${encodeURIComponent(originLabel || z)}${coordinates ? `&gps=1&lat=${coordinates.lat}&lon=${coordinates.lon}` : ""}`);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -210,16 +210,18 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
     setLoading(true);
     setErr(null);
     try {
-      const location = input === resolvedInput && /^\d{5}$/.test(zip)
-        ? { zip, label: input }
+      const location: { zip: string; label?: string; lat?: number; lon?: number } = input === resolvedInput && /^\d{5}$/.test(zip) && originCoordinates
+        ? { zip, label: input, ...originCoordinates }
         : /^\d{5}$/.test(input)
           ? { zip: input, label: input }
-          : await api<{ zip: string; label?: string }>(`/api/location/resolve?city=${encodeURIComponent(input)}`);
+          : await api<{ zip: string; label?: string; lat?: number; lon?: number }>(`/api/location/resolve?city=${encodeURIComponent(input)}`);
       const label = location.label ?? input;
+      const coordinates = typeof location.lat === "number" && typeof location.lon === "number" ? { lat: location.lat, lon: location.lon } : undefined;
       setZip(location.zip);
       setLocationInput(label);
       setResolvedInput(label);
-      await search(location.zip, radius, q, groups, label);
+      setOriginCoordinates(coordinates);
+      await search(location.zip, radius, q, groups, label, coordinates);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
