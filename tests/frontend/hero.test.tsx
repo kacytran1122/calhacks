@@ -16,7 +16,7 @@ describe("landing origin picker", () => {
     expect(screen.getByRole("dialog", { name: "Allow location access?" })).toBeVisible();
     expect(push).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Use 61401 instead" }));
-    expect(push).toHaveBeenCalledWith("/find?zip=61401");
+    expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=61401");
   });
 
   test("shows an inline error for an incomplete ZIP", async () => {
@@ -36,7 +36,7 @@ describe("landing origin picker", () => {
     await user.click(screen.getByRole("button", { name: /find trips/i }));
     expect(await screen.findByRole("dialog", { name: "Allow location access?" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Use Galesburg, IL instead" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=Galesburg%2C%20IL"));
   });
 
   test("accepts a city without requiring a state", async () => {
@@ -59,6 +59,18 @@ describe("landing origin picker", () => {
     await user.click(screen.getByRole("button", { name: /find trips/i }));
     expect(getCurrentPosition).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Allow location" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=Galesburg%2C%20IL&gps=1"));
+  });
+
+  test("falls back to the entered location when browser permission is denied", async () => {
+    const getCurrentPosition = vi.fn((_success: PositionCallback, error: PositionErrorCallback) => error({ code: 1, message: "denied", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError));
+    vi.stubGlobal("navigator", { ...navigator, geolocation: { getCurrentPosition } });
+    const user = userEvent.setup();
+    render(<HeroView onNavigate={push} />);
+    await user.type(screen.getByLabelText("Home ZIP code"), "61401");
+    await user.click(screen.getByRole("button", { name: /find trips/i }));
+    await user.click(screen.getByRole("button", { name: "Allow location" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=61401"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

@@ -30,6 +30,21 @@ const FareCandidates = z.object({
   ),
 });
 
+const RouteGuideCandidates = z.object({
+  options: z.array(
+    z.object({
+      mode: z.enum(["train", "bus", "rideshare", "flight"]),
+      title: z.string().min(1).max(120),
+      durationText: z.string().max(80).nullable(),
+      sourceUrl: z.string(),
+      sourceQuote: z.string().min(1).max(300),
+      steps: z.array(z.object({ instruction: z.string().min(1).max(220), detail: z.string().max(300).nullable() })).min(1).max(8),
+    }),
+  ).max(4),
+});
+
+export type RouteGuide = z.infer<typeof RouteGuideCandidates>["options"][number];
+
 function faresByRules(results: SerpOrganic[]) {
   const out: { mode: "train" | "bus"; amountUsd: number; link: string; quote: string }[] = [];
   for (const r of results) {
@@ -41,7 +56,45 @@ function faresByRules(results: SerpOrganic[]) {
   return out;
 }
 
-export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; event: EventFacts & { city?: string }; travelConstraintSummary?: string }) {
+async function extractFares(results: SerpOrganic[], from: string, to: string) {
+  const links = new Set(results.map((result) => result.link));
+  const corpus = results.map((result) => `${result.title} ${result.description ?? ""}`).join("\n").toLowerCase();
+  if (!llmAvailable()) return { fares: faresByRules(results), extractedBy: "rules" };
+  try {
+    const candidates = await structured(FareCandidates, {
+      model: "extract",
+      system: "From these live search results, list total travel fares that are explicitly stated for this exact trip. Copy the link and the exact snippet text. Never estimate or invent a price. Skip anything that is not an explicit dollar fare.",
+      user: JSON.stringify({ from, to, results }),
+      effort: "low",
+    });
+    return {
+      fares: candidates.fares.filter((fare) => links.has(fare.link) && corpus.includes(fare.quote.toLowerCase()) && fare.amountUsd > 0 && fare.amountUsd < 1000),
+      extractedBy: "claude (quotes verified against live snippets)",
+    };
+  } catch {
+    return { fares: faresByRules(results), extractedBy: "rules" };
+  }
+}
+
+async function extractRouteGuides(results: SerpOrganic[], from: string, to: string, requirement?: string) {
+  if (!llmAvailable()) return { guides: [] as RouteGuide[], extractedBy: "unavailable" };
+  const links = new Set(results.map((result) => result.link));
+  const corpus = results.map((result) => `${result.title} ${result.description ?? ""}`).join("\n").toLowerCase();
+  try {
+    const candidates = await structured(RouteGuideCandidates, {
+      model: "extract",
+      system: "Build concise door-to-door travel instructions using only the supplied live search-result titles and descriptions. Produce the best supported train, bus, rideshare, or flight options. Preserve an exact transit line, stop, transfer, duration, or schedule only when it appears in the evidence. Never invent route details. When the evidence omits a detail, tell the traveler to confirm that part in the linked live directions. sourceQuote must be one exact contiguous quote from the supplied result for sourceUrl.",
+      user: JSON.stringify({ from, to, requirement, results }),
+      effort: "low",
+    });
+    const guides = candidates.options.filter((option) => links.has(option.sourceUrl) && corpus.includes(option.sourceQuote.toLowerCase()));
+    return { guides, extractedBy: "claude (routes grounded in live search snippets)" };
+  } catch {
+    return { guides: [] as RouteGuide[], extractedBy: "unavailable" };
+  }
+}
+
+export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; originText?: string; event: EventFacts & { city?: string }; travelConstraintSummary?: string }) {
   const { tripId, homeZip, event } = args;
   const out: Evidence[] = [];
 
@@ -59,10 +112,12 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
 
   authorize(state, agent, "web.read", tripId);
   const venueQ = [event.venue, event.address ?? event.city].filter(Boolean).join(", ");
-  const fromCity = home.label ?? homeZip;
-  const [stops, fareSerp] = await Promise.all([
+  const fromCity = args.originText?.trim() || home.label || homeZip;
+  const destination = event.address ?? event.venue ?? event.city ?? event.name ?? "event venue";
+  const [stops, fareSerp, directionsSerp] = await Promise.all([
     venueQ ? serp(`breakfast coffee near ${venueQ}`, 1) : Promise.resolve(null),
-    serp(`${fromCity} to ${event.address ?? event.city ?? event.venue} train bus one way fare${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
+    serp(`${fromCity} to ${destination} train bus rideshare flight total fare cost${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
+    serp(`${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
   ]);
 
   if (stops) {
@@ -70,43 +125,36 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     out.push(push(state, { tripId, kind: "stop", source: "Bright Data SERP API → Google", status: stops.status, data: { query: venueQ, results: top, attempts: stops.attempts, ms: stops.ms }, note: stops.error ?? (stops.errorCode ? `x-brd-error-code=${stops.errorCode}` : undefined) }));
   }
 
-  let fares: { mode: string; amountUsd: number; link: string; quote: string }[] = [];
-  let extractedBy = "none";
-  if (fareSerp.status === "ok" && fareSerp.body) {
-    const results = fareSerp.body.slice(0, 8);
-    const links = new Set(results.map((r) => r.link));
-    const corpus = results.map((r) => `${r.title} ${r.description ?? ""}`).join("\n").toLowerCase();
-    if (llmAvailable()) {
-      try {
-        const c = await structured(FareCandidates, {
-          model: "extract",
-          system: "From these search results, list one-way fares that are explicitly stated for this trip. Copy the link and the exact snippet text. Skip anything that is not an explicit dollar fare.",
-          user: JSON.stringify({ from: fromCity, to: event.address ?? event.city, results }),
-          effort: "low",
-        });
-        fares = c.fares.filter((f) => links.has(f.link) && corpus.includes(f.quote.toLowerCase()) && f.amountUsd > 0 && f.amountUsd < 1000);
-        extractedBy = "claude (quotes verified against snippets)";
-      } catch {
-        fares = faresByRules(results);
-        extractedBy = "rules";
-      }
-    } else {
-      fares = faresByRules(results);
-      extractedBy = "rules";
-    }
-  }
+  const fareResults = fareSerp.status === "ok" && fareSerp.body ? fareSerp.body.slice(0, 8) : [];
+  const directionResults = directionsSerp.status === "ok" && directionsSerp.body ? directionsSerp.body.slice(0, 8) : [];
+  const [fareExtraction, guideExtraction] = await Promise.all([
+    fareResults.length ? extractFares(fareResults, fromCity, destination) : Promise.resolve({ fares: [] as { mode: string; amountUsd: number; link: string; quote: string }[], extractedBy: "none" }),
+    directionResults.length ? extractRouteGuides(directionResults, fromCity, destination, args.travelConstraintSummary) : Promise.resolve({ guides: [] as RouteGuide[], extractedBy: "none" }),
+  ]);
+  const fares = fareExtraction.fares;
   out.push(
     push(state, {
       tripId,
       kind: "fare",
       source: "Bright Data SERP API → Google",
       status: fareSerp.status === "ok" && fares.length === 0 ? "empty" : fareSerp.status,
-      data: { fares, extractedBy, attempts: fareSerp.attempts, ms: fareSerp.ms },
+      data: { fares, extractedBy: fareExtraction.extractedBy, attempts: fareSerp.attempts, ms: fareSerp.ms },
       note: fareSerp.error ?? (fares.length === 0 && fareSerp.status === "ok" ? "Results came back, but none stated an explicit fare. Route Analyst will fall back to the drive estimate." : undefined),
     }),
   );
 
-  return { evidence: out, miles, homeLabel: home.label, fares };
+  out.push(
+    push(state, {
+      tripId,
+      kind: "route_guide",
+      source: "Bright Data SERP API → Google → Claude",
+      status: directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "empty" : directionsSerp.status,
+      data: { from: fromCity, to: destination, options: guideExtraction.guides, extractedBy: guideExtraction.extractedBy, attempts: directionsSerp.attempts, ms: directionsSerp.ms },
+      note: directionsSerp.error ?? (directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "Live results did not contain enough grounded detail for step-by-step instructions." : undefined),
+    }),
+  );
+
+  return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides: guideExtraction.guides };
 }
 
 export async function buyWithX402(state: State, tripId: string, url: string, priceCents = 1): Promise<Evidence> {

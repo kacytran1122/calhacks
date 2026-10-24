@@ -40,7 +40,7 @@ type Plan = {
   trip: { id: string; mode: string; quoteCents: number; distanceMiles: number; travelerId: string; travelerBudgetCents?: number; travelerMaxDistanceMiles?: number; organizerCapCents?: number; reimbursementEligibleCents?: number };
   event: { name: string; startsAt: string };
   evidence: Ev[];
-  routes: { options: { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean }[]; pick?: { mode: string }; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" } | null;
+  routes: { options: RouteOption[]; pick?: { mode: string }; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" } | null;
   inbox: { id: string; question: string; askedOf: "traveler" | "organizer" | "controller" } | null;
   buddies: { initials: string; mode: string; sameMode: boolean; milesApart: number }[];
 };
@@ -54,6 +54,9 @@ type ConstraintReview = {
   followUpQuestion: string | null;
   parsedBy: "claude" | "rules";
 };
+type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean };
+type RouteGuide = { mode: string; title: string; durationText: string | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
+type FareItem = { mode: string; amountUsd: number; link: string; quote: string };
 
 const fmt = (c: number) => (c < 0 ? "-$" : "$") + (Math.abs(c) / 100).toFixed(2);
 const SOURCE = { luma: "Luma", devpost: "Devpost", mlh: "MLH" } as const;
@@ -91,8 +94,59 @@ function EventVisual({ event, compact = false }: { event: Listing; compact?: boo
   );
 }
 
-export function FindClient({ initialZip }: { initialZip: string }) {
-  const [locationInput, setLocationInput] = useState(initialZip);
+function modeName(mode: string) {
+  return ({ train: "Train + local transit", bus: "Bus + local transit", rideshare: "Rideshare", flight: "Flight + airport transfer", drive: "Self-drive" } as Record<string, string>)[mode] ?? mode;
+}
+
+function liveDirectionsUrl(origin: string, event: Listing, mode: string) {
+  const destination = event.lat !== undefined && event.lon !== undefined ? `${event.lat},${event.lon}` : [event.venue, event.city].filter(Boolean).join(", ");
+  if (mode === "flight") return `https://www.google.com/travel/flights?q=${encodeURIComponent(`Flights from ${origin} to ${destination}`)}`;
+  const travelmode = mode === "drive" || mode === "rideshare" ? "driving" : "transit";
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${travelmode}`;
+}
+
+function RouteInstructions({ option, guide, fare, origin, event, best = false }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; best?: boolean }) {
+  const destination = event.venue || event.city || event.name;
+  const directionsUrl = guide?.sourceUrl || liveDirectionsUrl(origin, event, option.mode);
+  const steps = guide?.steps?.length ? guide.steps : [
+    { instruction: `Start at ${origin}.`, detail: `Open the live ${option.mode === "drive" || option.mode === "rideshare" ? "road" : "transit"} directions before leaving so the first departure and delays are current.` },
+    { instruction: `Follow the ${modeName(option.mode).toLowerCase()} route to ${destination}.`, detail: "Use the linked live directions for the exact platform, stop, terminal, or pickup point." },
+    { instruction: `Complete the last leg to ${event.name}.`, detail: event.city ? `Confirm the event entrance in ${event.city} before the final transfer.` : "Confirm the event entrance before the final transfer." },
+  ];
+  const content = (
+    <>
+      <div className="fd-route-head">
+        <div><span>{best ? "Best route" : "Alternative"}</span><h3>{guide?.title || modeName(option.mode)}</h3></div>
+        <div className="fd-route-price"><b>{fmt(option.costCents)}</b><small>trip total</small></div>
+      </div>
+      <div className="fd-route-facts">
+        {guide?.durationText && <span>{guide.durationText}</span>}
+        <span>{option.history.trips ? `${Math.round(option.pMiss * 100)}% historical late risk` : "new route · no history yet"}</span>
+        <span>{option.mode === "drive" ? "IRS mileage estimate" : fare ? "live public-web fare" : "current route estimate"}</span>
+      </div>
+      <ol className="fd-route-steps">
+        {steps.map((step, index) => <li key={`${option.mode}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
+      </ol>
+      <div className="fd-cost-box">
+        <div><span>Estimated total</span><b>{fmt(option.costCents)}</b></div>
+        <p>{option.mode === "drive" ? "Mileage estimate based on the current IRS rate and route distance." : fare ? `Live fare evidence: “${fare.quote}”` : "No explicit live fare was published, so verify the amount before approval."}</p>
+      </div>
+      <div className="dk-row fd-route-links">
+        <a className="dk-btn primary" href={directionsUrl} target="_blank" rel="noreferrer">Open live directions ↗</a>
+        {fare?.link && <a className="dk-link" href={fare.link} target="_blank" rel="noreferrer">Check fare source ↗</a>}
+      </div>
+      {guide?.sourceQuote && <p className="fd-route-source">Route evidence: “{guide.sourceQuote}”</p>}
+      {!option.withinCap && <div className="dk-warn">This option is over the organizer cap.</div>}
+      {!option.withinBudget && <div className="dk-warn">This option is over your travel budget.</div>}
+    </>
+  );
+  if (best) return <section className="fd-route-card best">{content}</section>;
+  return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
+}
+
+export function FindClient({ initialZip, initialOrigin }: { initialZip: string; initialOrigin?: string }) {
+  const [locationInput, setLocationInput] = useState(initialOrigin || initialZip);
+  const [resolvedInput, setResolvedInput] = useState(initialOrigin || initialZip);
   const [zip, setZip] = useState(initialZip);
   const [radius, setRadius] = useState(200);
   const [distanceUnit, setDistanceUnit] = useState<"mi" | "km">("mi");
@@ -104,7 +158,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<Listing | null>(null);
 
-  const search = useCallback(async (z: string, nextRadius = radius, nextQuery = q, nextGroups = groups) => {
+  const search = useCallback(async (z: string, nextRadius = radius, nextQuery = q, nextGroups = groups, originLabel = locationInput) => {
     if (!/^\d{5}$/.test(z)) return setErr("Enter a 5-digit ZIP.");
     setLoading(true);
     setErr(null);
@@ -116,13 +170,13 @@ export function FindClient({ initialZip }: { initialZip: string }) {
       setRes(await api<Discover>(`/api/events?${p}`));
       setActiveQuery(query);
       setZip(z);
-      history.replaceState(null, "", `/find?zip=${z}`);
+      history.replaceState(null, "", `/find?zip=${z}&origin=${encodeURIComponent(originLabel || z)}`);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [radius, q, groups]);
+  }, [radius, q, groups, locationInput]);
 
   const useTypedLocation = async () => {
     const input = locationInput.trim();
@@ -130,12 +184,16 @@ export function FindClient({ initialZip }: { initialZip: string }) {
     setLoading(true);
     setErr(null);
     try {
-      const location = /^\d{5}$/.test(input)
-        ? { zip: input, label: input }
-        : await api<{ zip: string; label?: string }>(`/api/location/resolve?city=${encodeURIComponent(input)}`);
+      const location = input === resolvedInput && /^\d{5}$/.test(zip)
+        ? { zip, label: input }
+        : /^\d{5}$/.test(input)
+          ? { zip: input, label: input }
+          : await api<{ zip: string; label?: string }>(`/api/location/resolve?city=${encodeURIComponent(input)}`);
+      const label = location.label ?? input;
       setZip(location.zip);
-      setLocationInput(location.label ?? input);
-      await search(location.zip);
+      setLocationInput(label);
+      setResolvedInput(label);
+      await search(location.zip, radius, q, groups, label);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -321,13 +379,13 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             </p>
           )}
         </div>
-        {picked && <PlanPane key={picked.key} zip={zip} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
+        {picked && <PlanPane key={picked.key} zip={zip} originText={locationInput} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
       </div>
     </div>
   );
 }
 
-function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
+function PlanPane({ zip, originText, maxDistanceMiles, event, onClose }: { zip: string; originText: string; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
   const [initials, setInitials] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
   const [constraintText, setConstraintText] = useState("");
@@ -370,6 +428,7 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
       if (reviewed?.status === "needs_clarification") return;
       const p = await api<Plan>("/api/plan", {
         zip,
+        originText: originText || zip,
         initials: initials || undefined,
         travelerBudgetCents: Math.round(Number(budgetUsd) * 100),
         maxDistanceMiles,
@@ -398,7 +457,12 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
   const stops = plan?.evidence.find((e) => e.kind === "stop");
   const weather = plan?.evidence.find((e) => e.kind === "weather");
   const fare = plan?.evidence.find((e) => e.kind === "fare");
+  const routeGuide = plan?.evidence.find((e) => e.kind === "route_guide");
   const constraint = plan?.evidence.find((e) => e.kind === "traveler_constraint");
+  const fareItems = (Array.isArray(fare?.data.fares) ? fare.data.fares : []) as FareItem[];
+  const routeGuides = (Array.isArray(routeGuide?.data.options) ? routeGuide.data.options : []) as RouteGuide[];
+  const pickedRoute = plan?.routes?.options.find((option) => option.mode === plan.routes?.pick?.mode);
+  const alternativeRoutes = plan?.routes?.options.filter((option) => option.mode !== plan.routes?.pick?.mode) ?? [];
 
   return (
     <aside className="dk-panel fd-plan" aria-label={`Trip plan for ${event.name}`}>
@@ -440,10 +504,9 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
                 setConstraintAnswer("");
                 setReviewedConstraintText("");
               }}
-              placeholder="For example: I need to arrive at SFO by 10:00 PM PT on October 25, or be at Knox College by 10:00 AM CT."
+              placeholder="For example: I need to arrive at SFO by 10:00 PM PT on October 25, or be at UCI by 10:00 AM PT."
               aria-label="Travel timing and destination requirements"
             />
-            <small>Write naturally. Claude will turn clear details into route constraints.</small>
           </label>
           {constraintReview?.status === "needs_clarification" && (
             <div className="fd-constraint-question" role="status">
@@ -462,39 +525,15 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
           <button className="dk-btn primary" disabled={!!busy || budgetUsd === "" || Number(budgetUsd) < 0 || (constraintReview?.status === "needs_clarification" && !constraintAnswer.trim())} onClick={doPlan}>
             {busy === "plan" ? "Coordinating your trip…" : constraintReview?.status === "needs_clarification" ? "Answer and compare routes" : "Compare ways to get there"}
           </button>
-          <p className="dk-mut">Live fares and stops come from the public web; weather comes from the National Weather Service. Most plans return in 3–10 seconds.</p>
+          <p className="dk-mut">S’mile checks current public route, fare, and weather evidence before comparing your options.</p>
         </>
       )}
 
       {plan?.routes && (
         <>
           {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
-          <h3>Ways to get there</h3>
-          <table className="dk-table tight">
-            <thead>
-              <tr>
-                <th>Option</th>
-                <th className="r">Cost</th>
-                <th className="r">Chance you’re late</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plan.routes.options.map((o) => (
-                <tr key={o.mode} className={plan.routes?.pick?.mode === o.mode ? "sel" : ""}>
-                  <td>
-                    {o.mode} {plan.routes?.pick?.mode === o.mode && <span className="dk-tag">best</span>}
-                    <div className="dk-mut">{o.costSource}</div>
-                  </td>
-                  <td className="r num">
-                    {fmt(o.costCents)}
-                    {!o.withinCap && <div className="dk-warn">over organizer cap</div>}
-                    {!o.withinBudget && <div className="dk-warn">over your budget</div>}
-                  </td>
-                  <td className="r num">{o.history.trips ? `${Math.round(o.pMiss * 100)}%` : "no history yet"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {pickedRoute && <RouteInstructions option={pickedRoute} guide={routeGuides.find((guide) => guide.mode === pickedRoute.mode)} fare={fareItems.find((item) => item.mode === pickedRoute.mode)} origin={originText || zip} event={event} best />}
+          {alternativeRoutes.length > 0 && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Open an option for its route and full cost.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={routeGuides.find((guide) => guide.mode === option.mode)} fare={fareItems.find((item) => item.mode === option.mode)} origin={originText || zip} event={event} />)}</section>}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
             <i aria-hidden="true">→</i>

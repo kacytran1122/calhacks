@@ -31,6 +31,7 @@ export type EvidenceKind =
   | "geocode"
   | "weather"
   | "fare"
+  | "route_guide"
   | "stop"
   | "quote"
   | "card_auth"

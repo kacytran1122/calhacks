@@ -55,6 +55,19 @@ test("waits for confirmation before loading nearby events", async () => {
   expect(await screen.findByLabelText("Search events by name or topic")).toBeVisible();
 });
 
+test("keeps the resolved ZIP when the displayed origin is a place label", async () => {
+  const fetcher = vi.fn(() => response({ ...result, origin: { zip: "90095", label: "UCLA" } }));
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<FindClient initialZip="90095" initialOrigin="UCLA" />);
+
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(String(fetcher.mock.calls[0]?.[0])).toContain("zip=90095");
+  expect(String(fetcher.mock.calls[0]?.[0])).not.toContain("/api/location/resolve");
+});
+
 test("switches between miles and kilometers without changing the search radius", async () => {
   vi.stubGlobal("fetch", vi.fn(() => response(result)));
   const user = userEvent.setup();
@@ -116,7 +129,8 @@ test("shows each event thumbnail and asks for travel requirements below the budg
   const budget = screen.getByLabelText("Your maximum travel budget in dollars");
   const requirements = screen.getByLabelText("Travel timing and destination requirements");
   expect(budget.compareDocumentPosition(requirements) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByText(/Claude will turn clear details into route constraints/)).toBeVisible();
+  expect(screen.queryByText(/Claude will turn clear details into route constraints/)).not.toBeInTheDocument();
+  expect(requirements).toHaveAttribute("placeholder", expect.stringContaining("UCI"));
 });
 
 test("Claude constraint step asks one follow-up when a requirement is unclear", async () => {
@@ -152,4 +166,61 @@ test("Claude constraint step asks one follow-up when a requirement is unclear", 
   expect(await screen.findByText("One detail before S’mile plans")).toBeVisible();
   expect(screen.getByText(/Which school, date, AM or PM/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Answer and compare routes" })).toBeDisabled();
+});
+
+test("shows the best route first with detailed steps, total cost, and alternatives", async () => {
+  const event = {
+    key: "lax-event",
+    source: "luma",
+    name: "LAX Build Night",
+    startsAt: "2026-10-25T17:00:00Z",
+    city: "Los Angeles, CA",
+    venue: "LAX",
+    locationPrecision: "exact",
+    url: "https://lu.ma/lax",
+    kind: "tech",
+    distanceMiles: 12,
+    fetchedAt: "2026-10-24T00:00:00Z",
+    via: "direct",
+  };
+  const plan = {
+    approvalToken: "token",
+    trip: { id: "TR-1", mode: "bus", quoteCents: 1075, distanceMiles: 12, travelerId: "T-1", reimbursementEligibleCents: 1075 },
+    event: { name: event.name, startsAt: event.startsAt },
+    evidence: [
+      { id: "fare", kind: "fare", source: "Bright Data", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { fares: [{ mode: "bus", amountUsd: 10.75, link: "https://example.com/fare", quote: "$10.75 total fare" }] } },
+      { id: "guide", kind: "route_guide", source: "Bright Data → Claude", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", sourceUrl: "https://example.com/route", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }] } },
+    ],
+    routes: {
+      options: [
+        { mode: "bus", costCents: 1075, costSource: "fare", pMiss: 0.1, history: { trips: 12, late: 1 }, withinCap: true, withinBudget: true },
+        { mode: "rideshare", costCents: 3400, costSource: "fare", pMiss: 0.2, history: { trips: 5, late: 1 }, withinCap: true, withinBudget: true },
+      ],
+      pick: { mode: "bus" },
+      cap: 5000,
+      travelerBudgetCents: 10000,
+    },
+    inbox: null,
+    buddies: [],
+  };
+  const fetcher = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/location/resolve")) return response({ zip: "90095", label: "UCLA" });
+    if (url === "/api/plan") return response(plan);
+    return response({ ...result, origin: { zip: "90095", label: "UCLA" }, events: [event] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<FindClient initialZip="90095" initialOrigin="UCLA" />);
+
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+
+  expect(await screen.findByText("Best route")).toBeVisible();
+  expect(screen.getByText("Walk to the UCLA transit stop.")).toBeVisible();
+  expect(screen.getByText("$10.75 total fare", { exact: false })).toBeVisible();
+  expect(screen.getByText("Other ways to get there")).toBeVisible();
+  expect(screen.getAllByText("Rideshare").length).toBeGreaterThan(0);
 });
