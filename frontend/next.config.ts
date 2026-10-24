@@ -18,7 +18,6 @@ const config: NextConfig = {
     const beforeFiles = backendOrigin
       ? [
           { source: "/api/:path*", destination: `${backendOrigin}/api/:path*` },
-          { source: "/desk/:path*", destination: `${backendOrigin}/desk/:path*` },
         ]
       : [];
     return { beforeFiles, afterFiles: [], fallback: [] };
