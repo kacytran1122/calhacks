@@ -9,7 +9,6 @@ export async function currentUser(): Promise<User | null> {
   return userForSession((await cookies()).get(SESSION_COOKIE)?.value);
 }
 
-/** Returns the signed-in user, or a 401/403 response to send back as-is. */
 export async function requireUser(roles?: HumanRole[]): Promise<User | NextResponse> {
   const u = await currentUser();
   if (!u) return NextResponse.json({ error: "sign in first" }, { status: 401 });

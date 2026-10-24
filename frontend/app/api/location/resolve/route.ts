@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-/** Resolve a U.S. city and state to a representative ZIP for the existing trip workflow. */
 export async function GET(req: NextRequest) {
   const city = req.nextUrl.searchParams.get("city")?.trim() ?? "";
   if (city.length < 3 || city.length > 100) {

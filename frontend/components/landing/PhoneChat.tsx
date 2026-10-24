@@ -20,7 +20,6 @@ const SEQ: Msg[] = [
   { k: "them", n: "Rae", t: "Approved. See you on car 3!" },
 ];
 
-/** Animated group chat in the hero phone: typing dots, then the message, keeping the last five. */
 export function PhoneChat() {
   const [shown, setShown] = useState<number[]>([]);
   const [typing, setTyping] = useState<Msg["k"] | null>(null);

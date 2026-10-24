@@ -1,4 +1,4 @@
-name: S'mile Frontend CI
+name: S'mile CI/CD
 
 on:
   push:
@@ -10,20 +10,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: smile-frontend-${{ github.workflow }}-${{ github.ref }}
+  group: smile-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: "22"
+
 jobs:
-  frontend-tests:
-    name: Frontend interaction tests
+  structure:
+    name: Repository structure
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: tests/package-lock.json
       - name: Reject internal agent notes
         shell: bash
         run: |
@@ -31,21 +29,112 @@ jobs:
             echo "Internal agent notes must not be committed."
             exit 1
           fi
-      - run: npm ci --prefix tests
-      - run: npm run test:frontend --prefix tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: node --test tests/system/structure.test.mjs
 
-  source-artifact:
-    name: Package verified frontend source
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: frontend-tests
+  backend:
+    name: Backend tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm run typecheck --prefix backend
+      - run: npm run test:backend --prefix backend
+
+  agents:
+    name: Agent controls and evaluation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm run test:agents --prefix backend
+      - run: npm run eval --prefix backend
+
+  frontend:
+    name: Frontend tests and production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            tests/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm ci --prefix tests
+      - run: npm run typecheck --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run extension:build --prefix frontend
+      - run: npm run build --prefix frontend
+
+  system:
+    name: Whole-system tests
+    needs: [backend, frontend, agents]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - name: Run web app and system checks
+        shell: bash
+        run: |
+          npm run seed --prefix backend
+          npm run dev --prefix frontend > /tmp/smile-next.log 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid"' EXIT
+          node --input-type=module - <<'NODE'
+          for (let attempt = 0; attempt < 60; attempt++) {
+            try {
+              const response = await fetch('http://127.0.0.1:3000');
+              if (response.ok) process.exit(0);
+            } catch {}
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          process.exit(1);
+          NODE
+          npm run test:system --prefix backend
+
+  delivery:
+    name: Build delivery artifact
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [structure, backend, frontend, agents, system]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix frontend
+      - run: npm run extension:build --prefix frontend
       - uses: actions/upload-artifact@v4
         with:
-          name: smile-frontend-${{ github.sha }}
+          name: smile-${{ github.sha }}
           retention-days: 14
           if-no-files-found: error
           path: |
-            frontend
-            tests/frontend
+            frontend/.next
+            frontend/extension/dist
+            backend/src
+            backend/package.json
+            backend/package-lock.json

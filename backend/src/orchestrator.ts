@@ -1,12 +1,3 @@
-/**
- * Orchestrator — picks up work on its own and routes it between agents and people.
- *
- *   tick():   every submitted trip → Reconciler.decide → post balanced entries or park in
- *             suspense → ask exactly one person one specific question when it can't decide.
- *   answer(): a person answers; SoD and role are checked; the books are finished.
- *   planTrip(): the S'mile front door — Scout → Evidence → Route → Policy → mandate the
- *             traveler approves to the cent → Payments charges only that.
- */
 import { appendAudit } from "./audit";
 import { explain } from "./agents/auditor";
 import { gatherEvidence } from "./agents/evidence";
@@ -43,7 +34,6 @@ function post(state: State, trip: Trip, memo: string, lines: JournalLine[], refs
 const dr = (account: JournalLine["account"], c: Cents): JournalLine => ({ account, debit: c, credit: 0 });
 const cr = (account: JournalLine["account"], c: Cents): JournalLine => ({ account, debit: 0, credit: c });
 
-/** Book a final payout. Virtual card: the card already paid, so expense the settled cost (clearing suspense if parked). */
 function bookPayout(state: State, trip: Trip, pay: Cents, refs: string[], parked: boolean, memo: string) {
   const who = state.travelers.find((t) => t.id === trip.travelerId)?.initials ?? trip.travelerId;
   if (trip.method === "virtual_card") {
@@ -97,7 +87,6 @@ export function applyDecision(state: State, trip: Trip, d: ReturnType<typeof dec
   trip.state = "reimbursed";
 }
 
-/** One autonomous pass over the backlog. Returns what it did. */
 export async function tick(state: State, opts: { explainWithClaude?: boolean; limit?: number } = {}) {
   const todo = state.trips
     .filter((t) => t.state === "submitted" || (t.state === "reimbursed" && state.evidence.some((e) => e.tripId === t.id && e.kind === "refund" && e.data.processed === false)))
@@ -123,7 +112,6 @@ export interface Answerer {
   role: HumanRole;
 }
 
-/** A person answers an inbox question. Role and segregation of duties are enforced here. */
 export function answer(state: State, itemId: string, who: Answerer, option: string, note?: string) {
   const item = state.inbox.find((i) => i.id === itemId);
   if (!item || item.status !== "open") throw new Error("question not open");
@@ -131,7 +119,6 @@ export function answer(state: State, itemId: string, who: Answerer, option: stri
   const actor: Actor = { kind: "human", id: who.id, role: who.role };
   authorize(state, actor, "approve", trip.id);
 
-  // Role: the person asked, or the controller (who can answer anything except their own request).
   const roleOk = who.role === item.askedOf || who.role === "controller";
   const travelerOk = item.askedOf !== "traveler" || who.id === trip.travelerId || who.role === "controller";
   if (!roleOk || !travelerOk) {
@@ -139,7 +126,6 @@ export function answer(state: State, itemId: string, who: Answerer, option: stri
     throw new PermissionDenied(`this question is for the ${item.askedOf}`);
   }
   assertNotSelfApproval(state, who.id, trip.requestedBy, trip.id);
-  // The person who approved their own exception can't settle it either.
   if (item.meta.code === "block_self_approval") assertNotSelfApproval(state, who.id, trip.approvals.find((a) => a.by === trip.requestedBy)?.by ?? "", trip.id);
 
   item.status = "answered";
@@ -178,7 +164,6 @@ function resolveReconcile(state: State, trip: Trip, item: InboxItem, option: str
 
   switch (d.code) {
     case "hold_price_changed":
-      // Re-approved: pay the settled amount (bank if any, else receipt). Declined: pay what was approved.
       pay = option === "approve" ? card || receiptCents : trip.quoteCents;
       break;
     case "reimburse_capped":
@@ -206,8 +191,6 @@ function resolveReconcile(state: State, trip: Trip, item: InboxItem, option: str
   return { tripId: trip.id, outcome: pay > 0 ? `paid ${fmt(pay)}` : "not paid" };
 }
 
-// ── Front door: plan a live trip ───────────────────────────────────────────
-/** An event picked from discovery: it already has a name, a start time and (usually) coordinates. */
 export interface PickedEvent {
   key: string;
   name: string;
@@ -234,7 +217,6 @@ export async function planTrip(
     scoutEvidenceId = s.evidence.id;
   }
   const main = state.events.find((e) => e.id === "E-main")!;
-  // A discovered event keeps its source key as its id, so everyone planning it shares one event (buddies).
   const picked = args.event;
   const event = picked
     ? (state.events.find((e) => e.id === picked.key) ?? { id: picked.key, name: picked.name, venue: picked.venue ?? "", city: picked.city ?? "", startsAt: picked.startsAt, url: picked.url, lat: picked.lat, lon: picked.lon })
@@ -296,14 +278,12 @@ export async function planTrip(
   return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: q };
 }
 
-/** Book an approved trip. fareDeltaCents simulates the fare moving between approval and checkout. */
 export function bookTrip(state: State, tripId: string, fareDeltaCents = 0) {
   const trip = state.trips.find((t) => t.id === tripId);
   if (!trip || trip.state !== "pre_approved") throw new Error("trip isn't pre-approved");
   const amount = trip.quoteCents + fareDeltaCents;
   const r = chargeTrip(state, tripId, amount, `${trip.mode.toUpperCase()} via S'mile`);
   if (!r.ok) {
-    // R7: the network declined a different price; ask the traveler to approve the new exact amount.
     const m = createMandate({ tripId, maxCents: amount, merchantCategory: state.mandates.find((x) => x.id === trip.mandateId)!.merchantCategory, requestedBy: "agent:policy" });
     state.mandates.push(m);
     trip.mandateId = m.id;
@@ -313,10 +293,6 @@ export function bookTrip(state: State, tripId: string, fareDeltaCents = 0) {
   return r;
 }
 
-/**
- * Buddies: other travelers planning the same event from within `withinMiles` of this traveler's home,
- * same mode first. Only initials and rough distance are shared — never names, ZIPs or contact details.
- */
 export function buddiesFor(state: State, tripId: string, withinMiles = 15) {
   const trip = state.trips.find((t) => t.id === tripId);
   if (!trip) return [];

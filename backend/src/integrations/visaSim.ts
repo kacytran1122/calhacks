@@ -1,11 +1,3 @@
-/**
- * SIMULATED card network — models a Visa-style agentic payment mandate:
- * a single-use network token bound to one trip, one merchant category, an exact max
- * amount and an expiry. No real card data exists anywhere in this system.
- *
- * The rule that matters: a charge above the approved amount is DECLINED, not
- * silently absorbed — that decline is what sends the traveler back to re-approve (R7).
- */
 import { randomBytes } from "node:crypto";
 import type { Cents, Mandate } from "../types";
 

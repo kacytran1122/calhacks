@@ -1,17 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Actor } from "./types";
 
-/**
- * Append-only, hash-chained audit trail. Every agent action, permission denial,
- * human answer and ledger post lands here. Editing any past event breaks the chain,
- * which verifyChain() reports with the first bad sequence number.
- */
 export interface AuditEvent {
   seq: number;
   at: string;
   actor: Actor;
-  action: string; // e.g. "decision.made", "ledger.posted", "permission.denied"
-  subject: string; // trip id, entry id, mandate id...
+  action: string;
+  subject: string;
   reason: string;
   refs: string[];
   prevHash: string;

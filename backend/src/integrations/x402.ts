@@ -1,12 +1,3 @@
-/**
- * Coinbase x402 on Base Sepolia TESTNET — the Evidence agent pays per call for data it
- * needs, inside hard spend controls enforced by the CDP SDK (not by a prompt):
- *   ≤ $0.05 per payment · ≤ $1.00 per rolling 24h · Base Sepolia only.
- * Every purchase is booked to 5200 Data & Tools Expense, so the agent's own spending
- * shows up in the same books it keeps for everyone else.
- *
- * The SDKs are imported lazily so the app runs (and says "x402 not configured") without keys.
- */
 const USDC_BASE_SEPOLIA = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 export const X402_NETWORK = "eip155:84532";
 

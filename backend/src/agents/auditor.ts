@@ -1,12 +1,3 @@
-/**
- * Explaining and defending decisions.
- *
- * Claude gets the full trace for one trip (evidence with provenance, the decision, the
- * rule text, audit events, journal entries) and must answer only from it. Every id it
- * cites is checked against the trace; an answer that cites nothing real is thrown out
- * and replaced by the template. It can concede — a system that never concedes isn't
- * defending, it's stonewalling — but it can't change the books from here.
- */
 import { z } from "zod";
 import { fmt } from "../money";
 import { RULES, type RuleId } from "../policy";
@@ -75,9 +66,7 @@ export async function explain(state: State, tripId: string): Promise<{ text: str
       const ids = knownIds(t);
       const cited = out.citedIds.filter((id) => ids.has(id));
       if (cited.length > 0) return { text: out.summary, by: "claude", cited };
-    } catch {
-      /* fall through to the template; the reason is not user-facing */
-    }
+    } catch {}
   }
   return { text: templateExplanation(t.trip, t.decision), by: "template", cited: t.decision.refs };
 }
@@ -90,7 +79,6 @@ const DefenseSchema = z.object({
 });
 export type Defense = z.infer<typeof DefenseSchema> & { by: "claude" | "template"; invalidCitations: string[] };
 
-/** A reviewer (human controller, or the model-played auditor) questions a decision. */
 export async function defend(state: State, tripId: string, question: string): Promise<Defense> {
   const t = traceFor(state, tripId);
   if (!t.decision) throw new Error("trip has no decision yet");
@@ -106,9 +94,7 @@ export async function defend(state: State, tripId: string, question: string): Pr
       const invalid = out.citedIds.filter((id) => !ids.has(id));
       const cited = out.citedIds.filter((id) => ids.has(id));
       if (cited.length > 0) return { ...out, citedIds: cited, by: "claude", invalidCitations: invalid };
-    } catch {
-      /* template below */
-    }
+    } catch {}
   }
   const d = t.decision;
   return {
@@ -127,7 +113,6 @@ const ChallengeSchema = z.object({
   why: z.string(),
 });
 
-/** The model plays an external auditor and picks the decision it trusts least. */
 export async function auditorChallenge(state: State): Promise<z.infer<typeof ChallengeSchema> | null> {
   const decided = state.trips.filter((t) => t.decision && t.period !== "2026-03");
   if (!llmAvailable() || decided.length === 0) return null;

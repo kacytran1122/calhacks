@@ -1,11 +1,3 @@
-/**
- * Who is acting. The books never take a person's identity or role from a request body:
- * it comes from a server-side session (staff and seeded travelers) or from a trip-scoped
- * approval token handed only to the traveler who planned that trip (Lens / web planner).
- *
- * Sign-ins live in their own database (.data/auth.db), so resetting the books doesn't
- * reset who can sign in. Passwords are scrypt-hashed; tokens are stored only as SHA-256.
- */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -53,7 +45,6 @@ function hashPassword(password: string, salt: string): string {
   return scryptSync(password, salt, 32).toString("hex");
 }
 
-/** Create the test-only accounts from seed/users.ts if they aren't there yet. */
 export function ensureUsers(): void {
   const db = open();
   try {
@@ -69,7 +60,6 @@ export function ensureUsers(): void {
   }
 }
 
-// Simple lockout: 5 failures per sign-in name per 10 minutes.
 const failures = new Map<string, number[]>();
 export class TooManyAttempts extends Error {}
 
@@ -81,7 +71,6 @@ export function login(id: string, password: string): { token: string; user: User
   const db = open();
   try {
     const row = db.prepare("SELECT * FROM users WHERE id = ?").get(key) as Record<string, string> | undefined;
-    // Always run scrypt so a missing user and a wrong password take the same time.
     const candidate = Buffer.from(hashPassword(password, row?.salt ?? "no-such-user"), "hex");
     const stored = Buffer.from(row?.hash ?? "00".repeat(32), "hex");
     if (!row || !timingSafeEqual(candidate, stored)) {
@@ -122,7 +111,6 @@ export function logout(t: string | undefined): void {
   }
 }
 
-/** Handed only to whoever planned the trip; lets them approve that trip's mandate, nothing else. */
 export function issueTripToken(tripId: string, travelerId: string): string {
   const t = token();
   const db = open();
@@ -134,7 +122,6 @@ export function issueTripToken(tripId: string, travelerId: string): string {
   return t;
 }
 
-/** The traveler a trip token speaks for — only for that trip, only before it expires. */
 export function travelerForTripToken(t: string | undefined, tripId: string): string | null {
   if (!t) return null;
   const db = open();
@@ -147,10 +134,6 @@ export function travelerForTripToken(t: string | undefined, tripId: string): str
   }
 }
 
-/**
- * If a request also claims an identity, it must match the session. A mismatch is not
- * silently corrected — it's recorded as an attempted forgery and refused.
- */
 export function assertClaimMatches(state: State, user: User, claimed: { personId?: string; role?: string } | undefined, subject: string): void {
   if (!claimed || (claimed.personId === undefined && claimed.role === undefined)) return;
   const forged = (claimed.personId !== undefined && claimed.personId !== user.personId) || (claimed.role !== undefined && claimed.role !== user.role);

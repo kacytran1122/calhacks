@@ -1,5 +1,3 @@
-// Domain model for the Golden Gate Hack travel desk.
-// All money is integer cents (USD) unless a field says otherwise.
 
 export type Cents = number;
 
@@ -19,12 +17,11 @@ export type Actor =
   | { kind: "agent"; id: AgentId }
   | { kind: "human"; id: string; role: HumanRole };
 
-/** Where a fact came from. Shown on every value in the UI. */
 export type Provenance =
-  | "live" // fetched from the real public web / an official API during this run
-  | "simulated" // Visa mandate + card network (clearly labeled, not real money)
-  | "testnet" // Coinbase x402 on Base Sepolia
-  | "seeded"; // the company's historical books (synthetic, with planted errors)
+  | "live"
+  | "simulated"
+  | "testnet"
+  | "seeded";
 
 export type FetchStatus = "ok" | "blocked" | "empty" | "timeout" | "error";
 
@@ -46,9 +43,9 @@ export interface Evidence {
   id: string;
   tripId?: string;
   kind: EvidenceKind;
-  source: string; // human-readable source name, e.g. "Bright Data Web Unlocker → luma.com"
+  source: string;
   url?: string;
-  fetchedAt: string; // ISO
+  fetchedAt: string;
   status: FetchStatus;
   provenance: Provenance;
   data: Record<string, unknown>;
@@ -67,7 +64,7 @@ export interface HackEvent {
   name: string;
   venue: string;
   city: string;
-  startsAt: string; // ISO
+  startsAt: string;
   url?: string;
   lat?: number;
   lon?: number;
@@ -76,17 +73,17 @@ export interface HackEvent {
 export type PaymentMethod = "virtual_card" | "out_of_pocket";
 
 export type TripState =
-  | "planned" // route chosen, quote exists, mandate pending approval
-  | "pre_approved" // traveler (and controller if needed) approved the exact quote
-  | "booked" // virtual card charged / traveler paid
-  | "submitted" // receipts + bank lines are in; ready to reconcile
-  | "needs_human" // reconciler escalated with a specific question
-  | "reimbursed" // books posted, payout done
+  | "planned"
+  | "pre_approved"
+  | "booked"
+  | "submitted"
+  | "needs_human"
+  | "reimbursed"
   | "denied"
   | "closed";
 
 export interface Approval {
-  by: string; // person id
+  by: string;
   role: HumanRole;
   at: string;
   subject: "mandate" | "reimbursement" | "exception";
@@ -98,26 +95,21 @@ export interface Trip {
   id: string;
   travelerId: string;
   eventId: string;
-  period: string; // accounting period the trip belongs to, "2026-06"
+  period: string;
   method: PaymentMethod;
   mode: "train" | "bus" | "drive" | "rideshare" | "flight";
   distanceMiles: number;
-  /** Traveler-controlled discovery limit. It never changes the organizer's reimbursement policy. */
   travelerMaxDistanceMiles?: number;
-  /** Traveler-controlled ceiling used to filter route choices. */
   travelerBudgetCents?: Cents;
-  /** Immutable policy snapshot used when this trip was planned (R1). */
   organizerCapCents?: Cents;
-  /** Amount eligible for the organizer workflow before receipts/check-in are reconciled. */
   reimbursementEligibleCents?: Cents;
-  quoteCents: Cents; // the exact quote the traveler approved
+  quoteCents: Cents;
   mandateId?: string;
-  requestedBy: string; // person or agent id that requested the spend
+  requestedBy: string;
   approvals: Approval[];
   state: TripState;
   submittedAt?: string;
   decision?: Decision;
-  /** minutes before kickoff the traveler actually arrived (negative = late); history for P(miss) */
   arrivalMarginMin?: number;
 }
 
@@ -139,10 +131,10 @@ export type DecisionCode =
 export interface Decision {
   code: DecisionCode;
   payCents: Cents;
-  reasons: string[]; // plain sentences, each one backed by refs
-  refs: string[]; // evidence ids, rule ids (R1..), person ids
+  reasons: string[];
+  refs: string[];
   needsHuman: boolean;
-  question?: string; // the one specific question for the human, when needsHuman
+  question?: string;
   explanation?: string;
   explainedBy?: "claude" | "template";
   decidedAt: string;
@@ -152,7 +144,7 @@ export interface Decision {
 export interface Mandate {
   id: string;
   tripId: string;
-  token: string; // simulated network token, never a real PAN
+  token: string;
   maxCents: Cents;
   merchantCategory: string;
   expiresAt: string;
@@ -167,7 +159,6 @@ export interface InboxItem {
   id: string;
   kind: "mandate_approval" | "reconcile";
   tripId: string;
-  /** decision code (reconcile) or the amount being approved (mandate_approval) */
   meta: { code?: DecisionCode; amountCents?: Cents };
   createdAt: string;
   askedOf: HumanRole;

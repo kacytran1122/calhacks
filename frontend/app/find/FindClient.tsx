@@ -56,7 +56,6 @@ async function api<T>(url: string, body?: unknown): Promise<T> {
 function when(e: Listing) {
   if (!e.startsAt) return { mon: "—", day: "", time: "date unknown" };
   const d = new Date(e.startsAt);
-  // Devpost gives dates only (stored at noon UTC); don't print a fake time for those.
   const dateOnly = e.source === "devpost" && !e.alsoOn?.length;
   return {
     mon: d.toLocaleDateString("en-US", { month: "short" }),
@@ -94,7 +93,6 @@ export function FindClient({ initialZip }: { initialZip: string }) {
 
   useEffect(() => {
     if (initialZip) search(initialZip);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggle = (k: "hackathon" | "tech") => {

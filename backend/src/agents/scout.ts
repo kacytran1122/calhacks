@@ -1,13 +1,3 @@
-/**
- * Scout — reads a public event page through Bright Data and pulls out name, start time and venue.
- *
- *  1. Bright Data Web Unlocker fetches the page (retries, block detection).
- *  2. schema.org Event JSON-LD, when the page publishes it (most event platforms do).
- *  3. Otherwise Claude reads the page's markdown. It must quote the exact sentence each fact
- *     came from, and the quote is checked against the page. No match, no fact.
- *  4. If Bright Data can't get the page, the hints Lens read from the user's own tab are used,
- *     but marked "unverified" — and when both exist and disagree, the disagreement is recorded.
- */
 import { z } from "zod";
 import { authorize } from "../permissions";
 import type { State } from "../store";
@@ -79,9 +69,7 @@ export function jsonLdBlocks(html: string): unknown[] {
   for (const m of html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try {
       out.push(JSON.parse(m[1]!.trim()));
-    } catch {
-      /* malformed JSON-LD is common; skip the block */
-    }
+    } catch {}
   }
   return out;
 }
@@ -145,7 +133,6 @@ export async function scoutEvent(state: State, url: string, hints?: LensHints): 
     }
   }
 
-  // Cross-check against (or fall back to) what Lens saw in the user's own tab.
   const hintFacts = hints?.jsonLd ? eventFromJsonLd(hints.jsonLd) : null;
   if (hintFacts?.name) {
     if (!facts) {

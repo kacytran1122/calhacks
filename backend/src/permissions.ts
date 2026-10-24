@@ -2,14 +2,9 @@ import { appendAudit, actorLabel } from "./audit";
 import type { Actor, AgentId } from "./types";
 import type { State } from "./store";
 
-/**
- * Least privilege, enforced in code — not in prompts. Each agent gets only the
- * capabilities its seat needs. Approving anything is a human-only capability, and
- * segregation of duties (R8) is checked separately in assertNotSelfApproval().
- */
 export type Capability =
-  | "web.read" // public, logged-out pages via Bright Data
-  | "feeds.read" // official APIs (NWS, Census geocoder, ZIP lookup)
+  | "web.read"
+  | "feeds.read"
   | "policy.read"
   | "ledger.read"
   | "ledger.post"
@@ -17,7 +12,7 @@ export type Capability =
   | "mandate.charge"
   | "x402.pay"
   | "inbox.ask"
-  | "approve"; // humans only
+  | "approve";
 
 export const AGENT_CAPS: Record<AgentId, readonly Capability[]> = {
   scout: ["web.read", "feeds.read"],
@@ -30,7 +25,6 @@ export const AGENT_CAPS: Record<AgentId, readonly Capability[]> = {
   orchestrator: ["inbox.ask"],
 };
 
-/** What each seat is explicitly never allowed to do — shown on the Desk next to each agent. */
 export const AGENT_NEVER: Record<AgentId, string> = {
   scout: "Never logs in, reads cookies, or touches form/payment fields.",
   evidence: "Never writes to the ledger. x402 spend is capped per call and per day.",
@@ -59,7 +53,6 @@ export function authorize(state: State, actor: Actor, cap: Capability, subject: 
   }
 }
 
-/** R8 — whoever requests a spend can't be the one who approves it. */
 export function assertNotSelfApproval(state: State, approverId: string, requestedBy: string, subject: string): void {
   if (approverId === requestedBy) {
     appendAudit(state, {

@@ -2,12 +2,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
 
-/**
- * Where Claude sits in this system — and where it doesn't:
- *  - It reads messy text (event pages, receipts) into typed fields, and every field is validated.
- *  - It writes the explanation for a decision and defends it to the auditor, citing ids from the trace.
- *  - It NEVER produces an amount that gets paid or posted. Amounts come from deterministic code.
- */
 export const MODELS = {
   reason: "claude-opus-5-5", // explanations, defending decisions, auditor challenges
   extract: "claude-haiku-5-5", // page / receipt extraction
@@ -25,10 +19,6 @@ function getClient(): Anthropic {
 
 export class LlmUnavailable extends Error {}
 
-/**
- * One structured call. Returns the schema-validated object, or throws.
- * Opus calls opt into server-side refusal fallbacks ("default" routing).
- */
 export async function structured<S extends z.ZodType>(
   schema: S,
   opts: { model: keyof typeof MODELS; system: string; user: string; effort?: "low" | "medium" | "high" },

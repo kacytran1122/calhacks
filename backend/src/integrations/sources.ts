@@ -1,14 +1,3 @@
-/**
- * Public event sources for "events near my ZIP". All logged-out, public data.
- *
- *  - Luma:    the public discover feed, searched by latitude/longitude (events come geocoded)
- *  - Devpost: the public hackathon listing (in-person, upcoming + open)
- *  - MLH:     the public season page (the event list is embedded in the page as JSON)
- *
- * Every request goes through Bright Data's Web Unlocker when a key is configured (it handles
- * blocks, rate limits and captchas). Without a key it falls back to a direct fetch, and every
- * result says which path it took, so a demo never pretends.
- */
 import type { FetchStatus } from "../types";
 import { brightDataKey, unlock } from "./brightdata";
 
@@ -37,7 +26,6 @@ async function direct(url: string, timeoutMs = 20_000): Promise<{ status: FetchS
   }
 }
 
-/** Fetch a public URL: Bright Data first when configured, direct otherwise (or if Bright Data can't get it). */
 export async function getPublic(url: string): Promise<{ status: FetchStatus; body?: string; via: "bright-data" | "direct"; note?: string }> {
   if (brightDataKey()) {
     const r = await unlock(url);
@@ -48,7 +36,6 @@ export async function getPublic(url: string): Promise<{ status: FetchStatus; bod
   return { ...(await direct(url)), via: "direct" };
 }
 
-// ── Luma ───────────────────────────────────────────────────────────────────
 export interface LumaEvent {
   id: string;
   name: string;
@@ -114,7 +101,6 @@ export async function fetchLuma(lat: number, lon: number, pages = 3): Promise<So
   return { source: "luma", status: items.length ? "ok" : status === "ok" ? "empty" : status, via, items, ms: Date.now() - t0, note };
 }
 
-// ── Devpost ────────────────────────────────────────────────────────────────
 export interface DevpostHackathon {
   id: string;
   name: string;
@@ -127,7 +113,6 @@ export interface DevpostHackathon {
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
-/** "Oct 23 - 25, 2026" / "Jun 25 - Oct 27, 2026" → ISO date of the first day (noon UTC, date-only precision). */
 export function parseDevpostStart(dates: string): string | undefined {
   const m = dates.match(/([A-Za-z]{3})\s+(\d{1,2})/);
   const y = dates.match(/(\d{4})\s*$/);
@@ -135,7 +120,7 @@ export function parseDevpostStart(dates: string): string | undefined {
   const mon = MONTHS.indexOf(m[1]!.toLowerCase());
   if (mon < 0) return undefined;
   const endMon = [...dates.matchAll(/([A-Za-z]{3})\s+\d/g)].map((x) => MONTHS.indexOf(x[1]!.toLowerCase())).pop() ?? mon;
-  const year = Number(y[1]) - (endMon < mon ? 1 : 0); // "Dec 30 - Jan 2, 2027" starts in 2026
+  const year = Number(y[1]) - (endMon < mon ? 1 : 0);
   return new Date(Date.UTC(year, mon, Number(m[2]), 12)).toISOString();
 }
 
@@ -174,14 +159,13 @@ export async function fetchDevpost(pages = 3): Promise<SourceResult<DevpostHacka
   return { source: "devpost", status: items.length ? "ok" : status === "ok" ? "empty" : status, via, items, ms: Date.now() - t0, note };
 }
 
-// ── MLH ────────────────────────────────────────────────────────────────────
 export interface MlhEvent {
   id: string;
   name: string;
   startsAt: string;
   endsAt?: string;
   url: string;
-  location: string; // "San Francisco, California"
+  location: string;
   physical: boolean;
 }
 
@@ -190,7 +174,6 @@ function decodeAttr(s: string): string {
 }
 
 export function mlhSeason(now = new Date()): number {
-  // MLH seasons run roughly August → July and are named for the year they end in.
   return now.getUTCMonth() >= 6 ? now.getUTCFullYear() + 1 : now.getUTCFullYear();
 }
 
@@ -199,7 +182,6 @@ export async function fetchMlh(now = new Date()): Promise<SourceResult<MlhEvent>
   const url = `https://www.mlh.com/seasons/${mlhSeason(now)}/events`;
   const r = await getPublic(url);
   if (r.status !== "ok" || !r.body) return { source: "mlh", status: r.status, via: r.via, items: [], ms: Date.now() - t0, note: r.note };
-  // The page embeds its data as <script data-page="app" type="application/json">…</script> (older builds: a data-page attribute).
   const tag = r.body.match(/<script[^>]*data-page="app"[^>]*>([\s\S]*?)<\/script>/);
   const attr = tag ? null : r.body.match(/data-page="(\{[^"]+)"/);
   const raw = tag ? tag[1]! : attr ? decodeAttr(attr[1]!) : null;

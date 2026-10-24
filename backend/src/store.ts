@@ -27,7 +27,6 @@ export interface State {
   noShows: { travelerId: string; eventId: string; date: string; tripId: string }[];
 }
 
-/** Find backend/ from either the backend CLI or the sibling frontend process. */
 function backendRoot(): string {
   let dir = process.cwd();
   for (let i = 0; i < 6; i++) {
@@ -43,14 +42,12 @@ function backendRoot(): string {
 export const DATA_DIR = process.env.SMILE_DATA_DIR ?? path.join(backendRoot(), ".data");
 export const BOOKS_FILE = path.join(DATA_DIR, "books.db");
 
-/** Raised when another process changed the books between our read and our write. */
 export class ConcurrentEdit extends Error {}
 
 export function hasState(): boolean {
   return fs.existsSync(BOOKS_FILE);
 }
 
-// ── read ────────────────────────────────────────────────────────────────────
 type Row = Record<string, unknown>;
 
 function readJournal(db: DatabaseSync): JournalEntry[] {
@@ -95,7 +92,6 @@ function readState(db: DatabaseSync): State {
   const doc = db.prepare("SELECT body FROM doc WHERE id = 1").get() as Row | undefined;
   if (!doc) throw new Error("the books are empty — run `npm run seed`");
   const s = JSON.parse(String(doc.body)) as State;
-  // The database is the system of record for the ledger, the audit trail and which periods are closed.
   s.company.closedPeriods = (db.prepare("SELECT period FROM periods WHERE closed = 1 ORDER BY period").all() as Row[]).map((r) => String(r.period));
   s.journal = readJournal(db);
   s.audit = readAudit(db);
@@ -111,7 +107,6 @@ export function loadState(): State {
   }
 }
 
-// ── write ───────────────────────────────────────────────────────────────────
 function insertEntry(db: DatabaseSync, e: JournalEntry, seq: number) {
   db.prepare("INSERT OR IGNORE INTO periods (period, closed) VALUES (?, 0)").run(e.period);
   db.prepare("INSERT INTO journal_entries (id, seq, date, period, memo, refs, posted_by, posted_at, posted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)").run(
@@ -126,7 +121,7 @@ function insertEntry(db: DatabaseSync, e: JournalEntry, seq: number) {
   );
   const line = db.prepare("INSERT INTO journal_lines (entry_id, line_no, account, debit, credit) VALUES (?, ?, ?, ?, ?)");
   e.lines.forEach((l, i) => line.run(e.id, i + 1, l.account, l.debit, l.credit));
-  db.prepare("UPDATE journal_entries SET posted = 1 WHERE id = ?").run(e.id); // the balance trigger fires here
+  db.prepare("UPDATE journal_entries SET posted = 1 WHERE id = ?").run(e.id);
 }
 
 function insertAudit(db: DatabaseSync, a: AuditEvent) {
@@ -162,15 +157,10 @@ function writeDoc(db: DatabaseSync, s: State, version: number) {
 
 const asLedgerError = (e: unknown) => (e instanceof Error && /RAISE|closed|unbalanced|immutable|append-only|chain|never deleted|reopened|constraint/i.test(e.message) ? new LedgerError(`database refused: ${e.message}`) : e);
 
-/**
- * Replace the books wholesale (seeding / reset). Historical entries load first, then their
- * periods close. Built in a temp file and renamed into place, so a reader never sees half a seed.
- */
 export function saveState(state: State): void {
   writeBooksFile(BOOKS_FILE, state);
 }
 
-/** Write a complete set of books to `file` (atomic: temp file, then rename). */
 export function writeBooksFile(file: string, state: State): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
@@ -202,13 +192,6 @@ export function evidenceFor(state: State, tripId: string): Evidence[] {
   return state.evidence.filter((e) => e.tripId === tripId);
 }
 
-/**
- * Load state, run fn, write what changed in one transaction.
- * Serialized within this process; across processes, a version check turns a lost update
- * into a ConcurrentEdit error instead of silently overwriting someone else's work.
- * New journal entries and audit events are inserted (the DB rejects anything that breaks
- * an invariant); existing ones must be byte-for-byte unchanged.
- */
 let chain: Promise<unknown> = Promise.resolve();
 export function withState<T>(fn: (s: State) => Promise<T> | T): Promise<T> {
   const run = chain.then(async () => {
@@ -249,13 +232,10 @@ export function withState<T>(fn: (s: State) => Promise<T> | T): Promise<T> {
       persist();
       return out;
     } catch (e) {
-      // A blocked action still leaves its audit event (e.g. a permission denial) on the record.
       if (e && typeof e === "object" && "persistAudit" in e) {
         try {
           persist();
-        } catch {
-          /* the original error is the one to report */
-        }
+        } catch {}
       }
       throw e;
     }

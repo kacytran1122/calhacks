@@ -11,7 +11,6 @@ const same = (a: string, b: string) => {
   return timingSafeEqual(left, right);
 };
 
-/** Private bridge used only by the Photon 2.0 worker. Photon credentials never enter the browser. */
 export async function POST(req: Request) {
   const expected = process.env.PHOTON_BRIDGE_SECRET;
   const supplied = req.headers.get("x-smile-photon-secret") ?? "";

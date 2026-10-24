@@ -1,8 +1,3 @@
-/**
- * Route Analyst — deterministic scoring, no model. Each option carries its cost source
- * and a chance of missing kickoff learned from this program's own trip history
- * (Laplace-smoothed late share by mode), so March's late buses shape November's pick.
- */
 import { capFor, POLICY } from "../policy";
 import type { State } from "../store";
 import type { Cents, Trip } from "../types";
@@ -10,8 +5,8 @@ import type { Cents, Trip } from "../types";
 export interface RouteOption {
   mode: Trip["mode"];
   costCents: Cents;
-  costSource: string; // evidence id or rule
-  pMiss: number; // 0..1
+  costSource: string;
+  pMiss: number;
   history: { trips: number; late: number };
   withinCap: boolean;
   withinBudget: boolean;
@@ -46,7 +41,6 @@ export function compareRoutes(
   options.push({ mode: "drive", costCents: driveCost, costSource: "IRS mileage rate × distance", pMiss: drive.p, history: { trips: drive.trips, late: drive.late }, withinCap: driveCost <= cap, withinBudget: withinBudget(driveCost) });
 
   const overDistance = args.maxDistanceMiles !== undefined && args.miles > args.maxDistanceMiles;
-  // Cheapest option inside both independent ceilings whose chance of missing kickoff is ≤ 25%; else the safest eligible option.
   const ok = overDistance ? [] : options.filter((o) => o.withinCap && o.withinBudget);
   const pick = ok.filter((o) => o.pMiss <= 0.25).sort((a, b) => a.costCents - b.costCents)[0] ?? ok.sort((a, b) => a.pMiss - b.pMiss)[0];
   const blockReason = pick

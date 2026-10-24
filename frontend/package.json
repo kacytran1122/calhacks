@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev -H 127.0.0.1 -p 3000",
     "build": "next build",
-    "start": "next start -H 127.0.0.1 -p 3000",
+    "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
     "typecheck": "tsc --noEmit && tsc --noEmit -p extension/tsconfig.json",
     "test": "npm run test:frontend --prefix ../tests",
     "extension:build": "esbuild extension/src/background.ts extension/src/content.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist"

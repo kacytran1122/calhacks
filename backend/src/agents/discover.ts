@@ -1,17 +1,3 @@
-/**
- * Discover — "what hackathons and tech events are near my ZIP?"
- *
- *  1. ZIP → coordinates (official lookup).
- *  2. Luma (by coordinates), Devpost and MLH in parallel — public pages, via Bright Data when configured.
- *  3. Locate each event: Luma gives coordinates; MLH gives a city; Devpost often gives only a venue
- *     name, so it borrows the location from the same event on MLH/Luma when one exists. An event
- *     we can't place is shown as "location unknown", never placed by a guess.
- *  4. Merge the same event listed on several sources, measure distance, filter by radius/kind/query.
- *  5. Compare with the last stored snapshot ("date moved", "venue changed") and store this one.
- *
- * Claude's job here is narrow: sort Luma's mixed feed into hackathon / tech / other. Its labels are
- * checked against the ids it was given; without a key, keyword rules do the same job.
- */
 import { z } from "zod";
 import { eventStore, type EventListing } from "../eventStore";
 import { addressToPoint, cityToPoint, haversineMiles, zipToPoint } from "../integrations/geo";
@@ -31,7 +17,7 @@ export interface DiscoverResult {
   origin: { zip: string; label?: string; lat: number; lon: number };
   radiusMiles: number;
   events: EventListing[];
-  unplaced: EventListing[]; // matched the query but have no location we trust
+  unplaced: EventListing[];
   sources: { source: string; status: string; via: string; count: number; ms: number; note?: string }[];
   store: "tigerdata" | "local";
   storeNote?: string;
@@ -41,7 +27,6 @@ export interface DiscoverResult {
 const TECH = /\b(ai|a\.i\.|ml|llms?|gpt|genai|agents?|tech|startups?|founders?|developers?|devs?|code|coding|engineer(ing)?|data|cloud|web3|crypto|blockchain|robot(ics)?|build(ers|ing)?|product|ux|saas|cyber|security|python|javascript|react|open[- ]source|demo day|pitch|venture|vc|hardware|software|quantum)\b/i;
 const HACK = /hack|hackathon|buildathon|game jam|datathon|ideathon/i;
 
-/** Tech hubs: Luma's feed is local to the point you ask from, so a wide radius also asks from hubs inside it. */
 const HUBS = [
   { name: "San Francisco", lat: 37.7749, lon: -122.4194 },
   { name: "San Jose", lat: 37.3382, lon: -121.8863 },
@@ -78,9 +63,7 @@ async function classifyLuma(items: EventListing[]): Promise<"claude" | "keywords
       });
       const keys = new Set(todo.map((e) => e.key));
       for (const l of out.labels) if (keys.has(l.key)) labelCache.set(l.key, l.kind);
-    } catch {
-      /* fall back to keywords below */
-    }
+    } catch {}
   }
   let usedClaude = false;
   for (const e of items) {
@@ -93,7 +76,6 @@ async function classifyLuma(items: EventListing[]): Promise<"claude" | "keywords
   return usedClaude ? "claude" : "keywords";
 }
 
-/** Run async work with a concurrency limit (be polite to free public APIs). */
 async function pool<T>(items: T[], limit: number, fn: (x: T) => Promise<void>) {
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -162,7 +144,6 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
   });
   all.push(...devpostListings);
 
-  // Merge the same event listed on several sources (keep the most precise location).
   const rank = { exact: 0, city: 1, unknown: 2 } as const;
   const merged: EventListing[] = [];
   for (const l of [...all].sort((a, b) => rank[a.locationPrecision] - rank[b.locationPrecision])) {
@@ -190,7 +171,6 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     .sort((a, b) => (a.startsAt ?? "").localeCompare(b.startsAt ?? "") || (a.distanceMiles ?? 0) - (b.distanceMiles ?? 0));
   const unplaced = terms.length ? merged.filter((e) => e.locationPrecision === "unknown" && kinds.includes(e.kind) && inWindow(e) && matches(e)).slice(0, 10) : [];
 
-  // What changed since the last time we looked, then store this look.
   const store = eventStore();
   let storeNote: string | undefined;
   try {

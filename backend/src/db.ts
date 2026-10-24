@@ -1,16 +1,3 @@
-/**
- * The books live in SQLite (Node's built-in driver, no native install), and the database
- * itself enforces the accounting invariants — so a bug, a script, or a person with a SQL
- * prompt can't get around them the way they could get around application code:
- *
- *  - an entry becomes "posted" only if it has ≥2 lines and debits = credits
- *  - nothing can be inserted into a closed period, and a closed period can't be reopened
- *  - posted entries, their lines, and audit events can't be updated or deleted
- *  - each audit event must chain to the previous one's hash, in sequence
- *
- * Production would run the same schema on Postgres (constraint triggers / deferred checks);
- * SQLite keeps the hackathon setup to `npm install`.
- */
 import { DatabaseSync } from "node:sqlite";
 import { CHART } from "./ledger";
 
@@ -112,7 +99,6 @@ export function openDb(file: string): DatabaseSync {
   return db;
 }
 
-/** Run fn in one IMMEDIATE transaction: all of it lands, or none of it does. */
 export function tx<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN IMMEDIATE");
   try {

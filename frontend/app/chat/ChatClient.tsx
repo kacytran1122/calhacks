@@ -23,7 +23,6 @@ export function ChatClient() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  // Private approve links for replies to messages sent from this device (never shared with the room).
   const [approvals, setApprovals] = useState<Record<string, string>>({});
   const end = useRef<HTMLDivElement>(null);
 
@@ -32,7 +31,6 @@ export function ChatClient() {
     setTyping(v.typing);
   };
 
-  // Poll so a second tab (or a second person) sees the same room.
   useEffect(() => {
     let live = true;
     const load = () =>
@@ -59,7 +57,6 @@ export function ChatClient() {
     setSending(true);
     setErr(null);
     setText("");
-    // Show the message straight away; @smile may take a while to collect live evidence.
     setMsgs((m) => [...m, { id: `local-${Date.now()}`, from: me, initials: ini(me), text: t, at: new Date().toISOString() }]);
     if (/(^|\s)@smile\b/i.test(t)) setTyping(true);
     try {

@@ -2,23 +2,16 @@ import "server-only";
 import { fmt, issueTripToken, planTrip, withState } from "@smile/core";
 import { ensureState } from "@/lib/server";
 
-/**
- * The `@smile` group-chat brain, independent of transport. The web fallback at /chat calls it today;
- * a Photon iMessage adapter (`onNewMention`) would call `handleMessage` with the same arguments.
- * Privacy rule: replies only ever name other travelers by initials — never school, ZIP or profile.
- * Approval links carry a bearer token for one trip, so they go only to the sender (the POST response
- * here; a DM over iMessage), never into the room where anyone could approve someone else's trip.
- */
 
 export type PlanCard = {
   eventName: string;
   mode: string;
   priceCents: number;
   capCents: number;
-  pMiss: number | null; // null = no trip history for this mode yet
+  pMiss: number | null;
   historyTrips: number;
   tripId: string;
-  buddies: string[]; // initials of others in this chat, same event, same mode
+  buddies: string[];
 };
 
 export type ChatMsg = { id: string; from: string; initials: string; text: string; at: string; bot?: boolean; card?: PlanCard };
@@ -62,7 +55,6 @@ export function resetRoom(chatId: string) {
   rooms.delete(chatId);
 }
 
-/** Parse "@smile 95616 https://lu.ma/x" → { zip, url }. ZIPs inside the URL don't count. */
 export function parseMention(text: string): { mentioned: boolean; zip?: string; url?: string } {
   const mentioned = /(^|\s)@smile\b/i.test(text);
   const url = text.match(/https?:\/\/[^\s<>"]+/)?.[0]?.replace(/[).,!?]+$/, "");
@@ -80,7 +72,6 @@ const ride = (mode: string) => (mode === "drive" ? "driving" : `taking the ${mod
 
 const list = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 
-/** Posts the message (and any @smile replies) to the room; `approvals` maps a reply id to its private approve link. */
 export async function handleMessage(chatId: string, from: string, text: string): Promise<{ posted: ChatMsg[]; approvals: Record<string, string> }> {
   const approvals: Record<string, string> = {};
   const posted = await respond(chatId, from, text, approvals);

@@ -1,10 +1,5 @@
 import type { HackEvent, Person } from "../types";
 
-/**
- * The company: Golden Gate Hack — a student-run, sponsor-funded hackathon at Fort Mason, SF,
- * that reimburses hacker travel. Its "finance team" is two volunteers and a policy doc.
- * The seats S'mile fills: Travel Reimbursement Clerk + Card Reconciliation Analyst.
- */
 export const COMPANY = {
   name: "Golden Gate Hack",
   program: "Hacker Travel Grants",
@@ -25,7 +20,6 @@ export const EVENTS: HackEvent[] = [
   { id: "E-main", name: "Golden Gate Hack 2026", venue: "Fort Mason Center", city: "San Francisco, CA", startsAt: "2026-11-14T17:00:00Z", lat: 37.8063, lon: -122.4306 },
 ];
 
-/** Schools hackers travel from, with typical mode and one-way fare to Fort Mason. */
 export const SCHOOLS = [
   { school: "UC Davis", zip: "95616", miles: 72, mode: "train", fare: 2400, merchant: "rail" },
   { school: "Sacramento State", zip: "95819", miles: 87, mode: "train", fare: 2900, merchant: "rail" },

@@ -1,4 +1,3 @@
-/* @smile group chat — web stand-in for the Photon iMessage surface. Reuses the landing tokens. */
 .ch{max-width:720px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;background:#fff;border-inline:1.5px solid var(--color-divider);font-family:var(--font-body)}
 .ch-top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--plum);color:#fff}
 .ch-back{color:var(--butter);font:800 20px var(--font-heading);text-decoration:none}

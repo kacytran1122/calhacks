@@ -5,7 +5,6 @@ import { ensureState, fail } from "@/lib/server";
 
 export const maxDuration = 300;
 
-/** One autonomous pass. Staff can start it early; the orchestrator does the work, not the person. */
 export async function POST(req: Request) {
   const user = await requireUser(["controller", "organizer"]);
   if (isResponse(user)) return user;

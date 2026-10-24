@@ -1,9 +1,3 @@
-/**
- * Lens panel. What it reads from the page: the URL, the title, and schema.org JSON-LD blocks
- * (the public, machine-readable event description most event pages publish).
- * What it never reads: cookies, storage, form fields, passwords, payment fields, or anything
- * behind a login. The server re-fetches the page through Bright Data and cross-checks.
- */
 declare global {
   interface Window {
     __smileLens?: boolean;
@@ -17,9 +11,7 @@ function readHints() {
   document.querySelectorAll('script[type="application/ld+json"]').forEach((s) => {
     try {
       jsonLd.push(JSON.parse(s.textContent ?? ""));
-    } catch {
-      /* skip malformed blocks */
-    }
+    } catch {}
   });
   return { url: location.href, title: document.title, jsonLd };
 }

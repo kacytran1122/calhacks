@@ -3,11 +3,6 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { ensureState, fail } from "@/lib/server";
 
-/**
- * Who is answering comes from the session (or, for an anonymous Lens traveler, a token
- * scoped to their own trip) — never from the body. A body that claims a different
- * person or role is refused and recorded as an attempted forgery.
- */
 export async function POST(req: Request) {
   ensureState();
   const b = (await req.json()) as { itemId: string; option: string; note?: string; tripToken?: string; personId?: string; role?: HumanRole };

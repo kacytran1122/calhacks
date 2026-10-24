@@ -1,11 +1,3 @@
-/**
- * Seeded books for Golden Gate Hack (provenance: "seeded" — synthetic, and labeled as such).
- *
- *  - History: Spring (March) and Summer (June) trips, already reconciled and posted in their
- *    (now closed) periods. This is where time comes from: a March no-show changes October.
- *  - Backlog: 40 Fall Hack Night trips handed over half-done by the last volunteer treasurer.
- *    12 have planted errors. ANSWER_KEY says what a careful accountant would do with each.
- */
 import { appendAudit } from "../audit";
 import { postEntry } from "../ledger";
 import type { State } from "../store";
@@ -17,7 +9,6 @@ type SchoolLike = (typeof SCHOOLS)[number] | typeof UBC;
 
 const INITIALS = "AJ RK MN JL TS PB KO EH LW DC RV SM YA NB GF HQ IT OP CU WZ BD FE LM AK ZR QS VN XT MJ KD SE HP BL DA JO RW NG TC EY PU".split(" ");
 
-// Small deterministic PRNG so the seed (and the answer key) is reproducible.
 function rng(seed: number) {
   let s = seed >>> 0;
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
@@ -48,7 +39,7 @@ export interface AnswerKeyEntry {
   expected: DecisionCode;
   needsHuman: boolean;
   payCents: Cents;
-  plant: string; // what was planted, in one line
+  plant: string;
 }
 
 export function buildSeed(): { state: State; answerKey: Record<string, AnswerKeyEntry> } {
@@ -72,7 +63,6 @@ export function buildSeed(): { state: State; answerKey: Record<string, AnswerKey
   const controller = { kind: "human" as const, id: "P-maya", role: "controller" as const };
   const recon = { kind: "agent" as const, id: "reconciler" as const };
 
-  // Sponsor money lands in the travel fund.
   postEntry(
     state,
     {
@@ -120,7 +110,6 @@ export function buildSeed(): { state: State; answerKey: Record<string, AnswerKey
     return m;
   };
 
-  // ── History: Spring + Summer, reconciled and closed ───────────────────────
   const history: { event: string; period: string; date: string; travelers: number[] }[] = [
     { event: "E-spring", period: "2026-03", date: "2026-03-14", travelers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] },
     { event: "E-summer", period: "2026-06", date: "2026-06-20", travelers: [5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 20] },
@@ -158,12 +147,10 @@ export function buildSeed(): { state: State; answerKey: Record<string, AnswerKey
         postEntry(state, { date: h.date, period: h.period, memo: `Travel grant — ${t.initials} (${sc.school}) to ${h.event}`, lines: [{ account: "5100", debit: sc.fare, credit: 0 }, { account: "2100", debit: 0, credit: sc.fare }], refs: [id, `EV-${id}-bank`, "R6"], postedBy: recon }, `${h.date}T23:30:00Z`);
       }
     }
-    // Card bill paid from operating cash at month end.
     const total = state.journal.filter((j) => j.period === h.period && j.lines.some((l) => l.account === "2100")).reduce((a, j) => a + j.lines.find((l) => l.account === "2100")!.credit, 0);
     postEntry(state, { date: `${h.date.slice(0, 7)}-28`, period: h.period, memo: `Paid ${h.period} virtual card statement`, lines: [{ account: "2100", debit: total, credit: 0 }, { account: "1000", debit: 0, credit: total }], refs: [`statement-${h.period}`], postedBy: controller }, `${h.date.slice(0, 7)}-28T17:00:00Z`);
   }
 
-  // ── Backlog: Fall Hack Night (Oct 16), handed over half-done ───────────────
   const fall = { event: "E-fall-night", period: "2026-10", date: "2026-10-16" };
   type Spec = Partial<{
     school: SchoolLike;
@@ -171,7 +158,7 @@ export function buildSeed(): { state: State; answerKey: Record<string, AnswerKey
     mode: Trip["mode"];
     merchant: string;
     quote: Cents;
-    bankLines: Cents[] | null; // null = no card lines (out of pocket)
+    bankLines: Cents[] | null;
     cardAuth: { amount: Cents; currency: string; declined?: string } | null;
     receipt: { amount: Cents; currency?: string; ref?: string; date?: string } | null;
     checkin: "checked_in" | "absent" | null;

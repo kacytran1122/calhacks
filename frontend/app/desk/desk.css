@@ -1,4 +1,3 @@
-/* S’mile Desk — the organizer’s view. Reuses the landing tokens (plum, butter, coral). */
 .dk{max-width:1320px;margin:0 auto;padding:0 clamp(16px,3vw,32px) 80px;font-size:15px}
 .dk-loading{padding:80px 24px;font:700 22px var(--font-heading)}
 .dk-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:18px 0;border-bottom:2px solid var(--plum)}

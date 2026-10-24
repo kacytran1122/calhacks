@@ -1,12 +1,3 @@
-/**
- * Bright Data REST calls (server-side only; the key never reaches the browser).
- * Routes follow the CalHacks public-data hackpack: Web Unlocker for any public page,
- * and Google results as JSON (brd_json=1) through the same unblocker zone.
- *
- * Real web conditions are handled, not hidden: every call returns a status
- * ("ok" | "blocked" | "empty" | "timeout" | "error"), the attempts it took, and the
- * x-brd-error-code when Bright Data reports one. Nothing is ever recorded as zero.
- */
 import type { FetchStatus } from "../types";
 
 const API = "https://api.brightdata.com";
@@ -64,7 +55,6 @@ async function request(
       lastCode = res.headers.get("x-brd-error-code") ?? undefined;
       if (res.ok && body.length >= minBytes) return { status: "ok", body, attempts: i, ms: Date.now() - t0 };
       lastErr = res.headers.get("x-brd-error") ?? `HTTP ${res.status}, ${body.length} bytes`;
-      // A 200 with a tiny body is a failure; captcha / rejects read as blocked.
       lastStatus = lastCode || res.status === 403 || res.status === 429 ? "blocked" : res.ok ? "empty" : "error";
     } catch (e) {
       lastStatus = (e as Error).name === "AbortError" ? "timeout" : "error";
@@ -77,7 +67,6 @@ async function request(
   return { status: lastStatus, attempts, ms: Date.now() - t0, errorCode: lastCode, error: lastErr };
 }
 
-/** Any public page. format "markdown" asks Bright Data to convert it. */
 export function unlock(url: string, format: "html" | "markdown" = "html"): Promise<BdResult> {
   return request(url, format === "markdown" ? { data_format: "markdown" } : {});
 }
@@ -90,7 +79,6 @@ export interface SerpOrganic {
   rank?: number;
 }
 
-/** Google results as parsed JSON. A body that doesn't parse is a failed call, and is retried. */
 export async function serp(query: string, attempts = 3): Promise<BdResult<SerpOrganic[]>> {
   const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en&gl=us&brd_json=1`;
   let last: BdResult = { status: "error", attempts: 0, ms: 0 };

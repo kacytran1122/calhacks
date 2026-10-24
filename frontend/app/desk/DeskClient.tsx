@@ -57,7 +57,6 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
     }
   }, []);
   useEffect(() => {
-    // An approval link (#approve=…&trip=…) from Lens or the planner: read it, then drop it from the address bar.
     const h = new URLSearchParams(location.hash.slice(1));
     const token = h.get("approve");
     const tripId = h.get("trip");
@@ -85,7 +84,6 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
   const trips = useMemo(() => (snap?.trips ?? []).filter((t) => filter === "all" || (t.decision && t.decision.code !== "reimburse_full")), [snap, filter]);
   const pending = snap?.trips.filter((t) => t.state === "submitted" || (t.state === "reimbursed" && t.id === "TR-F-19" && t.decision?.code !== "recover_refund")).length ?? 0;
 
-  // An approval link always opens that trip's traveler view, even in a browser where staff are signed in.
   if (approveLink) return <TravelerApproval link={approveLink} onExit={() => setApproveLink(null)} />;
   if (signedOut) return <SignIn onDone={() => refresh()} />;
   if (!snap) return <div className="dk dk-loading">Loading the books…</div>;
@@ -303,7 +301,6 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
   );
 }
 
-// ── Plan a live trip (the S'mile front door) ─────────────────────────────────
 type PlanOut = {
   approvalToken: string;
   trip: { id: string; state: string; quoteCents: number; mode: string; distanceMiles: number; travelerId: string };
@@ -450,7 +447,6 @@ function EvidenceData({ e }: { e: PlanOut["evidence"][number] }) {
   return null;
 }
 
-// ── Scorecard ───────────────────────────────────────────────────────────────
 type Eval = {
   totals: { cases: number; exact: number; plantedCaught: number; planted: number; cleanPassedThrough: number; clean: number; escalations: number; controlsHeld: number; controls: number };
   cases: { tripId: string; plant: string; expected: string; got: string; codeOk: boolean; payOk: boolean; needsHumanOk: boolean; gotPay: number }[];
@@ -503,7 +499,6 @@ function Scorecard() {
   );
 }
 
-// ── Audit trail ─────────────────────────────────────────────────────────────
 function AuditPanel({ snap }: { snap: Snap }) {
   return (
     <div className="dk-panel dk-wide">
@@ -527,7 +522,6 @@ function AuditPanel({ snap }: { snap: Snap }) {
   );
 }
 
-// ── Trace drawer: why, from what, and "defend it" ───────────────────────────
 type Trace = {
   trip: TripRow;
   traveler?: { initials: string; school: string };
@@ -678,7 +672,6 @@ function TraceDrawer({ tripId, onClose, claude }: { tripId: string; onClose: () 
   );
 }
 
-// ── Sign in ─────────────────────────────────────────────────────────────────
 function SignIn({ onDone }: { onDone: () => void }) {
   const [id, setId] = useState("");
   const [pw, setPw] = useState("");
@@ -728,7 +721,6 @@ function SignIn({ onDone }: { onDone: () => void }) {
   );
 }
 
-// ── Anonymous traveler approving their own trip via its approval link ───────
 type Status = { trip: { id: string; state: string; mode: string; quoteCents: number; distanceMiles: number }; event?: { name: string }; questions: { id: string; question: string; options: { id: string; label: string }[] }[] };
 
 function TravelerApproval({ link, onExit }: { link: { token: string; tripId: string }; onExit: () => void }) {
@@ -796,7 +788,6 @@ function TravelerApproval({ link, onExit }: { link: { token: string; tripId: str
   );
 }
 
-/** Public planner (no account): the same panel, used by hackers from the landing page. */
 export function PublicPlanner({ initialZip }: { initialZip: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);

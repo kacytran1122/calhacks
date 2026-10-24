@@ -1,8 +1,3 @@
-/**
- * Payments — the only agent that can move (simulated) money, and only against a mandate
- * a human approved. A charge above the mandate is declined by the network sim and turned
- * into a re-approval request (R7); this agent can't raise a cap or approve anything.
- */
 import { appendAudit } from "../audit";
 import { fmt } from "../money";
 import { authorize } from "../permissions";

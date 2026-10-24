@@ -1,9 +1,3 @@
-/**
- * Official / open feeds that need no key:
- *  - ZIP → coordinates: api.zippopotam.us
- *  - Address → coordinates: U.S. Census Bureau geocoder
- * Plain fetch is right here: these are open APIs, so Bright Data is kept for pages that block.
- */
 import type { FetchStatus } from "../types";
 
 export interface GeoResult {
@@ -52,7 +46,6 @@ export async function addressToPoint(address: string): Promise<GeoResult> {
   return { status: "ok", lat: m.coordinates.y, lon: m.coordinates.x, label: m.matchedAddress, source, url };
 }
 
-/** Great-circle miles. Policy caps (R1) use one-way distance. */
 export function haversineMiles(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const R = 3958.8;
   const rad = (d: number) => (d * Math.PI) / 180;
@@ -76,7 +69,6 @@ const STATES: Record<string, string> = {
 
 const cityCache = new Map<string, GeoResult>();
 
-/** "San Francisco, California" / "Austin, TX" → city-center coordinates (U.S. only; anything else is "empty"). */
 export async function cityToPoint(location: string): Promise<GeoResult> {
   const key = location.trim().toLowerCase();
   const cached = cityCache.get(key);

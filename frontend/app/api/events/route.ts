@@ -4,7 +4,6 @@ import { NextResponse, type NextRequest } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-/** GET /api/events?zip=95616&radius=150&q=ai&kinds=hackathon,tech — live public sources, nothing cached or invented. */
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
   const zip = p.get("zip") ?? "";

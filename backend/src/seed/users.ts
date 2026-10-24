@@ -1,16 +1,8 @@
-/**
- * TEST-ONLY sign-in accounts for the local demo. These are not real accounts and these
- * passwords protect nothing outside this machine. Production would use the organization's
- * identity provider; never reuse these values anywhere.
- *
- * Staff:      maya (controller) · dev (organizer)
- * Travelers:  t01 … t40 (one per seeded traveler)
- */
 import type { HumanRole } from "../types";
 
 export interface TestUser {
-  id: string; // sign-in name
-  personId: string; // the person/traveler id the books use
+  id: string;
+  personId: string;
   role: HumanRole;
   name: string;
   password: string;

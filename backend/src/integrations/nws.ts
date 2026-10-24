@@ -1,4 +1,3 @@
-/** National Weather Service (api.weather.gov): official, free, no key. Forecasts reach ~7 days out. */
 import type { FetchStatus } from "../types";
 import { getJson } from "./geo";
 

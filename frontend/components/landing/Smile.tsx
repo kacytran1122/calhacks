@@ -1,6 +1,5 @@
 import type { CSSProperties } from "react";
 
-/** The smiling "o" that sits between "s" and "mile". */
 function Face({ tail = "currentColor", className, width, height, style }: { tail?: string; className?: string; width?: number; height?: number; style?: CSSProperties }) {
   return (
     <svg className={className} width={width} height={height} viewBox="0 0 22 30" aria-hidden="true" style={style}>
@@ -13,7 +12,6 @@ function Face({ tail = "currentColor", className, width, height, style }: { tail
   );
 }
 
-/** Inline wordmark used inside running text and headlines. */
 export function Smile() {
   return (
     <span className="lg">
@@ -23,7 +21,6 @@ export function Smile() {
   );
 }
 
-/** Header / footer wordmark. */
 export function SmileWord({ size = "header" }: { size?: "header" | "footer" }) {
   const header = size === "header";
   return (

@@ -2,10 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { Smile } from "./Smile";
 
-/** Drop public/why-flights.png and public/why-gemini.png in and they replace the placeholders. */
 function Shot({ file, placeholder }: { file: string; placeholder: string }) {
   const exists = fs.existsSync(path.join(process.cwd(), "public", file));
-  // eslint-disable-next-line @next/next/no-img-element
   return exists ? <img src={`/${file}`} alt={placeholder} /> : <div className="slot">{placeholder}</div>;
 }
 

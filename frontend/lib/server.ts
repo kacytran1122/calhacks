@@ -34,13 +34,11 @@ export function integrations() {
   };
 }
 
-/** Staff see the whole desk; a traveler sees only their own trips and questions. */
 export function canSeeTrip(s: State, user: User, tripId: string): boolean {
   if (user.role !== "traveler") return true;
   return s.trips.some((t) => t.id === tripId && t.travelerId === user.personId);
 }
 
-/** Everything the Desk renders, computed server-side from the books, scoped to who's asking. */
 export function snapshot(user: User) {
   ensureState();
   const s: State = loadState();

@@ -1,9 +1,3 @@
-/**
- * Evidence Clerk — collects the facts a route decision needs, each stamped with
- * source, fetch time and status. Official feeds first (ZIP lookup, NWS weather);
- * Bright Data for the open web (fares quoted on public pages, stops near the venue).
- * An empty or blocked source is recorded as such — never as zero, never invented.
- */
 import { z } from "zod";
 import { authorize } from "../permissions";
 import type { State } from "../store";
@@ -36,7 +30,6 @@ const FareCandidates = z.object({
   ),
 });
 
-/** Rules fallback: first "$NN.NN" in a snippet that talks about a ticket/fare. */
 function faresByRules(results: SerpOrganic[]) {
   const out: { mode: "train" | "bus"; amountUsd: number; link: string; quote: string }[] = [];
   for (const r of results) {
@@ -116,11 +109,6 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   return { evidence: out, miles, homeLabel: home.label, fares };
 }
 
-/**
- * Pay-per-call data over x402 (Base Sepolia testnet). The Evidence agent can pay but
- * not post, so the Reconciler books the purchase to 5200 Data & Tools Expense against
- * the testnet USDC wallet — the agents' own spend lands in the same books.
- */
 export async function buyWithX402(state: State, tripId: string, url: string, priceCents = 1): Promise<Evidence> {
   authorize(state, agent, "x402.pay", tripId);
   const r = await payAndFetch(url);

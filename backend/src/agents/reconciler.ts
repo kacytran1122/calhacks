@@ -1,12 +1,3 @@
-/**
- * Reconciler — the Card Reconciliation Analyst + Travel Reimbursement Clerk seat.
- *
- * decide() is a pure function of the books: same evidence in, same decision out.
- * It matches quote ↔ card authorization ↔ bank settlement ↔ receipt ↔ check-in,
- * applies the policy in a fixed order, and returns a decision whose every reason
- * cites the evidence ids and rule ids behind it. Claude writes the prose later;
- * it never changes the code or the amount.
- */
 import { capFor, isImmaterial, materialityFor, POLICY } from "../policy";
 import type { State } from "../store";
 import type { Cents, Decision, DecisionCode, Evidence, HumanRole, Trip } from "../types";
@@ -22,7 +13,6 @@ export interface ParsedReceipt {
   parsedBy: "rules" | "claude";
 }
 
-/** Deterministic receipt reader for the formats the program receives. */
 export function parseReceipt(text: string): ParsedReceipt {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const amt = text.match(/(?:total charged|air total|total|amount)\s*:?\s*(CAD|USD)?\s*\$?\s*([\d,]+\.\d{2})/i);
@@ -73,7 +63,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     refs: (string | undefined)[],
     human?: { askedOf: HumanRole; question: string; options: { id: string; label: string }[] },
   ): Decision & DecisionContext => {
-    // R3: any payout over the threshold needs the controller, whatever else is true.
     let h = human;
     if (!h && payCents > POLICY.controllerThresholdCents) {
       h = {
@@ -100,7 +89,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     };
   };
 
-  // 0 · A refund arriving after we already reimbursed (R11).
   if (refund && trip.state === "reimbursed" && refund.data.processed === false) {
     const amt = Number(refund.data.amountCents);
     return make(
@@ -115,7 +103,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  // 1 · Segregation of duties (R8).
   const selfApproved = trip.approvals.find((a) => a.by === trip.requestedBy && a.decision === "approve");
   if (selfApproved) {
     const person = state.people.find((p) => p.id === selfApproved.by);
@@ -139,7 +126,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  // 2 · Duplicate receipt (R5): same fingerprint on an earlier submission.
   if (receipt?.fingerprint) {
     const earlier = state.trips.find((o) => {
       if (o.id === trip.id || !o.submittedAt || !trip.submittedAt || o.submittedAt >= trip.submittedAt) return false;
@@ -161,7 +147,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     }
   }
 
-  // 3 · No-show (R12) and 4 · check-in required after a prior no-show (R4).
   if (checkin?.data.result === "absent") {
     const charged = sum(bankLines.map((b) => Number(b.data.amountCents)));
     return make(
@@ -198,7 +183,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  // Settled amount, by the system of record (R6): bank > card auth > receipt.
   const bankUsd = bankLines.length ? sum(bankLines.map((b) => Number(b.data.amountCents))) : undefined;
   const receiptUsd = receipt?.currency === "USD" ? receipt.amountCents : undefined;
   const settled = bankUsd ?? receiptUsd;
@@ -211,7 +195,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     });
   }
 
-  // 7 · Price changed after approval (R7).
   if (settled > trip.quoteCents && !isImmaterial(settled, trip.quoteCents, trip.quoteCents)) {
     const declined = auth?.data.result === "declined";
     return make(
@@ -238,7 +221,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
 
   const payBase = settled;
 
-  // 9 · Late item for a closed period (R9).
   if (state.company.closedPeriods.includes(trip.period)) {
     return make(
       "post_to_open_period",
@@ -251,7 +233,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  // 10 · Foreign currency (R10).
   if (receipt && receipt.currency !== "USD") {
     return make(
       "convert_currency",
@@ -264,7 +245,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  // Split settlement: several card lines that together equal the quote.
   if (bankLines.length > 1) {
     return make(
       "match_split_charge",
@@ -277,7 +257,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  // Receipt disagrees with the bank (R6).
   if (receiptUsd !== undefined && bankUsd !== undefined && !isImmaterial(receiptUsd, bankUsd, trip.quoteCents)) {
     return make(
       "trust_bank_over_receipt",
@@ -290,7 +269,6 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  // Over the distance cap (R1).
   if (payBase > cap) {
     return make(
       "reimburse_capped",

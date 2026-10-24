@@ -5,7 +5,6 @@ import { canSeeTrip, ensureState, fail } from "@/lib/server";
 
 export const maxDuration = 120;
 
-/** A reviewer questions one decision; the system answers from the trace (read-only). */
 export async function POST(req: Request) {
   const user = await requireUser();
   if (isResponse(user)) return user;

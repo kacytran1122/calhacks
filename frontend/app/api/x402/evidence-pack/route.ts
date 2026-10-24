@@ -2,12 +2,6 @@ import { loadState, traceFor, X402_NETWORK } from "@smile/core";
 import { NextResponse, type NextRequest } from "next/server";
 import { ensureState } from "@/lib/server";
 
-/**
- * S'mile Evidence API — the earning side of x402. Another organizer's agent pays $0.01
- * (Base Sepolia testnet USDC) for one trip's verified evidence pack: event facts, fares
- * and weather with source + freshness, plus the decision and the rules it cites.
- * No names, no contact details — travelers appear as initials only.
- */
 export const dynamic = "force-dynamic";
 
 type Handler = (req: NextRequest) => Promise<Response>;

@@ -1,9 +1,5 @@
 import type { Cents } from "./types";
 
-/**
- * Golden Gate Hack Travel Reimbursement Policy, season 2026.
- * Every decision cites the rule ids below, so a reviewer can trace any call to its rule.
- */
 export const RULES = {
   R1: "Caps by one-way distance from the traveler's home ZIP to the venue: ≤50 mi $40 · ≤150 mi $90 · ≤400 mi $200 · farther $400.",
   R2: "Materiality: a difference of at most the larger of $1.00 or 3% of the approved quote is immaterial and is paid as settled.",

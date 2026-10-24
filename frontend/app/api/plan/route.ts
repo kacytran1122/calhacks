@@ -4,11 +4,6 @@ import { ensureState, fail } from "@/lib/server";
 
 export const maxDuration = 300;
 
-/**
- * The S'mile front door (web form or Lens): Scout → Evidence → Route → Policy → mandate request.
- * Open to anonymous travelers. The response carries an approval token scoped to this one trip,
- * which is the only way an anonymous planner can approve (or book) it.
- */
 export async function POST(req: Request) {
   ensureState();
   const b = (await req.json()) as { zip: string; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: number; maxDistanceMiles?: number };

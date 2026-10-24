@@ -4,7 +4,6 @@ import { ensureState } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
-/** What an anonymous traveler can see with their trip token: their trip and the questions waiting for them. */
 export async function POST(req: Request) {
   ensureState();
   const { tripId, tripToken } = (await req.json()) as { tripId: string; tripToken: string };

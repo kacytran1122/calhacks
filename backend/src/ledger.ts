@@ -3,7 +3,6 @@ import { authorize } from "./permissions";
 import type { Actor, Cents } from "./types";
 import type { State } from "./store";
 
-/** Chart of accounts for the Golden Gate Hack travel program. */
 export const CHART = {
   "1000": { name: "Cash — Operating", type: "asset" },
   "1050": { name: "USDC Wallet (Base Sepolia, testnet)", type: "asset" },
@@ -26,11 +25,11 @@ export interface JournalLine {
 
 export interface JournalEntry {
   id: string;
-  date: string; // ISO date the entry is effective
-  period: string; // "2026-06" — must be open
+  date: string;
+  period: string;
   memo: string;
   lines: JournalLine[];
-  refs: string[]; // evidence / trip / rule ids this entry traces back to
+  refs: string[];
   postedBy: Actor;
   postedAt: string;
 }
@@ -39,9 +38,7 @@ export class LedgerError extends Error {
   readonly persistAudit = true;
 }
 
-/** Post a balanced journal entry. Throws (and posts nothing) if any invariant fails. */
 export function postEntry(state: State, entry: Omit<JournalEntry, "id" | "postedAt">, at?: string): JournalEntry {
-  // Least privilege applies to the books too: only agents holding ledger.post can post.
   if (entry.postedBy.kind === "agent") authorize(state, entry.postedBy, "ledger.post", entry.memo);
   if (entry.lines.length < 2) throw new LedgerError("an entry needs at least two lines");
   for (const l of entry.lines) {

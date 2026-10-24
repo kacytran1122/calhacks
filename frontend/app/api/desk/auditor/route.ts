@@ -5,7 +5,6 @@ import { ensureState, fail } from "@/lib/server";
 
 export const maxDuration = 180;
 
-/** Claude plays the external auditor: picks the decision it trusts least and questions it. */
 export async function POST() {
   const user = await requireUser(["controller", "organizer"]);
   if (isResponse(user)) return user;

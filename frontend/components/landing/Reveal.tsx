@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 
-/** Fades .reveal blocks in as they scroll into view (same behavior as the original page). */
 export function RevealObserver() {
   useEffect(() => {
     const io = new IntersectionObserver(

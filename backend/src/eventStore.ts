@@ -1,18 +1,9 @@
-/**
- * Event snapshots over time. Every search stores what each source said about each event,
- * stamped with when it was fetched. One fetch is a level; the history is what lets S'mile
- * say "this event moved to Saturday since you last looked".
- *
- *  - TigerData (Timescale cloud Postgres) when TIGER_DATABASE_URL is set: event_snapshots is a
- *    hypertable partitioned on fetched_at.
- *  - Otherwise a local SQLite file (.data/events.db) with the same columns.
- */
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DATA_DIR } from "./store";
 
 export interface EventListing {
-  key: string; // "luma:evt-…", "devpost:123", "mlh:cal-hacks-13-0"
+  key: string;
   source: "luma" | "devpost" | "mlh";
   name: string;
   startsAt?: string;
@@ -26,10 +17,10 @@ export interface EventListing {
   kind: "hackathon" | "tech" | "other";
   distanceMiles?: number;
   themes?: string[];
-  alsoOn?: string[]; // other sources listing the same event
+  alsoOn?: string[];
   fetchedAt: string;
   via: "bright-data" | "direct";
-  change?: string; // what changed since the previous snapshot, if anything
+  change?: string;
 }
 
 export interface PreviousSnapshot {
@@ -45,7 +36,6 @@ export interface EventStore {
   save(listings: EventListing[]): Promise<void>;
 }
 
-// ── local SQLite ────────────────────────────────────────────────────────────
 function localStore(): EventStore {
   const open = () => {
     const db = new DatabaseSync(path.join(DATA_DIR, "events.db"));
@@ -90,7 +80,6 @@ function localStore(): EventStore {
   };
 }
 
-// ── TigerData ───────────────────────────────────────────────────────────────
 type PgPool = { query: (q: string, v?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
 let poolP: Promise<PgPool> | undefined;
 
@@ -101,15 +90,12 @@ async function tigerPool(url: string): Promise<PgPool> {
     await pool.query(`CREATE TABLE IF NOT EXISTS event_snapshots (
       fetched_at TIMESTAMPTZ NOT NULL, event_key TEXT NOT NULL, source TEXT NOT NULL, name TEXT NOT NULL,
       starts_at TIMESTAMPTZ, venue TEXT, city TEXT, lat DOUBLE PRECISION, lon DOUBLE PRECISION, url TEXT, kind TEXT, payload JSONB NOT NULL)`);
-    // Make it a hypertable when TimescaleDB is there (TigerData always has it); plain Postgres just keeps a table.
     try {
       await pool.query("SELECT create_hypertable('event_snapshots', by_range('fetched_at'), if_not_exists => TRUE)");
     } catch {
       try {
         await pool.query("SELECT create_hypertable('event_snapshots', 'fetched_at', if_not_exists => TRUE)");
-      } catch {
-        /* not TimescaleDB */
-      }
+      } catch {}
     }
     await pool.query("CREATE INDEX IF NOT EXISTS event_snapshots_key_time ON event_snapshots (event_key, fetched_at DESC)");
     return pool as unknown as PgPool;

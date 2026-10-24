@@ -14,7 +14,6 @@ export function Header() {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
 
-  // Scroll spy: highlight the section whose top has passed 40% of the viewport.
   useEffect(() => {
     const sections = LINKS.map((l) => document.querySelector(l.href));
     const spy = () => {
