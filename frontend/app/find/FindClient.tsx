@@ -68,6 +68,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
   const [zip, setZip] = useState(initialZip);
   const [radius, setRadius] = useState(200);
   const [q, setQ] = useState("");
+  const [includeSelfDrive, setIncludeSelfDrive] = useState(true);
   const [kinds, setKinds] = useState<Set<"hackathon" | "tech">>(new Set(["hackathon", "tech"]));
   const [res, setRes] = useState<Discover | null>(null);
   const [loading, setLoading] = useState(false);
@@ -139,6 +140,11 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             Tech events
           </button>
         </div>
+        <label className="fd-drive">
+          <input type="checkbox" checked={includeSelfDrive} onChange={(e) => setIncludeSelfDrive(e.target.checked)} />
+          <span aria-hidden="true"><i /></span>
+          Include self-drive
+        </label>
         <button className="dk-btn primary" disabled={loading}>
           {loading ? "Searching live sources…" : "Find events"}
         </button>
@@ -201,13 +207,13 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             </p>
           )}
         </div>
-        {picked && <PlanPane key={picked.key} zip={zip} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
+        {picked && <PlanPane key={picked.key} zip={zip} maxDistanceMiles={radius} includeSelfDrive={includeSelfDrive} event={picked} onClose={() => setPicked(null)} />}
       </div>
     </div>
   );
 }
 
-function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
+function PlanPane({ zip, maxDistanceMiles, includeSelfDrive, event, onClose }: { zip: string; maxDistanceMiles: number; includeSelfDrive: boolean; event: Listing; onClose: () => void }) {
   const [initials, setInitials] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -234,6 +240,7 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
         initials: initials || undefined,
         travelerBudgetCents: Math.round(Number(budgetUsd) * 100),
         maxDistanceMiles,
+        includeSelfDrive,
         event: { key: event.key, name: event.name, startsAt: event.startsAt, venue: event.venue, city: event.city, lat: event.lat, lon: event.lon, url: event.url },
       });
       setPlan(p);
@@ -339,7 +346,7 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
             <div className="dk-q"><b>This event is outside your distance limit.</b><p>Go back and increase the maximum distance only if you want to.</p></div>
           )}
           {plan.routes.blockReason === "ORGANIZER_CAP" && <p className="dk-note">No route fits organizer policy R1. The finance controller—not the traveler—receives the exception request.</p>}
-          {fare?.status !== "ok" && <p className="dk-note">Fares: {fare?.note ?? fare?.status}. Driving cost is the IRS mileage rate × distance.</p>}
+          {fare?.status !== "ok" && <p className="dk-note">Fares: {fare?.note ?? fare?.status}.{includeSelfDrive ? " Driving cost is the IRS mileage rate × distance." : " Self-drive is excluded from this plan."}</p>}
 
           <h3>A stop on the way</h3>
           {stops?.status === "ok" && Array.isArray(stops.data.results) && (stops.data.results as unknown[]).length ? (

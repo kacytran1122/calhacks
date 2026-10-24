@@ -204,7 +204,7 @@ export interface PickedEvent {
 
 export async function planTrip(
   state: State,
-  args: { zip: string; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number },
+  args: { zip: string; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean },
 ) {
   const travelerId = newId("T-live");
   state.travelers.push({ id: travelerId, initials: args.initials ?? "YOU", school: "Lens user", homeZip: args.zip });
@@ -241,7 +241,7 @@ export async function planTrip(
   trip.distanceMiles = g.miles;
   trip.organizerCapCents = capFor(g.miles);
   const fareEv = g.evidence.find((e) => e.kind === "fare");
-  const routes = compareRoutes(state, { miles: g.miles, fares: g.fares, fareEvidenceId: fareEv?.id, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles });
+  const routes = compareRoutes(state, { miles: g.miles, fares: g.fares, fareEvidenceId: fareEv?.id, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, includeSelfDrive: args.includeSelfDrive });
 
   authorize(state, { kind: "agent", id: "policy" }, "mandate.request", trip.id);
   if (!routes.pick) {

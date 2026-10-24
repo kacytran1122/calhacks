@@ -22,7 +22,7 @@ export function missRate(state: State, mode: Trip["mode"]) {
 
 export function compareRoutes(
   state: State,
-  args: { miles: number; fares: { mode: string; amountUsd: number }[]; fareEvidenceId?: string; travelerBudgetCents?: Cents; maxDistanceMiles?: number },
+  args: { miles: number; fares: { mode: string; amountUsd: number }[]; fareEvidenceId?: string; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean },
 ): { options: RouteOption[]; pick?: RouteOption; cap: Cents; travelerBudgetCents?: Cents; maxDistanceMiles?: number; blockReason?: RouteBlockReason } {
   const cap = capFor(args.miles);
   const withinBudget = (costCents: Cents) => args.travelerBudgetCents === undefined || costCents <= args.travelerBudgetCents;
@@ -36,9 +36,11 @@ export function compareRoutes(
     const costCents = Math.round(f.amountUsd * 100);
     options.push({ mode, costCents, costSource: args.fareEvidenceId ?? "web", pMiss: m.p, history: { trips: m.trips, late: m.late }, withinCap: costCents <= cap, withinBudget: withinBudget(costCents) });
   }
-  const drive = missRate(state, "drive");
-  const driveCost = Math.round(args.miles * POLICY.irsMileageCentsPerMile);
-  options.push({ mode: "drive", costCents: driveCost, costSource: "IRS mileage rate × distance", pMiss: drive.p, history: { trips: drive.trips, late: drive.late }, withinCap: driveCost <= cap, withinBudget: withinBudget(driveCost) });
+  if (args.includeSelfDrive !== false) {
+    const drive = missRate(state, "drive");
+    const driveCost = Math.round(args.miles * POLICY.irsMileageCentsPerMile);
+    options.push({ mode: "drive", costCents: driveCost, costSource: "IRS mileage rate × distance", pMiss: drive.p, history: { trips: drive.trips, late: drive.late }, withinCap: driveCost <= cap, withinBudget: withinBudget(driveCost) });
+  }
 
   const overDistance = args.maxDistanceMiles !== undefined && args.miles > args.maxDistanceMiles;
   const ok = overDistance ? [] : options.filter((o) => o.withinCap && o.withinBudget);
