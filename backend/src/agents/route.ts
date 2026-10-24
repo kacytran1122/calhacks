@@ -12,7 +12,7 @@ export interface RouteOption {
   withinBudget: boolean;
 }
 
-export type RouteBlockReason = "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE";
+export type RouteBlockReason = "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" | "NO_VERIFIED_FARE";
 
 export function missRate(state: State, mode: Trip["mode"]) {
   const hist = state.trips.filter((t) => t.mode === mode && t.arrivalMarginMin !== undefined);
@@ -51,6 +51,8 @@ export function compareRoutes(
     ? undefined
     : overDistance
       ? "MAX_DISTANCE"
+      : options.length === 0
+        ? "NO_VERIFIED_FARE"
       : options.some((o) => o.withinCap && !o.withinBudget)
         ? "TRAVELER_BUDGET"
         : "ORGANIZER_CAP";

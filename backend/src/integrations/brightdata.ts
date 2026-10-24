@@ -116,13 +116,13 @@ export interface SerpOrganic {
   rank?: number;
 }
 
-export async function serp(query: string, attempts = 3): Promise<BdResult<SerpOrganic[]>> {
+export async function serp(query: string, attempts = 3, timeoutMs = 12_000): Promise<BdResult<SerpOrganic[]>> {
   const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en&gl=us`;
   let last: BdResult = { status: "error", attempts: 0, ms: 0 };
   let used = 0;
   const t0 = Date.now();
   for (let i = 0; i < attempts; i++) {
-    last = await request(url, { data_format: "parsed_light" }, { attempts: 1, timeoutMs: 12_000, minBytes: 2, zoneType: "serp" });
+    last = await request(url, { data_format: "parsed_light" }, { attempts: 1, timeoutMs, minBytes: 2, zoneType: "serp" });
     used++;
     if (last.status === "ok" && last.body) {
       try {

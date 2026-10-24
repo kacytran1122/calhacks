@@ -13,3 +13,9 @@ test("self-drive follows the traveler preference", () => {
   assert.ok(withoutDrive.options.every((option) => option.mode !== "drive"));
   assert.deepEqual(withoutDrive.options.map((option) => option.mode), ["train"]);
 });
+
+test("a live route without an auditable fare waits for fare verification", () => {
+  const routes = compareRoutes(buildSeed().state, { miles: 30, fares: [], includeSelfDrive: false });
+  assert.equal(routes.options.length, 0);
+  assert.equal(routes.blockReason, "NO_VERIFIED_FARE");
+});

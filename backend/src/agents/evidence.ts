@@ -10,6 +10,7 @@ import { payAndFetch } from "../integrations/x402";
 import { postEntry } from "../ledger";
 import { llmAvailable, structured } from "../llm";
 import { planPublicTransit, type TransitOption } from "../integrations/transitous";
+import { currentOfficialFares } from "../integrations/official-fares";
 import type { EventFacts } from "./scout";
 
 const agent = { kind: "agent" as const, id: "evidence" as const };
@@ -145,10 +146,8 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const transitPromise = home.status === "ok" && home.lat !== undefined && home.lon !== undefined && event.lat !== undefined && event.lon !== undefined
     ? planPublicTransit({ from: { lat: home.lat, lon: home.lon }, to: { lat: event.lat, lon: event.lon }, startsAt: event.startsAt })
     : Promise.resolve({ status: "empty" as const, url: "https://transitous.org/sources/", options: [] as TransitOption[], ms: 0, error: "Coordinates were unavailable for live transit routing." });
-  const [stops, fareSerp, directionsSerp, transit] = await Promise.all([
-    venueQ ? serp(`breakfast coffee near ${venueQ}`, 1) : Promise.resolve(null),
-    serp(`${fromCity} to ${destination} train bus rideshare flight total fare cost${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
-    serp(`${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
+  const [stops, transit] = await Promise.all([
+    venueQ ? serp(`breakfast coffee near ${venueQ}`, 1, 6_000) : Promise.resolve(null),
     transitPromise,
   ]);
 
@@ -158,7 +157,13 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   }
 
   const targetedQuery = officialFareQuery(transit.options, event.startsAt);
-  const targetedFareSerp = targetedQuery ? await serp(targetedQuery, 1) : null;
+  const officialFares = await currentOfficialFares(transit.options, event.startsAt);
+  const needSearchFallback = officialFares.length === 0 && transit.options.every((option) => option.amountUsd === undefined);
+  const [fareSerp, directionsSerp, targetedFareSerp] = await Promise.all([
+    needSearchFallback ? serp(`${fromCity} to ${destination} train bus rideshare flight total fare cost${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1, 6_000) : Promise.resolve({ status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined }),
+    transit.options.length ? Promise.resolve({ status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined }) : serp(`${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1, 6_000),
+    needSearchFallback && targetedQuery ? serp(targetedQuery, 1, 6_000) : Promise.resolve(null),
+  ]);
   const fareResults = [
     ...(targetedFareSerp?.status === "ok" && targetedFareSerp.body ? targetedFareSerp.body.slice(0, 8) : []),
     ...(fareSerp.status === "ok" && fareSerp.body ? fareSerp.body.slice(0, 8) : []),
@@ -172,15 +177,15 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     directionResults.length ? extractRouteGuides(directionResults, fromCity, destination, args.travelConstraintSummary) : Promise.resolve({ guides: [] as RouteGuide[], extractedBy: "none" }),
   ]);
   const transitFares = transit.options.flatMap((option) => option.amountUsd && option.fareQuote ? [{ mode: option.mode, amountUsd: option.amountUsd, link: option.sourceUrl, quote: option.fareQuote }] : []);
-  const fares = [...transitFares, ...fareExtraction.fares].filter((fare, index, all) => all.findIndex((candidate) => candidate.mode === fare.mode && candidate.amountUsd === fare.amountUsd) === index);
+  const fares = [...officialFares, ...transitFares, ...fareExtraction.fares].filter((fare, index, all) => all.findIndex((candidate) => candidate.mode === fare.mode && candidate.amountUsd === fare.amountUsd) === index);
   const fareStatus = fares.length ? "ok" : targetedFareSerp?.status === "error" ? targetedFareSerp.status : fareSerp.status === "ok" ? "empty" : fareSerp.status;
   out.push(
     push(state, {
       tripId,
       kind: "fare",
-      source: "Transitous GTFS fares + Bright Data SERP API → official operator pages",
+      source: "Official operator fares + Transitous GTFS fares + Bright Data SERP API",
       status: fareStatus,
-      data: { fares, extractedBy: transitFares.length ? "GTFS fare products and/or Claude with verified public-web quotes" : fareExtraction.extractedBy, attempts: fareSerp.attempts + (targetedFareSerp?.attempts ?? 0), ms: fareSerp.ms + (targetedFareSerp?.ms ?? 0), query: targetedQuery },
+      data: { fares, extractedBy: officialFares.length ? "current official operator page" : transitFares.length ? "GTFS fare products and/or Claude with verified public-web quotes" : fareExtraction.extractedBy, attempts: fareSerp.attempts + (targetedFareSerp?.attempts ?? 0), ms: fareSerp.ms + (targetedFareSerp?.ms ?? 0), query: targetedQuery },
       note: targetedFareSerp?.error ?? fareSerp.error ?? (fares.length === 0 ? "Current route data was found, but no source stated an auditable total fare. S’mile will not invent one." : undefined),
     }),
   );
@@ -226,7 +231,7 @@ export async function buyWithX402(state: State, tripId: string, url: string, pri
         { account: "1050", debit: 0, credit: priceCents },
       ],
       refs: [e.id, tripId],
-      postedBy: { kind: "agent", id: "reconciler" }, // the Evidence agent can't post (least privilege)
+      postedBy: { kind: "agent", id: "reconciler" },
     });
   }
   return e;

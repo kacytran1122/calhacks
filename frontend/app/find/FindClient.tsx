@@ -40,7 +40,7 @@ type Plan = {
   trip: { id: string; mode: string; quoteCents: number; distanceMiles: number; travelerId: string; travelerBudgetCents?: number; travelerMaxDistanceMiles?: number; organizerCapCents?: number; reimbursementEligibleCents?: number };
   event: { name: string; startsAt: string };
   evidence: Ev[];
-  routes: { options: RouteOption[]; pick?: { mode: string }; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" } | null;
+  routes: { options: RouteOption[]; pick?: { mode: string }; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" | "NO_VERIFIED_FARE" } | null;
   inbox: { id: string; question: string; askedOf: "traveler" | "organizer" | "controller" } | null;
   buddies: { initials: string; mode: string; sameMode: boolean; milesApart: number }[];
 };
@@ -145,12 +145,10 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false }:
   return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
 }
 
-function UnpricedRouteGuide({ guide, origin, event }: { guide: RouteGuide; origin: string; event: Listing }) {
-  return (
-    <details className="fd-route-card alternative">
-      <summary><span>{guide.title}</span><b>check fare</b></summary>
+function UnpricedRouteGuide({ guide, origin, event, best = false }: { guide: RouteGuide; origin: string; event: Listing; best?: boolean }) {
+  const content = (
       <div className="fd-route-detail">
-        <div className="fd-route-head"><div><span>Live alternative</span><h3>{guide.title}</h3></div><div className="fd-route-price"><small>fare not published</small></div></div>
+        <div className="fd-route-head"><div><span>{best ? "Best live route" : "Live alternative"}</span><h3>{guide.title}</h3></div><div className="fd-route-price"><small>fare verification needed</small></div></div>
         {guide.durationText && <div className="fd-route-facts"><span>{guide.durationText}</span><span>public GTFS / GTFS-Realtime</span></div>}
         <ol className="fd-route-steps">
           {guide.steps.map((step, index) => <li key={`${guide.title}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
@@ -162,8 +160,9 @@ function UnpricedRouteGuide({ guide, origin, event }: { guide: RouteGuide; origi
         <p className="fd-route-source">Route source: {guide.sourceQuote}</p>
         <p className="dk-note">This route is shown for comparison, but S’mile will not display or approve a total until a public source states the fare.</p>
       </div>
-    </details>
   );
+  if (best) return <section className="fd-route-card best">{content}</section>;
+  return <details className="fd-route-card alternative"><summary><span>{guide.title}</span><b>check fare</b></summary>{content}</details>;
 }
 
 export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }: { initialZip: string; initialOrigin?: string; initialLat?: number; initialLon?: number }) {
@@ -498,6 +497,8 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
     if (index >= 0) representedGuideIndexes.add(index);
   }
   const additionalRouteGuides = routeGuides.filter((_, index) => !representedGuideIndexes.has(index));
+  const unpricedPrimary = !pickedRoute ? additionalRouteGuides[0] : undefined;
+  const unpricedAlternatives = !pickedRoute ? additionalRouteGuides.slice(1) : additionalRouteGuides;
 
   return (
     <aside className="dk-panel fd-plan" aria-label={`Trip plan for ${event.name}`}>
@@ -568,7 +569,8 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
         <>
           {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
           {pickedRoute && <RouteInstructions option={pickedRoute} guide={routeGuides.find((guide) => guide.mode === pickedRoute.mode)} fare={fareItems.find((item) => item.mode === pickedRoute.mode)} origin={originText || zip} event={event} best />}
-          {(alternativeRoutes.length > 0 || additionalRouteGuides.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={routeGuides.find((guide) => guide.mode === option.mode)} fare={fareItems.find((item) => item.mode === option.mode)} origin={originText || zip} event={event} />)}{additionalRouteGuides.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
+          {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best />}
+          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={routeGuides.find((guide) => guide.mode === option.mode)} fare={fareItems.find((item) => item.mode === option.mode)} origin={originText || zip} event={event} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
             <i aria-hidden="true">→</i>
@@ -586,6 +588,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
           {plan.routes.blockReason === "MAX_DISTANCE" && (
             <div className="dk-q"><b>This event is outside your distance limit.</b><p>Go back and increase the maximum distance only if you want to.</p></div>
           )}
+          {plan.routes.blockReason === "NO_VERIFIED_FARE" && <p className="dk-note">Live route instructions are ready, but S’mile is waiting for a verifiable fare before creating a payment approval.</p>}
           {plan.routes.blockReason === "ORGANIZER_CAP" && <p className="dk-note">No route fits organizer policy R1. The finance controller—not the traveler—receives the exception request.</p>}
           {fare?.status !== "ok" && <p className="dk-note">Fares: {fare?.note ?? fare?.status}.{includeSelfDrive ? " Driving cost is the IRS mileage rate × distance." : " Self-drive is excluded from this plan."}</p>}
 

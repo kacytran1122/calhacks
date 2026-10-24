@@ -224,3 +224,34 @@ test("shows the best route first with detailed steps, total cost, and alternativ
   expect(screen.getByText("Other ways to get there")).toBeVisible();
   expect(screen.getAllByText("Rideshare").length).toBeGreaterThan(0);
 });
+
+test("keeps detailed live transit visible while its fare is being verified", async () => {
+  const event = {
+    key: "irvine-event", source: "luma", name: "Irvine Build Night", startsAt: "2026-10-25T17:00:00Z", city: "Irvine, CA", venue: "UCI", locationPrecision: "exact" as const, url: "https://lu.ma/irvine", kind: "tech" as const, distanceMiles: 45, fetchedAt: "2026-10-24T00:00:00Z", via: "direct",
+  };
+  const plan = {
+    approvalToken: "token",
+    trip: { id: "TR-2", mode: "train", quoteCents: 0, distanceMiles: 45, travelerId: "T-2" },
+    event: { name: event.name, startsAt: event.startsAt },
+    evidence: [
+      { id: "fare", kind: "fare", source: "Official fares", status: "empty", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", note: "Fare verification is still pending.", data: { fares: [] } },
+      { id: "guide", kind: "route_guide", source: "Transitous", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "train", title: "Metro + Metrolink to Irvine", durationText: "2 hrs 20 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Live GTFS itinerary.", steps: [{ instruction: "Take Metro from UCLA to Union Station.", detail: "Check the live platform." }, { instruction: "Take Metrolink to Tustin.", detail: "Transfer to the final local bus." }] }] } },
+    ],
+    routes: { options: [], cap: 4000, travelerBudgetCents: 10000, blockReason: "NO_VERIFIED_FARE" },
+    inbox: null,
+    buddies: [],
+  };
+  const fetcher = vi.fn((input: RequestInfo | URL) => String(input) === "/api/plan" ? response(plan) : response({ ...result, origin: { zip: "90095", label: "UCLA" }, events: [event] }));
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<FindClient initialZip="90095" initialOrigin="UCLA" />);
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.click(screen.getByLabelText("Include self-drive"));
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+  expect(await screen.findByText("Best live route")).toBeVisible();
+  expect(screen.getByText("Take Metro from UCLA to Union Station.")).toBeVisible();
+  expect(screen.getByText(/waiting for a verifiable fare/i)).toBeVisible();
+  expect(screen.queryByText(/No route fits organizer policy/i)).not.toBeInTheDocument();
+});

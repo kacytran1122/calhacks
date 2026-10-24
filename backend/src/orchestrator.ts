@@ -257,6 +257,10 @@ export async function planTrip(
       appendAudit(state, { actor: orch, action: "plan.blocked", subject: trip.id, reason: `${g.miles} mi exceeds the traveler's ${args.maxDistanceMiles} mi search limit` });
       return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: null };
     }
+    if (routes.blockReason === "NO_VERIFIED_FARE") {
+      appendAudit(state, { actor: orch, action: "plan.awaiting_fare", subject: trip.id, reason: "Live routes were found without an auditable total fare; no payment mandate was created", refs: g.evidence.map((e) => e.id) });
+      return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: null };
+    }
     const q = ask(state, trip, "reconcile", "controller", `No option for ${g.homeLabel ?? args.zip} → ${event.name} fits the ${fmt(routes.cap)} cap (R1). Approve an exception?`, [{ id: "approve", label: "Approve exception" }, { id: "reject", label: "Decline" }], {});
     return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: q };
   }
