@@ -74,10 +74,6 @@ export function FindClient({ initialZip }: { initialZip: string }) {
   const [groups, setGroups] = useState<Set<"mlh" | "tech">>(new Set(["mlh", "tech"]));
   const [res, setRes] = useState<Discover | null>(null);
   const [loading, setLoading] = useState(false);
-  const [locating, setLocating] = useState(false);
-  const [confirmingLocation, setConfirmingLocation] = useState(false);
-  const [confirmedInput, setConfirmedInput] = useState("");
-  const [locationNote, setLocationNote] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<Listing | null>(null);
 
@@ -102,16 +98,13 @@ export function FindClient({ initialZip }: { initialZip: string }) {
   }, [radius, q, groups]);
 
   useEffect(() => {
-    if (initialZip) {
-      search(initialZip);
-      setConfirmingLocation(true);
-    }
+    if (initialZip) search(initialZip);
   }, []);
 
   const useTypedLocation = async () => {
     const input = locationInput.trim();
     if (!input) return setErr("Enter a U.S. city and state or a 5-digit ZIP.");
-    setLocating(true);
+    setLoading(true);
     setErr(null);
     try {
       const location = /^\d{5}$/.test(input)
@@ -119,43 +112,11 @@ export function FindClient({ initialZip }: { initialZip: string }) {
         : await api<{ zip: string; label?: string }>(`/api/location/resolve?city=${encodeURIComponent(input)}`);
       setZip(location.zip);
       setLocationInput(location.label ?? input);
-      setConfirmedInput(location.label ?? input);
-      setLocationNote(`Using ${location.label ?? location.zip} as your trip start.`);
-      setConfirmingLocation(false);
       await search(location.zip);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
-      setLocating(false);
-    }
-  };
-
-  const useCurrentLocation = async () => {
-    if (!navigator.geolocation) return setErr("This browser doesn’t support location access. Keep the city or ZIP you entered instead.");
-    setLocating(true);
-    setErr(null);
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 12_000, maximumAge: 300_000 }),
-      );
-      const location = await api<{ zip: string; label?: string }>(
-        `/api/location/resolve?lat=${encodeURIComponent(position.coords.latitude)}&lon=${encodeURIComponent(position.coords.longitude)}`,
-      );
-      const label = location.label ?? location.zip;
-      setZip(location.zip);
-      setLocationInput(label);
-      setConfirmedInput(label);
-      setLocationNote(`Current location matched to ${label}. Your precise coordinates are not saved.`);
-      setConfirmingLocation(false);
-      await search(location.zip);
-    } catch (e) {
-      const code = typeof e === "object" && e !== null && "code" in e ? Number((e as { code: unknown }).code) : 0;
-      const message = code === 1
-        ? "Location access was not allowed. You can still use the city or ZIP you entered."
-        : "We couldn’t get your current location. You can still use the city or ZIP you entered.";
-      setErr(message);
-    } finally {
-      setLocating(false);
+      setLoading(false);
     }
   };
 
@@ -163,9 +124,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
     const input = locationInput.trim();
     if (!input) return setErr("Enter a U.S. city and state or a 5-digit ZIP.");
     if (!/^\d{5}$/.test(input) && !input.includes(",")) return setErr("For a city, add the state too, like Galesburg, IL.");
-    if (input === confirmedInput && zip) return search(zip);
-    setErr(null);
-    setConfirmingLocation(true);
+    useTypedLocation();
   };
 
   const toggle = (k: "mlh" | "tech") => {
@@ -205,9 +164,6 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             value={locationInput}
             onChange={(e) => {
               setLocationInput(e.target.value);
-              setConfirmedInput("");
-              setConfirmingLocation(false);
-              setLocationNote(null);
             }}
             autoComplete="postal-code"
             placeholder="City, state or ZIP code"
@@ -237,19 +193,6 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           {loading ? "Searching live sources…" : res ? "Update nearby events" : "Find nearby events"}
         </button>
       </form>
-
-      {confirmingLocation && (
-        <section className="fd-location-check" aria-live="polite">
-          <div><b>Is {locationInput || "this place"} your current location?</b><span>Choose whether to keep the place you entered or let S’mile match your current GPS to a ZIP.</span></div>
-          <div className="dk-row">
-            <button type="button" className="dk-btn ghost" onClick={useTypedLocation} disabled={locating}>No, keep this place</button>
-            <button type="button" className="dk-btn primary" onClick={useCurrentLocation} disabled={locating}>{locating ? "Checking…" : "Yes, use my location"}</button>
-          </div>
-          <small>GPS is requested only after you choose yes. Precise coordinates are not saved.</small>
-        </section>
-      )}
-
-      {locationNote && <div className="fd-location-note">✓ {locationNote}</div>}
 
       {err && <div className="dk-toast err">{err}</div>}
 

@@ -5,12 +5,16 @@ import { PhoneChat } from "./PhoneChat";
 import { Smile } from "./Smile";
 
 type OriginMode = "zip" | "city";
+type PendingOrigin = { zip: string; label: string };
 
 export function HeroView({ onNavigate }: { onNavigate: (href: string) => void }) {
   const [mode, setMode] = useState<OriginMode>("zip");
   const [zip, setZip] = useState("");
   const [city, setCity] = useState("");
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [pendingOrigin, setPendingOrigin] = useState<PendingOrigin | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: "hint" | "error"; text: string } | null>(null);
 
   const selectMode = (next: OriginMode) => {
@@ -28,7 +32,8 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
         setMessage({ kind: "error", text: "Enter a 5-digit ZIP code." });
         return;
       }
-      onNavigate(`/find?zip=${value}`);
+      setLocationError(null);
+      setPendingOrigin({ zip: value, label: value });
       return;
     }
 
@@ -43,12 +48,40 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
       const response = await fetch(`/api/location/resolve?city=${encodeURIComponent(city.trim())}`);
       const result = (await response.json()) as { zip?: string; label?: string; error?: string };
       if (!response.ok || !result.zip) throw new Error(result.error ?? "We couldn’t find that city.");
-      setMessage({ kind: "hint", text: `${result.label ?? city} found. Loading nearby events…` });
-      onNavigate(`/find?zip=${result.zip}`);
+      setMessage({ kind: "hint", text: `${result.label ?? city} found.` });
+      setLocationError(null);
+      setPendingOrigin({ zip: result.zip, label: result.label ?? city.trim() });
     } catch (error) {
       setMessage({ kind: "error", text: (error as Error).message });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const continueWithEnteredLocation = () => {
+    if (pendingOrigin) onNavigate(`/find?zip=${pendingOrigin.zip}`);
+  };
+
+  const allowCurrentLocation = async () => {
+    if (!navigator.geolocation) {
+      setLocationError("Location access isn’t available in this browser. Use the location you entered instead.");
+      return;
+    }
+    setLocating(true);
+    setLocationError(null);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 12_000, maximumAge: 300_000 }),
+      );
+      const response = await fetch(`/api/location/resolve?lat=${encodeURIComponent(position.coords.latitude)}&lon=${encodeURIComponent(position.coords.longitude)}`);
+      const result = (await response.json()) as { zip?: string; error?: string };
+      if (!response.ok || !result.zip) throw new Error(result.error ?? "We couldn’t match your location to a ZIP code.");
+      onNavigate(`/find?zip=${result.zip}`);
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error ? Number((error as { code: unknown }).code) : 0;
+      setLocationError(code === 1 ? "Location access wasn’t allowed. Use the location you entered instead." : "We couldn’t get your location. Use the location you entered instead.");
+    } finally {
+      setLocating(false);
     }
   };
 
@@ -113,6 +146,21 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
           </div>
         </div>
       </div>
+      {pendingOrigin && (
+        <div className="location-modal-backdrop">
+          <div className="location-modal" role="dialog" aria-modal="true" aria-labelledby="location-modal-title">
+            <div className="location-modal-icon" aria-hidden="true">⌖</div>
+            <h2 id="location-modal-title">Allow location access?</h2>
+            <p>S’mile can use your current location once to find events closest to you.</p>
+            <small>Your precise location is not saved.</small>
+            {locationError && <div className="location-modal-error" role="alert">{locationError}</div>}
+            <div className="location-modal-actions">
+              <button type="button" className="location-skip" onClick={continueWithEnteredLocation}>Use {pendingOrigin.label} instead</button>
+              <button type="button" className="location-allow" onClick={allowCurrentLocation} disabled={locating}>{locating ? "Checking location…" : "Allow location"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

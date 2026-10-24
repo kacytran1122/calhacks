@@ -16,7 +16,7 @@ const result = {
   classifiedBy: "keywords",
 };
 
-test("confirms a typed city before searching and places event search below the result count", async () => {
+test("resolves a typed city and places event search below the result count", async () => {
   const fetcher = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url.startsWith("/api/location/resolve")) return response({ zip: "61401", label: "Galesburg, IL" });
@@ -28,10 +28,6 @@ test("confirms a typed city before searching and places event search below the r
 
   await user.type(screen.getByLabelText("Starting city or ZIP code"), "Galesburg, IL");
   await user.click(screen.getByRole("button", { name: "Find nearby events" }));
-
-  expect(screen.getByText("Is Galesburg, IL your current location?")).toBeVisible();
-  expect(fetcher).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "No, keep this place" }));
 
   const count = await screen.findByText(/events within 200 mi of Galesburg, IL/);
   const eventSearch = screen.getByLabelText("Search events by name or topic");
