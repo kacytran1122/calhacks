@@ -35,13 +35,25 @@ const required = (name: string) => {
   return value;
 };
 
+export function assertPhoton2Credentials(projectId: string, apiKey: string) {
+  if (!projectId.startsWith("pho_prj_")) {
+    throw new Error("PHOTON_PROJECT_ID must be a Photon 2.0 project ID beginning with pho_prj_. Spectrum UUIDs are not compatible.");
+  }
+  if (!apiKey.startsWith("pho_sk_")) {
+    throw new Error("PHOTON_API_KEY must be a Photon 2.0 project key beginning with pho_sk_. Spectrum project secrets are not compatible.");
+  }
+}
+
 export function configuration(): Config {
   const webUrl = required("SMILE_WEB_URL").replace(/\/$/, "");
   const parsed = new URL(webUrl);
   if (!/^https?:$/.test(parsed.protocol)) throw new Error("SMILE_WEB_URL must be an http(s) origin.");
+  const apiKey = required("PHOTON_API_KEY");
+  const projectId = required("PHOTON_PROJECT_ID");
+  assertPhoton2Credentials(projectId, apiKey);
   return {
-    apiKey: required("PHOTON_API_KEY"),
-    projectId: required("PHOTON_PROJECT_ID"),
+    apiKey,
+    projectId,
     webUrl,
     bridgeSecret: required("PHOTON_BRIDGE_SECRET"),
     cursorFile: resolve(process.env.PHOTON_CURSOR_FILE?.trim() || ".data/photon-cursor.json"),
@@ -141,7 +153,9 @@ export async function processMessage(photon: Photon, config: Config, message: Ph
 
 export async function start(config = configuration()) {
   const { Photon } = await import("@photon-ai/api");
-  const photon = new Photon({ headers: { Authorization: `Bearer ${config.apiKey}` } });
+  assertPhoton2Credentials(config.projectId, config.apiKey);
+  const photon = new Photon({ baseUrl: config.apiOrigin, headers: { Authorization: `Bearer ${config.apiKey}` } });
+  await photon.projects.get({ path: { projectId: config.projectId } });
   let cursor = await loadCursor(config.cursorFile);
   let epoch = 0;
   let pending = 0;
