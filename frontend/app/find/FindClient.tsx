@@ -104,28 +104,19 @@ export function FindClient({ initialZip }: { initialZip: string }) {
 
   return (
     <div className="dk">
-      <header className="fd-nav">
+      <header className="dk-top">
         <a href="/" className="brand" aria-label="S’mile home">
           <SmileWord />
         </a>
-        <nav className="fd-nav-links" aria-label="S’mile tools">
-          <a href="/chat">Group chat</a>
-          <a href="/desk">Finance desk</a>
-        </nav>
+        <span className="dk-desk">Find events</span>
+        <div className="dk-co">Hackathons and tech events near you, from live public listings.</div>
+        <a className="dk-btn ghost" href="/chat">
+          @smile group chat
+        </a>
+        <a className="dk-btn ghost" href="/desk">
+          Organizer finance desk
+        </a>
       </header>
-
-      <section className="fd-hero">
-        <div className="fd-hero-copy">
-          <div className="fd-eyebrow"><i /> Live event scout</div>
-          <h1>Find the room<br /><em>you should be in.</em></h1>
-          <p>Real hackathons and tech events, ranked by where you are and how far you want to go.</p>
-        </div>
-        <div className="fd-hero-note">
-          <span>Searching the public web</span>
-          <strong>{res ? `${res.events.length} live matches` : "Luma · Devpost · MLH"}</strong>
-          <small>Fresh routes, evidence and event details in one place.</small>
-        </div>
-      </section>
 
       <form
         className="fd-search"
@@ -134,54 +125,41 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           search();
         }}
       >
-        <label className="fd-control fd-control-zip">
-          <span>Start near</span>
-          <input className="dk-in fd-zip" value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" placeholder="ZIP code" aria-label="Your ZIP code" />
-        </label>
-        <label className="fd-control fd-control-search">
-          <span>What sounds good?</span>
-          <input className="dk-in fd-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="AI, robotics, Cal Hacks…" aria-label="Search events" />
-        </label>
-        <label className="fd-control fd-limit">
-          <span>Go up to</span>
+        <input className="dk-in fd-zip" value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" placeholder="Your ZIP" aria-label="Your ZIP code" />
+        <input className="dk-in fd-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search: AI, Stanford, Cal Hacks…" aria-label="Search events" />
+        <label className="fd-limit">
+          <span>Max distance</span>
           <span className="fd-number"><input className="dk-in" type="number" min={1} max={3000} value={radius} onChange={(e) => setRadius(Math.min(3000, Math.max(1, Number(e.target.value) || 1)))} aria-label="Maximum route distance in miles" /><b>mi</b></span>
         </label>
-        <div className="fd-control fd-control-types">
-          <span>Show me</span>
-          <div className="dk-seg">
-            <button type="button" className={kinds.has("hackathon") ? "on" : ""} onClick={() => toggle("hackathon")}>
-              Hackathons
-            </button>
-            <button type="button" className={kinds.has("tech") ? "on" : ""} onClick={() => toggle("tech")}>
-              Tech events
-            </button>
-          </div>
+        <div className="dk-seg">
+          <button type="button" className={kinds.has("hackathon") ? "on" : ""} onClick={() => toggle("hackathon")}>
+            Hackathons
+          </button>
+          <button type="button" className={kinds.has("tech") ? "on" : ""} onClick={() => toggle("tech")}>
+            Tech events
+          </button>
         </div>
-        <button className="dk-btn primary fd-submit" disabled={loading}>
-          {loading ? "Searching live sources…" : "Find my next event →"}
+        <button className="dk-btn primary" disabled={loading}>
+          {loading ? "Searching live sources…" : "Find events"}
         </button>
-        {loading && <div className="fd-loading" aria-hidden="true"><span /></div>}
       </form>
 
       {err && <div className="dk-toast err">{err}</div>}
 
       {res && (
-        <section className="fd-results-head">
-          <div className="fd-result-title">
-            <strong>{res.events.length}</strong>
-            <div><b>events ready to explore</b><span>within {res.radiusMiles} miles of {res.origin.label ?? res.origin.zip}</span></div>
-          </div>
-          <div className="fd-meta" aria-label="Live data pipeline">
-            {res.sources.map((s) => (
-              <span key={s.source} className={`fd-src ${s.status === "ok" ? "ok" : "bad"}`} title={`${s.status} · ${s.via === "bright-data" ? "Bright Data" : "direct"}${s.note ? ` · ${s.note}` : ""}`}>
-                <i /> {SOURCE[s.source as keyof typeof SOURCE] ?? s.source} <b>{s.count}</b>
-              </span>
-            ))}
-            <span className="fd-src ok"><i /> {res.store === "tigerdata" ? "TigerData" : "Local"}</span>
-            <span className="fd-src ok"><i /> {res.classifiedBy === "claude" ? "Claude ranked" : "Smart sorted"}</span>
-          </div>
-          {res.storeNote && <span className="dk-warn fd-store-note">{res.storeNote}</span>}
-        </section>
+        <div className="fd-meta">
+          <span>
+            <b>{res.events.length}</b> events within {res.radiusMiles} mi of {res.origin.label ?? res.origin.zip}
+          </span>
+          {res.sources.map((s) => (
+            <span key={s.source} className={`fd-src ${s.status === "ok" ? "ok" : "bad"}`} title={s.note ?? ""}>
+              {SOURCE[s.source as keyof typeof SOURCE] ?? s.source} · {s.status} · {s.count} · {s.via === "bright-data" ? "Bright Data" : "direct"}
+            </span>
+          ))}
+          <span className="fd-src">snapshots → {res.store === "tigerdata" ? "TigerData" : "local file"}</span>
+          <span className="fd-src">sorted by {res.classifiedBy === "claude" ? "Claude" : "keyword rules"}</span>
+          {res.storeNote && <span className="dk-warn">{res.storeNote}</span>}
+        </div>
       )}
 
       <div className={`fd-grid ${picked ? "with-plan" : ""}`}>
@@ -206,16 +184,15 @@ export function FindClient({ initialZip }: { initialZip: string }) {
                 </div>
                 <div className="fd-body">
                   <h3>{e.name}</h3>
-                  <div className="fd-facts">
-                    <div><span>When</span><b>{w.time}</b></div>
-                    <div><span>Where</span><b>{e.venue && e.source !== "luma" ? `${e.venue}, ` : ""}{e.city ?? "Location pending"}</b></div>
-                    <div><span>From you</span><b>{e.distanceMiles !== undefined ? `${e.distanceMiles} mi` : "—"}</b></div>
+                  <div className="dk-mut">
+                    {w.time} · {e.venue && e.source !== "luma" ? `${e.venue}, ` : ""}
+                    {e.city ?? "location unknown"} · <b>{e.distanceMiles} mi</b>
+                    {e.locationPrecision === "city" && " (city center)"}
                   </div>
-                  {e.locationPrecision === "city" && <span className="fd-precision">Approximate city center</span>}
                   {e.change && <div className="dk-warn fd-change">⚠ {e.change}</div>}
                   <div className="dk-row fd-actions">
                     <button className="dk-btn primary" onClick={() => setPicked(e)}>
-                      Plan this trip →
+                      Plan my trip
                     </button>
                     <a className="dk-link" href={e.url} target="_blank" rel="noreferrer">
                       event page ↗
@@ -292,7 +269,7 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
   return (
     <aside className="dk-panel fd-plan" aria-label={`Trip plan for ${event.name}`}>
       <div className="dk-ph">
-        <div><span className="fd-plan-kicker">Your travel agent</span><h2>Build my trip</h2></div>
+        <h2>Your trip</h2>
         <button className="dk-btn ghost" onClick={onClose}>
           Close
         </button>

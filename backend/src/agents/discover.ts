@@ -107,11 +107,9 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     ...hubs.map((h) => fetchLuma(h.lat, h.lon, 2)),
   ]);
   const seenLuma = new Set<string>();
-  const lumaItems = [lumaHome, ...lumaHubs].flatMap((r) => r.items).filter((e) => !seenLuma.has(e.id) && seenLuma.add(e.id));
   const luma = {
     ...lumaHome,
-    status: lumaItems.length ? "ok" as const : lumaHome.status,
-    items: lumaItems,
+    items: [lumaHome, ...lumaHubs].flatMap((r) => r.items).filter((e) => !seenLuma.has(e.id) && seenLuma.add(e.id)),
     ms: Math.max(lumaHome.ms, ...lumaHubs.map((r) => r.ms)),
     note: [lumaHome.note, hubs.length ? `also searched from ${hubs.map((h) => h.name).join(", ")}` : undefined].filter(Boolean).join("; ") || undefined,
   };
