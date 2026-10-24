@@ -56,7 +56,7 @@ type ConstraintReview = {
 };
 type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean };
 type RouteGuide = { mode: string; title: string; durationText: string | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
-type FareItem = { mode: string; amountUsd: number; link: string; quote: string };
+type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string };
 
 const fmt = (c: number) => (c < 0 ? "-$" : "$") + (Math.abs(c) / 100).toFixed(2);
 const SOURCE = { luma: "Luma", devpost: "Devpost", mlh: "MLH" } as const;
@@ -493,9 +493,17 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
   const routeGuides = (Array.isArray(routeGuide?.data.options) ? routeGuide.data.options : []) as RouteGuide[];
   const pickedRoute = plan?.routes?.options.find((option) => option.mode === plan.routes?.pick?.mode);
   const alternativeRoutes = plan?.routes?.options.filter((option) => option.mode !== plan.routes?.pick?.mode) ?? [];
+  const fareFor = (option: RouteOption) => fareItems.find((item) => item.mode === option.mode);
+  const guideFor = (option: RouteOption) => {
+    const matchedFare = fareFor(option);
+    return matchedFare?.routeTitle
+      ? routeGuides.find((guide) => guide.title === matchedFare.routeTitle)
+      : routeGuides.find((guide) => guide.mode === option.mode);
+  };
   const representedGuideIndexes = new Set<number>();
   for (const option of plan?.routes?.options ?? []) {
-    const index = routeGuides.findIndex((guide, guideIndex) => guide.mode === option.mode && !representedGuideIndexes.has(guideIndex));
+    const selectedGuide = guideFor(option);
+    const index = routeGuides.findIndex((guide, guideIndex) => guide === selectedGuide && !representedGuideIndexes.has(guideIndex));
     if (index >= 0) representedGuideIndexes.add(index);
   }
   const additionalRouteGuides = routeGuides.filter((_, index) => !representedGuideIndexes.has(index));
@@ -570,9 +578,9 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
       {plan?.routes && (
         <>
           {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
-          {pickedRoute && <RouteInstructions option={pickedRoute} guide={routeGuides.find((guide) => guide.mode === pickedRoute.mode)} fare={fareItems.find((item) => item.mode === pickedRoute.mode)} origin={originText || zip} event={event} best />}
+          {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} best />}
           {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best />}
-          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={routeGuides.find((guide) => guide.mode === option.mode)} fare={fareItems.find((item) => item.mode === option.mode)} origin={originText || zip} event={event} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
+          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
             <i aria-hidden="true">→</i>

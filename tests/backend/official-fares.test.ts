@@ -5,9 +5,10 @@ import { metrolinkFareFromPage } from "../../backend/src/integrations/official-f
 const officialPage = `<main><p>Each Metrolink ticket or pass includes free transfers to most local transit providers.</p><ul><li>Weekdays: $19</li><li>Saturdays &amp; Sundays: $12</li><li>Holidays: $12</li></ul></main>`;
 
 test("official Metrolink page yields the weekend trip total", () => {
-  const fare = metrolinkFareFromPage(officialPage, "2026-10-25T00:30:00.000Z");
+  const fare = metrolinkFareFromPage(officialPage, "2026-10-25T00:30:00.000Z", "Metro + Metrolink to Irvine");
   assert.equal(fare?.amountUsd, 12);
   assert.equal(fare?.mode, "train");
+  assert.equal(fare?.routeTitle, "Metro + Metrolink to Irvine");
   assert.match(fare?.quote ?? "", /free transfers/i);
 });
 

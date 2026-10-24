@@ -266,3 +266,35 @@ test("keeps detailed live transit visible while its fare is being verified", asy
   expect(screen.getByText(/waiting for a verifiable fare/i)).toBeVisible();
   expect(screen.queryByText(/No route fits organizer policy/i)).not.toBeInTheDocument();
 });
+
+test("binds an official fare to the exact live itinerary it covers", async () => {
+  const event = {
+    key: "irvine-priced", source: "luma", name: "Irvine Tech Day", startsAt: "2026-10-25T17:00:00Z", city: "Irvine, CA", venue: "UCI", locationPrecision: "exact" as const, url: "https://lu.ma/irvine-priced", kind: "tech" as const, distanceMiles: 45, fetchedAt: "2026-10-24T00:00:00Z", via: "direct",
+  };
+  const coveredTitle = "Public transit via Metro + OC Line";
+  const plan = {
+    approvalToken: "token",
+    trip: { id: "TR-3", mode: "train", quoteCents: 1200, distanceMiles: 45, travelerId: "T-3", reimbursementEligibleCents: 1200 },
+    event: { name: event.name, startsAt: event.startsAt },
+    evidence: [
+      { id: "fare", kind: "fare", source: "Official fares", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { fares: [{ mode: "train", amountUsd: 12, link: "https://metrolinktrains.com", quote: "Metrolink weekend pass is $12.", routeTitle: coveredTitle }] } },
+      { id: "guide", kind: "route_guide", source: "Transitous", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [
+        { mode: "train", title: "Public transit via Amtrak", durationText: "2 hrs", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Live GTFS itinerary.", steps: [{ instruction: "Take Amtrak.", detail: "This fare is separate." }] },
+        { mode: "train", title: coveredTitle, durationText: "2 hrs 30 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Live GTFS itinerary.", steps: [{ instruction: "Take Metrolink OC Line.", detail: "The pass covers this itinerary." }] },
+      ] } },
+    ],
+    routes: { options: [{ mode: "train", costCents: 1200, costSource: "fare", pMiss: 0.1, history: { trips: 0, late: 0 }, withinCap: true, withinBudget: true }], pick: { mode: "train" }, cap: 5000, travelerBudgetCents: 10000 },
+    inbox: null,
+    buddies: [],
+  };
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/plan" ? response(plan) : response({ ...result, origin: { zip: "90024", label: "UCLA" }, events: [event] })));
+  const user = userEvent.setup();
+  const { container } = render(<FindClient initialZip="90024" initialOrigin="UCLA" initialLat={34.0711778} initialLon={-118.4511766} />);
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+  expect(await screen.findByText("Best route")).toBeVisible();
+  expect(container.querySelector(".fd-route-card.best")?.textContent).toContain("Take Metrolink OC Line.");
+  expect(container.querySelector(".fd-route-card.best")?.textContent).not.toContain("Take Amtrak.");
+});

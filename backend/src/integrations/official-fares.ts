@@ -8,13 +8,14 @@ export interface OfficialFare {
   amountUsd: number;
   link: string;
   quote: string;
+  routeTitle?: string;
 }
 
 function pageText(html: string) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 }
 
-export function metrolinkFareFromPage(html: string, startsAt?: string): OfficialFare | undefined {
+export function metrolinkFareFromPage(html: string, startsAt?: string, routeTitle?: string): OfficialFare | undefined {
   const text = pageText(html);
   const hasCurrentPrices = /Weekdays:\s*\$19/i.test(text) && /Saturdays\s*&\s*Sundays:\s*\$12/i.test(text) && /free transfers to most local transit providers/i.test(text);
   if (!hasCurrentPrices) return undefined;
@@ -27,6 +28,7 @@ export function metrolinkFareFromPage(html: string, startsAt?: string): Official
     amountUsd,
     link: METROLINK_FARES,
     quote: `Metrolink SoCal Day Pass: $${amountUsd.toFixed(2)} on ${weekend ? "weekends and holidays" : "weekdays"}; the official page includes free transfers to most connecting local transit.`,
+    routeTitle,
   };
 }
 
@@ -44,8 +46,9 @@ async function officialPage(url: string, timeoutMs = 4_000) {
 }
 
 export async function currentOfficialFares(options: TransitOption[], startsAt?: string): Promise<OfficialFare[]> {
-  if (!options.some((option) => option.agencies.some((agency) => /metrolink/i.test(agency)))) return [];
+  const metrolinkRoute = options.find((option) => option.agencies.some((agency) => /metrolink/i.test(agency)));
+  if (!metrolinkRoute) return [];
   const html = await officialPage(METROLINK_FARES);
-  const fare = html ? metrolinkFareFromPage(html, startsAt) : undefined;
+  const fare = html ? metrolinkFareFromPage(html, startsAt, metrolinkRoute.title) : undefined;
   return fare ? [fare] : [];
 }
