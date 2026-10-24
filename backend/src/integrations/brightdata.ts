@@ -18,6 +18,7 @@ export function brightDataKey(): string | undefined {
 type ZoneType = "unblocker" | "serp";
 type ActiveZone = { name: string; type: string };
 const zoneCache = new Map<ZoneType, string>();
+const zonePromiseCache = new Map<ZoneType, Promise<string>>();
 
 export function selectActiveZone(zones: ActiveZone[], type: ZoneType): string | undefined {
   const accepted = type === "unblocker" ? new Set(["unblocker", "web_unlocker"]) : new Set(["serp"]);
@@ -31,12 +32,28 @@ async function zone(key: string, type: ZoneType): Promise<string> {
   if (configured) return configured;
   const cached = zoneCache.get(type);
   if (cached) return cached;
-  const res = await fetch(`${API}/zone/get_active_zones`, { headers: { Authorization: `Bearer ${key}` } });
-  if (!res.ok) throw new Error(`zone lookup failed: HTTP ${res.status}`);
-  const name = selectActiveZone((await res.json()) as ActiveZone[], type);
-  if (!name) throw new Error(`no active ${type === "unblocker" ? "Web Unlocker" : "SERP API"} zone on this Bright Data account`);
-  zoneCache.set(type, name);
-  return name;
+  const running = zonePromiseCache.get(type);
+  if (running) return running;
+  const lookup = (async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      const res = await fetch(`${API}/zone/get_active_zones`, { signal: ctrl.signal, headers: { Authorization: `Bearer ${key}` } });
+      if (!res.ok) throw new Error(`zone lookup failed: HTTP ${res.status}`);
+      const name = selectActiveZone((await res.json()) as ActiveZone[], type);
+      if (!name) throw new Error(`no active ${type === "unblocker" ? "Web Unlocker" : "SERP API"} zone on this Bright Data account`);
+      zoneCache.set(type, name);
+      return name;
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+  zonePromiseCache.set(type, lookup);
+  try {
+    return await lookup;
+  } finally {
+    zonePromiseCache.delete(type);
+  }
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -53,14 +70,16 @@ async function request(
   let lastErr: string | undefined;
   let lastStatus: FetchStatus = "error";
   for (let i = 1; i <= attempts; i++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      const zoneName = await zone(key, zoneType);
+      const ctrl = new AbortController();
+      timer = setTimeout(() => ctrl.abort(), timeoutMs);
       const res = await fetch(`${API}/request`, {
         method: "POST",
         signal: ctrl.signal,
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ zone: await zone(key, zoneType), url, format: "raw", country: "us", ...extra }),
+        body: JSON.stringify({ zone: zoneName, url, format: "raw", country: "us", ...extra }),
       });
       const body = await res.text();
       lastCode = res.headers.get("x-brd-error-code") ?? undefined;
@@ -68,10 +87,11 @@ async function request(
       lastErr = res.headers.get("x-brd-error") ?? `HTTP ${res.status}, ${body.length} bytes`;
       lastStatus = lastCode || res.status === 403 || res.status === 429 ? "blocked" : res.ok ? "empty" : "error";
     } catch (e) {
-      lastStatus = (e as Error).name === "AbortError" ? "timeout" : "error";
-      lastErr = (e as Error).message;
+      const timedOut = (e as Error).name === "AbortError" || (e as Error).name === "TimeoutError";
+      lastStatus = timedOut ? "timeout" : "error";
+      lastErr = timedOut ? `Bright Data did not respond within ${Math.round(timeoutMs / 1000)} seconds` : (e as Error).message;
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     }
     if (i < attempts) await sleep(1500 * i);
   }
@@ -96,7 +116,7 @@ export async function serp(query: string, attempts = 3): Promise<BdResult<SerpOr
   let used = 0;
   const t0 = Date.now();
   for (let i = 0; i < attempts; i++) {
-    last = await request(url, {}, { attempts: 1, timeoutMs: 8_000, minBytes: 2, zoneType: "serp" });
+    last = await request(url, {}, { attempts: 1, timeoutMs: 12_000, minBytes: 2, zoneType: "serp" });
     used++;
     if (last.status === "ok" && last.body) {
       try {
