@@ -8,6 +8,26 @@ export type EventChoice = {
   lon?: number;
 };
 
+const hackathonLocations: Array<[RegExp, string]> = [
+  [/\bhacktx\b/i, "Austin, TX"],
+  [/\bcal\s*hacks?\b/i, "San Francisco, CA"],
+  [/\bla\s*hacks?\b/i, "Los Angeles, CA"],
+  [/\btamuhack\b/i, "College Station, TX"],
+  [/\bhackutd\b/i, "Richardson, TX"],
+  [/\browdyhacks\b/i, "San Antonio, TX"],
+  [/\bhackrice\b/i, "Houston, TX"],
+  [/\bboilermake\b/i, "West Lafayette, IN"],
+  [/\bhackillinois\b/i, "Champaign, IL"],
+  [/\bmhacks\b/i, "Ann Arbor, MI"],
+  [/\bhackprinceton\b/i, "Princeton, NJ"],
+  [/\bhackharvard\b/i, "Cambridge, MA"],
+  [/\btechnica\b/i, "College Park, MD"],
+];
+
+export function locationFromHackathonName(name: string) {
+  return hackathonLocations.find(([pattern]) => pattern.test(name))?.[1] ?? "";
+}
+
 function metaContent(scope: ParentNode, property: string) {
   return scope.querySelector<HTMLMetaElement>(`meta[itemprop="${property}"]`)?.content?.trim();
 }
@@ -75,7 +95,7 @@ export function pageEvents(source: Document = document, pageUrl = location.href)
   return [{
     name: source.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || source.title || "This hackathon",
     url: pageUrl,
-    location: "",
+    location: locationFromHackathonName(source.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || source.title || ""),
     imageUrl: source.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content,
   } satisfies EventChoice];
 }

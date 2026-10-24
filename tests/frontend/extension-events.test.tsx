@@ -18,3 +18,10 @@ test("reads a collegiate hackathon JSON-LD venue without page-wide access", () =
   const events = pageEvents(document, "https://campus.example");
   expect(events[0]).toMatchObject({ name: "Campus Hack", url: "https://campus.example", location: "Student Center, 1 College Way, Boston, MA, 02110", lat: 42.36, lon: -71.06 });
 });
+
+test("detects a known hackathon destination from its page name", () => {
+  document.head.innerHTML = `<meta property="og:title" content="HackTX 26 — Freetail Hackers">`;
+  document.body.innerHTML = "";
+  const events = pageEvents(document, "https://hacktx.com/");
+  expect(events[0]).toMatchObject({ name: "HackTX 26 — Freetail Hackers", location: "Austin, TX" });
+});

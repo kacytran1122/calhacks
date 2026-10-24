@@ -1,4 +1,4 @@
-import { globalPlaceToPoint } from "./integrations/geo";
+import { globalPlaceToPoint, placeToPoint, type GeoResult } from "./integrations/geo";
 import { planDrivingRoutes } from "./integrations/osrm";
 import { planPublicTransit } from "./integrations/transitous";
 
@@ -39,13 +39,19 @@ function validCoordinates(point: { lat: number; lon: number } | undefined) {
   return Boolean(point && Number.isFinite(point.lat) && Number.isFinite(point.lon) && point.lat >= -90 && point.lat <= 90 && point.lon >= -180 && point.lon <= 180);
 }
 
+async function resolvePlace(text: string): Promise<GeoResult> {
+  const primary = await globalPlaceToPoint(text);
+  if (primary.status === "ok") return primary;
+  return placeToPoint(text);
+}
+
 export async function planExtensionRoute(input: { originText?: string; originCoordinates?: { lat: number; lon: number }; includeSelfDrive: boolean; event: ExtensionEvent }): Promise<ExtensionRoutePlan> {
   const originText = input.originText?.trim();
   const destinationText = input.event.location.trim();
-  const originLookup = validCoordinates(input.originCoordinates) ? undefined : originText ? await globalPlaceToPoint(originText) : undefined;
+  const originLookup = validCoordinates(input.originCoordinates) ? undefined : originText ? await resolvePlace(originText) : undefined;
   const destinationLookup = validCoordinates(input.event.lat !== undefined && input.event.lon !== undefined ? { lat: input.event.lat, lon: input.event.lon } : undefined)
     ? undefined
-    : await globalPlaceToPoint(destinationText);
+    : await resolvePlace(destinationText);
   const origin = validCoordinates(input.originCoordinates)
     ? { lat: input.originCoordinates!.lat, lon: input.originCoordinates!.lon, label: originText || "Your current location" }
     : originLookup?.status === "ok" && originLookup.lat !== undefined && originLookup.lon !== undefined
