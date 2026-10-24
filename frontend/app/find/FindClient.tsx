@@ -15,6 +15,7 @@ type Listing = {
   lon?: number;
   locationPrecision: "exact" | "city" | "unknown";
   url: string;
+  thumbnailUrl?: string;
   kind: "hackathon" | "tech" | "other";
   distanceMiles?: number;
   alsoOn?: string[];
@@ -43,6 +44,16 @@ type Plan = {
   inbox: { id: string; question: string; askedOf: "traveler" | "organizer" | "controller" } | null;
   buddies: { initials: string; mode: string; sameMode: boolean; milesApart: number }[];
 };
+type ConstraintReview = {
+  status: "ready" | "needs_clarification";
+  summary: string;
+  destination: string | null;
+  arriveBy: string | null;
+  departAfter: string | null;
+  timezone: string | null;
+  followUpQuestion: string | null;
+  parsedBy: "claude" | "rules";
+};
 
 const fmt = (c: number) => (c < 0 ? "-$" : "$") + (Math.abs(c) / 100).toFixed(2);
 const SOURCE = { luma: "Luma", devpost: "Devpost", mlh: "MLH" } as const;
@@ -68,6 +79,16 @@ function when(e: Listing) {
     day: d.toLocaleDateString("en-US", { day: "numeric" }),
     time: dateOnly ? d.toLocaleDateString("en-US", { weekday: "short" }) : d.toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }),
   };
+}
+
+function EventVisual({ event, compact = false }: { event: Listing; compact?: boolean }) {
+  const fallback = event.source === "mlh" || event.alsoOn?.includes("mlh") ? "/mlh-logo.png" : "/tech-events-icon.png";
+  const hasThumbnail = Boolean(event.thumbnailUrl);
+  return (
+    <span className={`fd-event-visual${compact ? " compact" : ""}${hasThumbnail ? "" : " fallback"}`} aria-hidden="true">
+      <img src={event.thumbnailUrl ?? fallback} alt="" onError={(e) => { e.currentTarget.parentElement?.classList.add("fallback"); e.currentTarget.src = fallback; }} />
+    </span>
+  );
 }
 
 export function FindClient({ initialZip }: { initialZip: string }) {
@@ -236,7 +257,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
         const expandedRadius = Math.max(res.radiusMiles + 1, Math.ceil(distance));
         return (
           <section className="fd-outside" role="status">
-            <span className="fd-outside-mark" aria-hidden="true">↗</span>
+            <EventVisual event={event} compact />
             <div>
               <span className="fd-eyebrow">A match exists beyond your limit</span>
               <h2>{event.name} is outside your {displayDistance(res.radiusMiles, distanceUnit)} {distanceUnit} travel area.</h2>
@@ -257,17 +278,20 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             return (
               <article key={e.key} className={`fd-card ${picked?.key === e.key ? "sel" : ""}`}>
                 <div className="fd-card-top">
-                  <div className="fd-date">
-                    <span>{w.mon}</span>
-                    <b>{w.day}</b>
-                  </div>
-                  <div className="fd-tags">
-                    <span className={`fd-kind ${e.kind}`}>{e.source === "mlh" || e.alsoOn?.includes("mlh") ? "MLH event" : "Tech event"}</span>
-                    {[e.source, ...(e.alsoOn ?? [])].map((s) => (
-                      <span key={s} className="fd-srcbadge">
-                        {SOURCE[s as keyof typeof SOURCE] ?? s}
-                      </span>
-                    ))}
+                  <EventVisual event={e} />
+                  <div className="fd-card-top-meta">
+                    <div className="fd-date">
+                      <span>{w.mon}</span>
+                      <b>{w.day}</b>
+                    </div>
+                    <div className="fd-tags">
+                      <span className={`fd-kind ${e.kind}`}>{e.source === "mlh" || e.alsoOn?.includes("mlh") ? "MLH event" : "Tech event"}</span>
+                      {[e.source, ...(e.alsoOn ?? [])].map((s) => (
+                        <span key={s} className="fd-srcbadge">
+                          {SOURCE[s as keyof typeof SOURCE] ?? s}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
                 <div className="fd-body">
@@ -306,6 +330,10 @@ export function FindClient({ initialZip }: { initialZip: string }) {
 function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
   const [initials, setInitials] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
+  const [constraintText, setConstraintText] = useState("");
+  const [constraintAnswer, setConstraintAnswer] = useState("");
+  const [constraintReview, setConstraintReview] = useState<ConstraintReview | null>(null);
+  const [reviewedConstraintText, setReviewedConstraintText] = useState("");
   const [includeSelfDrive, setIncludeSelfDrive] = useState(true);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -326,12 +354,27 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
 
   const doPlan = () =>
     run("plan", async () => {
+      const rawConstraint = [constraintText.trim(), constraintAnswer.trim() ? `Additional detail: ${constraintAnswer.trim()}` : ""].filter(Boolean).join("\n");
+      let reviewed = constraintReview;
+      if (rawConstraint && (!reviewed || reviewedConstraintText !== rawConstraint)) {
+        reviewed = await api<ConstraintReview>("/api/constraints", {
+          text: rawConstraint,
+          origin: zip,
+          eventName: event.name,
+          eventCity: event.city,
+          eventStartsAt: event.startsAt,
+        });
+        setConstraintReview(reviewed);
+        setReviewedConstraintText(rawConstraint);
+      }
+      if (reviewed?.status === "needs_clarification") return;
       const p = await api<Plan>("/api/plan", {
         zip,
         initials: initials || undefined,
         travelerBudgetCents: Math.round(Number(budgetUsd) * 100),
         maxDistanceMiles,
         includeSelfDrive,
+        travelConstraints: reviewed ? { ...reviewed, raw: rawConstraint } : undefined,
         event: { key: event.key, name: event.name, startsAt: event.startsAt, venue: event.venue, city: event.city, lat: event.lat, lon: event.lon, url: event.url },
       });
       setPlan(p);
@@ -355,6 +398,7 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
   const stops = plan?.evidence.find((e) => e.kind === "stop");
   const weather = plan?.evidence.find((e) => e.kind === "weather");
   const fare = plan?.evidence.find((e) => e.kind === "fare");
+  const constraint = plan?.evidence.find((e) => e.kind === "traveler_constraint");
 
   return (
     <aside className="dk-panel fd-plan" aria-label={`Trip plan for ${event.name}`}>
@@ -383,21 +427,48 @@ function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxD
             Your maximum travel spend
             <span className="fd-money"><b>$</b><input className="dk-in" type="number" min="0" max="10000" step="1" value={budgetUsd} onChange={(e) => setBudgetUsd(e.target.value)} placeholder="e.g. 120" aria-label="Your maximum travel budget in dollars" /></span>
           </label>
+          <label className="fd-label fd-constraint-label">
+            Any arrival, departure, or destination requirements?
+            <textarea
+              className="dk-in"
+              rows={3}
+              maxLength={1500}
+              value={constraintText}
+              onChange={(e) => {
+                setConstraintText(e.target.value);
+                setConstraintReview(null);
+                setConstraintAnswer("");
+                setReviewedConstraintText("");
+              }}
+              placeholder="For example: I need to arrive at SFO by 10:00 PM PT on October 25, or be at Knox College by 10:00 AM CT."
+              aria-label="Travel timing and destination requirements"
+            />
+            <small>Write naturally. Claude will turn clear details into route constraints.</small>
+          </label>
+          {constraintReview?.status === "needs_clarification" && (
+            <div className="fd-constraint-question" role="status">
+              <b>One detail before S’mile plans</b>
+              <p>{constraintReview.followUpQuestion ?? "What exact place, date, time, and time zone should S’mile use?"}</p>
+              <input className="dk-in" value={constraintAnswer} onChange={(e) => setConstraintAnswer(e.target.value)} placeholder="Type your answer" aria-label="Answer Claude’s travel requirement question" />
+            </div>
+          )}
+          {constraintReview?.status === "ready" && <div className="fd-constraint-ready"><b>Claude understood</b><span>{constraintReview.summary}</span></div>}
           <label className="fd-drive">
             <span>Include self-drive</span>
             <input type="checkbox" checked={includeSelfDrive} onChange={(e) => setIncludeSelfDrive(e.target.checked)} />
             <span className="fd-drive-switch" aria-hidden="true"><i /></span>
           </label>
           <p className="dk-note">This is your personal limit. It filters routes but never raises the organizer’s reimbursement cap.</p>
-          <button className="dk-btn primary" disabled={!!busy || budgetUsd === "" || Number(budgetUsd) < 0} onClick={doPlan}>
-            {busy === "plan" ? "Comparing routes…" : "Compare ways to get there"}
+          <button className="dk-btn primary" disabled={!!busy || budgetUsd === "" || Number(budgetUsd) < 0 || (constraintReview?.status === "needs_clarification" && !constraintAnswer.trim())} onClick={doPlan}>
+            {busy === "plan" ? "Coordinating your trip…" : constraintReview?.status === "needs_clarification" ? "Answer and compare routes" : "Compare ways to get there"}
           </button>
-          <p className="dk-mut">Live fares and stops come from the public web; weather from the National Weather Service. It can take up to a minute.</p>
+          <p className="dk-mut">Live fares and stops come from the public web; weather comes from the National Weather Service. Most plans return in 3–10 seconds.</p>
         </>
       )}
 
       {plan?.routes && (
         <>
+          {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
           <h3>Ways to get there</h3>
           <table className="dk-table tight">
             <thead>

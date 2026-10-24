@@ -1,5 +1,6 @@
 import { appendAudit } from "./audit";
 import { explain } from "./agents/auditor";
+import type { TravelConstraints } from "./agents/constraints";
 import { gatherEvidence } from "./agents/evidence";
 import { chargeTrip } from "./agents/payments";
 import { decide, parseReceipt } from "./agents/reconciler";
@@ -204,7 +205,7 @@ export interface PickedEvent {
 
 export async function planTrip(
   state: State,
-  args: { zip: string; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean },
+  args: { zip: string; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; travelConstraints?: TravelConstraints & { raw: string } },
 ) {
   const travelerId = newId("T-live");
   state.travelers.push({ id: travelerId, initials: args.initials ?? "YOU", school: "Lens user", homeZip: args.zip });
@@ -227,13 +228,16 @@ export async function planTrip(
 
   const trip: Trip = {
     id: newId("TR-L"), travelerId, eventId: event.id, period: state.company.openPeriod, method: "virtual_card", mode: "train", distanceMiles: 0,
-    travelerMaxDistanceMiles: args.maxDistanceMiles, travelerBudgetCents: args.travelerBudgetCents,
+    travelerMaxDistanceMiles: args.maxDistanceMiles, travelerBudgetCents: args.travelerBudgetCents, travelConstraintSummary: args.travelConstraints?.summary,
     quoteCents: 0, requestedBy: "agent:policy", approvals: [], state: "planned",
   };
   state.trips.push(trip);
+  if (args.travelConstraints) {
+    state.evidence.push({ id: newId("EV-constraint"), tripId: trip.id, kind: "traveler_constraint", source: "Claude travel constraint coordinator", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: args.travelConstraints });
+  }
   if (scoutEvidenceId) state.evidence.find((e) => e.id === scoutEvidenceId)!.tripId = trip.id;
 
-  const g = await gatherEvidence(state, { tripId: trip.id, homeZip: args.zip, event: { ...(facts ?? { extractedBy: picked ? "json-ld" : "lens-hints", verified: Boolean(picked) }), name: event.name, venue: event.venue, city: event.city, startsAt: event.startsAt, lat: event.lat, lon: event.lon } });
+  const g = await gatherEvidence(state, { tripId: trip.id, homeZip: args.zip, event: { ...(facts ?? { extractedBy: picked ? "json-ld" : "lens-hints", verified: Boolean(picked) }), name: event.name, venue: event.venue, city: event.city, startsAt: event.startsAt, lat: event.lat, lon: event.lon }, travelConstraintSummary: args.travelConstraints?.summary });
   if (g.miles === undefined) {
     appendAudit(state, { actor: orch, action: "plan.blocked", subject: trip.id, reason: "Couldn't compute distance (ZIP or venue location unavailable)", refs: g.evidence.map((e) => e.id) });
     return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes: null, inbox: null };
@@ -241,7 +245,7 @@ export async function planTrip(
   trip.distanceMiles = g.miles;
   trip.organizerCapCents = capFor(g.miles);
   const fareEv = g.evidence.find((e) => e.kind === "fare");
-  const routes = compareRoutes(state, { miles: g.miles, fares: g.fares, fareEvidenceId: fareEv?.id, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, includeSelfDrive: args.includeSelfDrive });
+  const routes = compareRoutes(state, { miles: g.miles, fares: g.fares, fareEvidenceId: fareEv?.id, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, includeSelfDrive: args.includeSelfDrive, deadlineCritical: Boolean(args.travelConstraints?.arriveBy || args.travelConstraints?.departAfter) });
 
   authorize(state, { kind: "agent", id: "policy" }, "mandate.request", trip.id);
   if (!routes.pick) {
@@ -269,7 +273,7 @@ export async function planTrip(
     trip,
     "mandate_approval",
     "traveler",
-    `${trip.mode} for ${fmt(trip.quoteCents)} (cap ${fmt(capFor(g.miles))}, ${routes.pick.history.trips ? `${Math.round(routes.pick.pMiss * 100)}% chance of missing kickoff from ${routes.pick.history.trips} past trips` : "no trip history for this mode yet"}). Approve exactly ${fmt(trip.quoteCents)}? Nothing is charged until you do.`,
+    `${trip.mode} for ${fmt(trip.quoteCents)} (cap ${fmt(capFor(g.miles))}, ${routes.pick.history.trips ? `${Math.round(routes.pick.pMiss * 100)}% chance of missing kickoff from ${routes.pick.history.trips} past trips` : "no trip history for this mode yet"})${args.travelConstraints ? `. Travel requirement: ${args.travelConstraints.summary}` : ""}. Approve exactly ${fmt(trip.quoteCents)}? Nothing is charged until you do.`,
     [{ id: "approve", label: `Approve ${fmt(trip.quoteCents)}` }, { id: "reject", label: "Not now" }],
     { amountCents: trip.quoteCents },
   );

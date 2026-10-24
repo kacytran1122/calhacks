@@ -1,8 +1,6 @@
-import { z } from "zod";
 import { eventStore, type EventListing } from "../eventStore";
-import { addressToPoint, cityToPoint, haversineMiles, zipToPoint } from "../integrations/geo";
+import { cityToPoint, haversineMiles, zipToPoint } from "../integrations/geo";
 import { fetchDevpost, fetchLuma, fetchMlh, type SourceResult } from "../integrations/sources";
-import { llmAvailable, structured } from "../llm";
 
 export interface DiscoverOptions {
   zip: string;
@@ -69,34 +67,6 @@ const sameEvent = (a: EventListing, b: EventListing) => {
   return Math.abs(new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()) < 3 * 86_400_000;
 };
 
-const Labels = z.object({ labels: z.array(z.object({ key: z.string(), kind: z.enum(["hackathon", "tech", "other"]) })) });
-const labelCache = new Map<string, EventListing["kind"]>();
-
-async function classifyLuma(items: EventListing[]): Promise<"claude" | "keywords"> {
-  const todo = items.filter((e) => !labelCache.has(e.key));
-  if (llmAvailable() && todo.length) {
-    try {
-      const out = await structured(Labels, {
-        model: "extract",
-        system: "Label each event: 'hackathon' (people build projects over hours/days), 'tech' (talks, meetups, workshops, demo days about technology, AI, startups, engineering, design), or 'other' (social, fitness, food, kids, faith, general business). Use only the keys given.",
-        user: JSON.stringify(todo.slice(0, 150).map((e) => ({ key: e.key, name: e.name, host: e.themes?.[0] ?? "" }))),
-        effort: "low",
-      });
-      const keys = new Set(todo.map((e) => e.key));
-      for (const l of out.labels) if (keys.has(l.key)) labelCache.set(l.key, l.kind);
-    } catch {}
-  }
-  let usedClaude = false;
-  for (const e of items) {
-    const k = labelCache.get(e.key);
-    if (k) {
-      e.kind = k;
-      usedClaude = true;
-    }
-  }
-  return usedClaude ? "claude" : "keywords";
-}
-
 async function pool<T>(items: T[], limit: number, fn: (x: T) => Promise<void>) {
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -124,6 +94,12 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
   const days = opts.days ?? 90;
   const kinds = opts.kinds ?? ["hackathon", "tech"];
   const fetchedAt = now.toISOString();
+  const terms = (opts.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  const rawInWindow = (startsAt?: string, endsAt?: string) => {
+    if (!startsAt) return false;
+    return new Date(endsAt ?? startsAt).getTime() >= now.getTime() - 86_400_000 && new Date(startsAt).getTime() <= now.getTime() + days * 86_400_000;
+  };
+  const rawMatches = (...values: (string | undefined)[]) => !terms.length || terms.every((term) => values.join(" ").toLowerCase().includes(term));
 
   const home = await zipToPoint(opts.zip);
   if (home.status !== "ok") throw new Error(`couldn't find ZIP ${opts.zip} (${home.status}${home.error ? `: ${home.error}` : ""})`);
@@ -134,43 +110,43 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     return d > 25 && d <= radiusMiles;
   })
     .sort((a, b) => haversineMiles(origin, a) - haversineMiles(origin, b))
-    .slice(0, 2);
+    .slice(0, 1);
   const [lumaHome, devpost, mlh, ...lumaHubs] = await Promise.all([
     fetchLuma(origin.lat, origin.lon),
     fetchDevpost(),
     fetchMlh(now),
-    ...hubs.map((h) => fetchLuma(h.lat, h.lon, 2)),
+    ...hubs.map((h) => fetchLuma(h.lat, h.lon)),
   ]);
   const luma = mergeLumaSources([lumaHome, ...lumaHubs], hubs.map((hub) => hub.name));
   const sources = [luma, devpost, mlh].map((r: SourceResult<unknown>) => ({ source: r.source, status: r.status, via: r.via, count: r.items.length, ms: r.ms, note: r.note }));
 
   const all: EventListing[] = [];
   for (const e of luma.items) {
-    if (e.online) continue;
+    if (e.online || !rawInWindow(e.startsAt, e.endsAt) || !rawMatches(e.name, e.city, e.venue, e.calendar)) continue;
     all.push({
       key: e.id, source: "luma", name: e.name, startsAt: e.startsAt, endsAt: e.endsAt, city: e.city, venue: e.venue, lat: e.lat, lon: e.lon,
       locationPrecision: e.lat !== undefined ? "exact" : "unknown", url: e.url,
+      thumbnailUrl: e.thumbnailUrl,
       kind: HACK.test(e.name) ? "hackathon" : TECH.test(`${e.name} ${e.calendar ?? ""}`) ? "tech" : "other",
       themes: e.calendar ? [e.calendar] : [], fetchedAt, via: luma.via,
     });
   }
   const mlhListings: EventListing[] = mlh.items
-    .filter((e) => e.physical)
-    .map((e) => ({ key: e.id, source: "mlh", name: e.name, startsAt: e.startsAt, endsAt: e.endsAt, city: e.location, locationPrecision: "unknown", url: e.url, kind: "hackathon", fetchedAt, via: mlh.via }));
-  await pool(mlhListings, 6, async (l) => {
+    .filter((e) => e.physical && rawInWindow(e.startsAt, e.endsAt) && rawMatches(e.name, e.location))
+    .map((e) => ({ key: e.id, source: "mlh", name: e.name, startsAt: e.startsAt, endsAt: e.endsAt, city: e.location, locationPrecision: "unknown", url: e.url, thumbnailUrl: e.thumbnailUrl, kind: "hackathon", fetchedAt, via: mlh.via }));
+  await pool(mlhListings, 24, async (l) => {
     const g = await cityToPoint(l.city ?? "");
     if (g.status === "ok") Object.assign(l, { lat: g.lat, lon: g.lon, locationPrecision: "city" as const });
   });
   all.push(...mlhListings);
 
-  const devpostListings: EventListing[] = devpost.items.map((h) => ({ key: h.id, source: "devpost", name: h.name, startsAt: h.startsAt, venue: h.location, locationPrecision: "unknown", url: h.url, kind: "hackathon", themes: h.themes, fetchedAt, via: devpost.via }));
-  await pool(devpostListings, 4, async (l) => {
+  const devpostListings: EventListing[] = devpost.items
+    .filter((h) => rawInWindow(h.startsAt) && rawMatches(h.name, h.location, ...(h.themes ?? [])))
+    .map((h) => ({ key: h.id, source: "devpost", name: h.name, startsAt: h.startsAt, venue: h.location, locationPrecision: "unknown", url: h.url, thumbnailUrl: h.thumbnailUrl, kind: "hackathon", themes: h.themes, fetchedAt, via: devpost.via }));
+  for (const l of devpostListings) {
     const twin = all.find((o) => o.lat !== undefined && sameEvent(o, l));
-    if (twin) return void Object.assign(l, { lat: twin.lat, lon: twin.lon, city: twin.city, locationPrecision: twin.locationPrecision });
-    const v = l.venue ?? "";
-    const g = /,\s*[A-Za-z .]+$/.test(v) ? await cityToPoint(v) : /\d/.test(v) ? await addressToPoint(v) : null;
-    if (g?.status === "ok") Object.assign(l, { lat: g.lat, lon: g.lon, city: g.label, locationPrecision: /\d/.test(v) ? "exact" : "city" });
-  });
+    if (twin) Object.assign(l, { lat: twin.lat, lon: twin.lon, city: twin.city, locationPrecision: twin.locationPrecision });
+  }
   all.push(...devpostListings);
 
   const rank = { exact: 0, city: 1, unknown: 2 } as const;
@@ -180,16 +156,16 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     if (m) {
       if (l.source !== m.source) m.alsoOn = [...new Set([...(m.alsoOn ?? []), l.source])];
       if (l.source === "mlh") m.url = l.url;
+      if (l.thumbnailUrl && (!m.thumbnailUrl || l.source === "mlh")) m.thumbnailUrl = l.thumbnailUrl;
       if (l.source === "devpost" && l.venue && !m.venue) m.venue = l.venue;
       if (l.kind === "hackathon") m.kind = "hackathon";
     } else merged.push({ ...l });
   }
 
-  const classifiedBy = await classifyLuma(merged.filter((e) => e.source === "luma"));
+  const classifiedBy = "keywords" as const;
 
   for (const e of merged) if (e.lat !== undefined && e.lon !== undefined) e.distanceMiles = Math.round(haversineMiles(origin, { lat: e.lat, lon: e.lon }));
 
-  const terms = (opts.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   const matches = (e: EventListing) => terms.every((t) => `${e.name} ${e.city ?? ""} ${e.venue ?? ""} ${(e.themes ?? []).join(" ")}`.toLowerCase().includes(t));
   const inWindow = (e: EventListing) => {
     if (!e.startsAt) return false;

@@ -78,8 +78,8 @@ async function request(
   return { status: lastStatus, attempts, ms: Date.now() - t0, errorCode: lastCode, error: lastErr };
 }
 
-export function unlock(url: string, format: "html" | "markdown" = "html"): Promise<BdResult> {
-  return request(url, format === "markdown" ? { data_format: "markdown" } : {});
+export function unlock(url: string, format: "html" | "markdown" = "html", options?: { attempts?: number; timeoutMs?: number }): Promise<BdResult> {
+  return request(url, format === "markdown" ? { data_format: "markdown" } : {}, options);
 }
 
 export interface SerpOrganic {
@@ -96,7 +96,7 @@ export async function serp(query: string, attempts = 3): Promise<BdResult<SerpOr
   let used = 0;
   const t0 = Date.now();
   for (let i = 0; i < attempts; i++) {
-    last = await request(url, {}, { attempts: 1, minBytes: 2, zoneType: "serp" });
+    last = await request(url, {}, { attempts: 1, timeoutMs: 8_000, minBytes: 2, zoneType: "serp" });
     used++;
     if (last.status === "ok" && last.body) {
       try {

@@ -11,6 +11,8 @@ export interface GeoResult {
   error?: string;
 }
 
+const zipCache = new Map<string, GeoResult>();
+
 async function getJson(url: string, timeoutMs = 12_000): Promise<{ ok: boolean; status: number; json?: unknown; error?: string }> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -29,11 +31,15 @@ export async function zipToPoint(zip: string): Promise<GeoResult> {
   const url = `https://api.zippopotam.us/us/${encodeURIComponent(zip)}`;
   const source = "Zippopotam.us ZIP lookup";
   if (!/^\d{5}$/.test(zip)) return { status: "error", source, url, error: "ZIP must be 5 digits" };
-  const r = await getJson(url);
+  const cached = zipCache.get(zip);
+  if (cached) return cached;
+  const r = await getJson(url, 4_000);
   if (!r.ok) return { status: r.status === 404 ? "empty" : r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? `HTTP ${r.status}` };
   const place = (r.json as { places?: { latitude: string; longitude: string; "place name": string; "state abbreviation": string }[] }).places?.[0];
   if (!place) return { status: "empty", source, url };
-  return { status: "ok", lat: Number(place.latitude), lon: Number(place.longitude), label: `${place["place name"]}, ${place["state abbreviation"]}`, postalCode: zip, source, url };
+  const result = { status: "ok" as const, lat: Number(place.latitude), lon: Number(place.longitude), label: `${place["place name"]}, ${place["state abbreviation"]}`, postalCode: zip, source, url };
+  zipCache.set(zip, result);
+  return result;
 }
 
 export async function addressToPoint(address: string): Promise<GeoResult> {
@@ -104,7 +110,7 @@ const cityCache = new Map<string, GeoResult>();
 async function cityInState(city: string, state: string): Promise<GeoResult> {
   const url = `https://api.zippopotam.us/us/${state.toLowerCase()}/${encodeURIComponent(city.toLowerCase())}`;
   const source = "Zippopotam.us city lookup";
-  const r = await getJson(url);
+  const r = await getJson(url, 3_000);
   type P = { "place name": string; latitude: string; longitude: string; "post code": string };
   const places = r.ok ? ((r.json as { places?: P[] }).places ?? []) : [];
   const exact = places.find((p) => p["place name"].toLowerCase() === city.toLowerCase()) ?? places[0];
@@ -135,7 +141,7 @@ export async function cityToPoint(location: string): Promise<GeoResult> {
   const source = "OpenStreetMap U.S. place lookup";
   if (key.length < 3) return { status: "empty", source, url: "", error: "location is too short" };
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=us&addressdetails=1&limit=5&q=${encodeURIComponent(location)}`;
-  const r = await getJson(url, 15_000);
+  const r = await getJson(url, 5_000);
   type Place = { name?: string; lat: string; lon: string; display_name: string; address?: { city?: string; town?: string; village?: string; municipality?: string; state?: string; country_code?: string } };
   const places = r.ok && Array.isArray(r.json) ? r.json as Place[] : [];
   const place = places.find((candidate) => candidate.address?.country_code?.toLowerCase() === "us") ?? places[0];

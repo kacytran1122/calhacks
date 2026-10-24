@@ -14,6 +14,7 @@ export interface EventListing {
   lon?: number;
   locationPrecision: "exact" | "city" | "unknown";
   url: string;
+  thumbnailUrl?: string;
   kind: "hackathon" | "tech" | "other";
   distanceMiles?: number;
   themes?: string[];

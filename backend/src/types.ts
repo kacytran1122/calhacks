@@ -27,6 +27,7 @@ export type FetchStatus = "ok" | "blocked" | "empty" | "timeout" | "error";
 
 export type EvidenceKind =
   | "event_page"
+  | "traveler_constraint"
   | "geocode"
   | "weather"
   | "fare"
@@ -101,6 +102,7 @@ export interface Trip {
   distanceMiles: number;
   travelerMaxDistanceMiles?: number;
   travelerBudgetCents?: Cents;
+  travelConstraintSummary?: string;
   organizerCapCents?: Cents;
   reimbursementEligibleCents?: Cents;
   quoteCents: Cents;

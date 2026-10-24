@@ -10,7 +10,7 @@ export interface SourceResult<T> {
   note?: string;
 }
 
-async function direct(url: string, timeoutMs = 20_000): Promise<{ status: FetchStatus; body?: string; note?: string }> {
+async function direct(url: string, timeoutMs = 5_000): Promise<{ status: FetchStatus; body?: string; note?: string }> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -28,9 +28,8 @@ async function direct(url: string, timeoutMs = 20_000): Promise<{ status: FetchS
 
 export async function getPublic(url: string): Promise<{ status: FetchStatus; body?: string; via: "bright-data" | "direct"; note?: string }> {
   if (brightDataKey()) {
-    const r = await unlock(url);
+    const [r, d] = await Promise.all([unlock(url, "html", { attempts: 1, timeoutMs: 5_000 }), direct(url)]);
     if (r.status === "ok" && r.body) return { status: "ok", body: r.body, via: "bright-data" };
-    const d = await direct(url);
     return { ...d, via: "direct", note: `Bright Data: ${r.status}${r.errorCode ? ` (${r.errorCode})` : ""}; direct fetch: ${d.status}` };
   }
   return { ...(await direct(url)), via: "direct" };
@@ -46,12 +45,13 @@ export interface LumaEvent {
   venue?: string;
   lat?: number;
   lon?: number;
+  thumbnailUrl?: string;
   calendar?: string;
   guests?: number;
   online: boolean;
 }
 
-export async function fetchLuma(lat: number, lon: number, pages = 3): Promise<SourceResult<LumaEvent>> {
+export async function fetchLuma(lat: number, lon: number, pages = 1): Promise<SourceResult<LumaEvent>> {
   const t0 = Date.now();
   const items: LumaEvent[] = [];
   let cursor: string | undefined;
@@ -69,7 +69,7 @@ export async function fetchLuma(lat: number, lon: number, pages = 3): Promise<So
       }
       break;
     }
-    type Entry = { event: { api_id: string; name: string; start_at: string; end_at?: string; url: string; location_type?: string; geo_address_info?: { city_state?: string; address?: string; full_address?: string }; coordinate?: { latitude: number; longitude: number } }; calendar?: { name?: string }; guest_count?: number };
+    type Entry = { event: { api_id: string; name: string; start_at: string; end_at?: string; url: string; cover_url?: string; social_image_url?: string; location_type?: string; geo_address_info?: { city_state?: string; address?: string; full_address?: string }; coordinate?: { latitude: number; longitude: number } }; calendar?: { name?: string }; guest_count?: number };
     let json: { entries?: Entry[]; has_more?: boolean; next_cursor?: string };
     try {
       json = JSON.parse(r.body);
@@ -90,6 +90,7 @@ export async function fetchLuma(lat: number, lon: number, pages = 3): Promise<So
         venue: ev.geo_address_info?.address,
         lat: ev.coordinate?.latitude,
         lon: ev.coordinate?.longitude,
+        thumbnailUrl: ev.cover_url ?? ev.social_image_url,
         calendar: e.calendar?.name,
         guests: e.guest_count,
         online: ev.location_type !== "offline",
@@ -109,6 +110,7 @@ export interface DevpostHackathon {
   dates: string;
   startsAt?: string;
   themes: string[];
+  thumbnailUrl?: string;
 }
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -124,7 +126,7 @@ export function parseDevpostStart(dates: string): string | undefined {
   return new Date(Date.UTC(year, mon, Number(m[2]), 12)).toISOString();
 }
 
-export async function fetchDevpost(pages = 3): Promise<SourceResult<DevpostHackathon>> {
+export async function fetchDevpost(pages = 1): Promise<SourceResult<DevpostHackathon>> {
   const t0 = Date.now();
   const items: DevpostHackathon[] = [];
   let via: "bright-data" | "direct" = "direct";
@@ -140,7 +142,7 @@ export async function fetchDevpost(pages = 3): Promise<SourceResult<DevpostHacka
       }
       break;
     }
-    type H = { id: number; title: string; url: string; displayed_location?: { location?: string }; submission_period_dates?: string; themes?: { name: string }[] };
+    type H = { id: number; title: string; url: string; thumbnail_url?: string; displayed_location?: { location?: string }; submission_period_dates?: string; themes?: { name: string }[] };
     let json: { hackathons?: H[]; meta?: { total_count?: number; per_page?: number } };
     try {
       json = JSON.parse(r.body);
@@ -151,7 +153,7 @@ export async function fetchDevpost(pages = 3): Promise<SourceResult<DevpostHacka
     }
     for (const h of json.hackathons ?? []) {
       const dates = h.submission_period_dates ?? "";
-      items.push({ id: `devpost:${h.id}`, name: h.title, url: h.url, location: h.displayed_location?.location ?? "", dates, startsAt: parseDevpostStart(dates), themes: (h.themes ?? []).map((t) => t.name) });
+      items.push({ id: `devpost:${h.id}`, name: h.title, url: h.url, thumbnailUrl: h.thumbnail_url ? `https:${h.thumbnail_url.replace(/^https?:/, "")}` : undefined, location: h.displayed_location?.location ?? "", dates, startsAt: parseDevpostStart(dates), themes: (h.themes ?? []).map((t) => t.name) });
     }
     const total = json.meta?.total_count ?? 0;
     if (p * (json.meta?.per_page ?? 40) >= total) break;
@@ -167,6 +169,7 @@ export interface MlhEvent {
   url: string;
   location: string;
   physical: boolean;
+  thumbnailUrl?: string;
 }
 
 export function resolveMlhEventUrl(event: { slug: string; url?: string; websiteUrl?: string }): string {
@@ -194,7 +197,7 @@ export async function fetchMlh(now = new Date()): Promise<SourceResult<MlhEvent>
   const attr = tag ? null : r.body.match(/data-page="(\{[^"]+)"/);
   const raw = tag ? tag[1]! : attr ? decodeAttr(attr[1]!) : null;
   if (!raw) return { source: "mlh", status: "empty", via: r.via, items: [], ms: Date.now() - t0, note: "MLH page layout changed: no embedded event data" };
-  type E = { id: string; slug: string; name: string; startsAt: string; endsAt?: string; url?: string; websiteUrl?: string; location?: string; formatType?: string };
+  type E = { id: string; slug: string; name: string; startsAt: string; endsAt?: string; url?: string; websiteUrl?: string; location?: string; formatType?: string; backgroundUrl?: string; logoUrl?: string };
   let props: { upcomingEvents?: E[] };
   try {
     props = (JSON.parse(raw) as { props?: { upcomingEvents?: E[] } }).props ?? {};
@@ -209,6 +212,7 @@ export async function fetchMlh(now = new Date()): Promise<SourceResult<MlhEvent>
     url: resolveMlhEventUrl(e),
     location: e.location ?? "",
     physical: e.formatType !== "digital",
+    thumbnailUrl: e.logoUrl ?? e.backgroundUrl,
   }));
   return { source: "mlh", status: items.length ? "ok" : "empty", via: r.via, items, ms: Date.now() - t0 };
 }

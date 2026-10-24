@@ -22,7 +22,7 @@ export function missRate(state: State, mode: Trip["mode"]) {
 
 export function compareRoutes(
   state: State,
-  args: { miles: number; fares: { mode: string; amountUsd: number }[]; fareEvidenceId?: string; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean },
+  args: { miles: number; fares: { mode: string; amountUsd: number }[]; fareEvidenceId?: string; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; deadlineCritical?: boolean },
 ): { options: RouteOption[]; pick?: RouteOption; cap: Cents; travelerBudgetCents?: Cents; maxDistanceMiles?: number; blockReason?: RouteBlockReason } {
   const cap = capFor(args.miles);
   const withinBudget = (costCents: Cents) => args.travelerBudgetCents === undefined || costCents <= args.travelerBudgetCents;
@@ -44,7 +44,9 @@ export function compareRoutes(
 
   const overDistance = args.maxDistanceMiles !== undefined && args.miles > args.maxDistanceMiles;
   const ok = overDistance ? [] : options.filter((o) => o.withinCap && o.withinBudget);
-  const pick = ok.filter((o) => o.pMiss <= 0.25).sort((a, b) => a.costCents - b.costCents)[0] ?? ok.sort((a, b) => a.pMiss - b.pMiss)[0];
+  const pick = args.deadlineCritical
+    ? ok.sort((a, b) => a.pMiss - b.pMiss || a.costCents - b.costCents)[0]
+    : ok.filter((o) => o.pMiss <= 0.25).sort((a, b) => a.costCents - b.costCents)[0] ?? ok.sort((a, b) => a.pMiss - b.pMiss)[0];
   const blockReason = pick
     ? undefined
     : overDistance

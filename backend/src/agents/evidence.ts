@@ -41,7 +41,7 @@ function faresByRules(results: SerpOrganic[]) {
   return out;
 }
 
-export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; event: EventFacts & { city?: string } }) {
+export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; event: EventFacts & { city?: string }; travelConstraintSummary?: string }) {
   const { tripId, homeZip, event } = args;
   const out: Evidence[] = [];
 
@@ -61,8 +61,8 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const venueQ = [event.venue, event.address ?? event.city].filter(Boolean).join(", ");
   const fromCity = home.label ?? homeZip;
   const [stops, fareSerp] = await Promise.all([
-    venueQ ? serp(`breakfast coffee near ${venueQ}`) : Promise.resolve(null),
-    serp(`${fromCity} to ${event.address ?? event.city ?? event.venue} train bus one way fare`),
+    venueQ ? serp(`breakfast coffee near ${venueQ}`, 1) : Promise.resolve(null),
+    serp(`${fromCity} to ${event.address ?? event.city ?? event.venue} train bus one way fare${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
   ]);
 
   if (stops) {

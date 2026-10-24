@@ -88,3 +88,68 @@ test("explains when a named event is beyond the selected distance", async () => 
   expect(await screen.findByText("Cal Hacks 13.0 is outside your 200 mi travel area.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Expand to 1,850 mi" })).toBeVisible();
 });
+
+test("shows each event thumbnail and asks for travel requirements below the budget", async () => {
+  const event = {
+    key: "calhacks",
+    source: "mlh",
+    name: "Cal Hacks 13.0",
+    startsAt: "2026-10-25T17:00:00Z",
+    city: "San Francisco, CA",
+    locationPrecision: "city",
+    url: "https://calhacks.io/",
+    thumbnailUrl: "https://example.com/calhacks.png",
+    kind: "hackathon",
+    distanceMiles: 1850,
+    fetchedAt: "2026-10-24T00:00:00Z",
+    via: "direct",
+  };
+  vi.stubGlobal("fetch", vi.fn(() => response({ ...result, events: [event] })));
+  const user = userEvent.setup();
+  render(<FindClient initialZip="61401" />);
+
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  const card = (await screen.findByText("Cal Hacks 13.0")).closest("article")!;
+  expect(card.querySelector('img[src="https://example.com/calhacks.png"]')).not.toBeNull();
+  await user.click(screen.getByRole("button", { name: "Plan my trip" }));
+
+  const budget = screen.getByLabelText("Your maximum travel budget in dollars");
+  const requirements = screen.getByLabelText("Travel timing and destination requirements");
+  expect(budget.compareDocumentPosition(requirements) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByText(/Claude will turn clear details into route constraints/)).toBeVisible();
+});
+
+test("Claude constraint step asks one follow-up when a requirement is unclear", async () => {
+  const event = {
+    key: "knox",
+    source: "luma",
+    name: "Knox Build Night",
+    startsAt: "2026-10-25T17:00:00Z",
+    city: "Galesburg, IL",
+    locationPrecision: "exact",
+    url: "https://lu.ma/knox",
+    kind: "tech",
+    distanceMiles: 2,
+    fetchedAt: "2026-10-24T00:00:00Z",
+    via: "direct",
+  };
+  const fetcher = vi.fn((input: RequestInfo | URL) => {
+    if (String(input) === "/api/constraints") {
+      return response({ status: "needs_clarification", summary: "Need to be at school at 10", destination: null, arriveBy: null, departAfter: null, timezone: null, followUpQuestion: "Which school, date, AM or PM, and time zone should S’mile use?", parsedBy: "claude" });
+    }
+    return response({ ...result, events: [event] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<FindClient initialZip="61401" />);
+
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "120");
+  await user.type(screen.getByLabelText("Travel timing and destination requirements"), "Need to be at school at 10");
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+
+  expect(await screen.findByText("One detail before S’mile plans")).toBeVisible();
+  expect(screen.getByText(/Which school, date, AM or PM/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Answer and compare routes" })).toBeDisabled();
+});
