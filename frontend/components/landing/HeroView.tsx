@@ -37,8 +37,8 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
       return;
     }
 
-    if (!city.includes(",")) {
-      setMessage({ kind: "error", text: "Add the state, like Galesburg, IL." });
+    if (city.trim().length < 3) {
+      setMessage({ kind: "error", text: "Enter a U.S. city, state, or city and state." });
       return;
     }
 
@@ -101,14 +101,14 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
               <span>Start from</span>
               <div className="origin-modes" role="group" aria-label="Choose how to enter your starting location">
                 <button type="button" aria-pressed={mode === "zip"} onClick={() => selectMode("zip")}>ZIP code</button>
-                <button type="button" aria-pressed={mode === "city"} onClick={() => selectMode("city")}>City</button>
+                <button type="button" aria-pressed={mode === "city"} onClick={() => selectMode("city")}>City or state</button>
               </div>
             </div>
             <form className="zip" onSubmit={onSubmit}>
               {mode === "zip" ? (
                 <input key="zip" inputMode="numeric" autoComplete="postal-code" maxLength={5} placeholder="Enter ZIP code" aria-label="Home ZIP code" value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} autoFocus />
               ) : (
-                <input key="city" inputMode="text" autoComplete="address-level2" maxLength={100} placeholder="City, state" aria-label="Home city and state" value={city} onChange={(e) => setCity(e.target.value)} autoFocus />
+                <input key="city" inputMode="text" autoComplete="address-level2" maxLength={100} placeholder="City, state, or city + state" aria-label="Home city or state" value={city} onChange={(e) => setCity(e.target.value)} autoFocus />
               )}
               <button type="submit" disabled={busy}>
                 {busy ? "Locating…" : "Find trips"}{" "}
@@ -118,7 +118,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
               </button>
             </form>
             <p className={`note origin-note${message?.kind === "error" ? " error" : ""}`} aria-live="polite">
-              {message?.text ?? (mode === "zip" ? "Use the ZIP where your trip begins." : "U.S. cities work best with a state abbreviation.")}
+              {message?.text ?? (mode === "zip" ? "Use the ZIP where your trip begins." : "Enter a city, a state, or both for a more precise match.")}
             </p>
           </div>
         </div>

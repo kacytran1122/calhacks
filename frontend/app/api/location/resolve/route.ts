@@ -15,13 +15,13 @@ export async function GET(req: NextRequest) {
   }
   const city = req.nextUrl.searchParams.get("city")?.trim() ?? "";
   if (city.length < 3 || city.length > 100) {
-    return NextResponse.json({ error: "Enter a city and state, like Galesburg, IL." }, { status: 400 });
+    return NextResponse.json({ error: "Enter a U.S. city, state, or city and state." }, { status: 400 });
   }
 
   const location = await cityToPoint(city);
   if (location.status !== "ok" || !location.postalCode) {
     return NextResponse.json(
-      { error: location.error === "not a U.S. city, state" ? "Add the state, like Galesburg, IL." : "We couldn’t find that U.S. city. Check the spelling and state." },
+      { error: "We couldn’t find that U.S. location. Try a ZIP code, city, state, or city and state." },
       { status: 404 },
     );
   }

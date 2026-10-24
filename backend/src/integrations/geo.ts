@@ -86,28 +86,64 @@ const STATES: Record<string, string> = {
   vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV", wisconsin: "WI", wyoming: "WY",
 };
 
+const STATE_ANCHORS: Record<string, [string, string]> = {
+  AL: ["Montgomery", "36104"], AK: ["Juneau", "99801"], AZ: ["Phoenix", "85003"], AR: ["Little Rock", "72201"], CA: ["Sacramento", "95814"],
+  CO: ["Denver", "80202"], CT: ["Hartford", "06103"], DE: ["Dover", "19901"], DC: ["Washington", "20001"], FL: ["Tallahassee", "32301"],
+  GA: ["Atlanta", "30303"], HI: ["Honolulu", "96813"], ID: ["Boise", "83702"], IL: ["Springfield", "62701"], IN: ["Indianapolis", "46204"],
+  IA: ["Des Moines", "50309"], KS: ["Topeka", "66603"], KY: ["Frankfort", "40601"], LA: ["Baton Rouge", "70802"], ME: ["Augusta", "04330"],
+  MD: ["Annapolis", "21401"], MA: ["Boston", "02108"], MI: ["Lansing", "48933"], MN: ["Saint Paul", "55101"], MS: ["Jackson", "39201"],
+  MO: ["Jefferson City", "65101"], MT: ["Helena", "59601"], NE: ["Lincoln", "68508"], NV: ["Carson City", "89701"], NH: ["Concord", "03301"],
+  NJ: ["Trenton", "08608"], NM: ["Santa Fe", "87501"], NY: ["Albany", "12207"], NC: ["Raleigh", "27601"], ND: ["Bismarck", "58501"],
+  OH: ["Columbus", "43215"], OK: ["Oklahoma City", "73102"], OR: ["Salem", "97301"], PA: ["Harrisburg", "17101"], RI: ["Providence", "02903"],
+  SC: ["Columbia", "29201"], SD: ["Pierre", "57501"], TN: ["Nashville", "37219"], TX: ["Austin", "78701"], UT: ["Salt Lake City", "84111"],
+  VT: ["Montpelier", "05602"], VA: ["Richmond", "23219"], WA: ["Olympia", "98501"], WV: ["Charleston", "25301"], WI: ["Madison", "53703"], WY: ["Cheyenne", "82001"],
+};
+
 const cityCache = new Map<string, GeoResult>();
+
+async function cityInState(city: string, state: string): Promise<GeoResult> {
+  const url = `https://api.zippopotam.us/us/${state.toLowerCase()}/${encodeURIComponent(city.toLowerCase())}`;
+  const source = "Zippopotam.us city lookup";
+  const r = await getJson(url);
+  type P = { "place name": string; latitude: string; longitude: string; "post code": string };
+  const places = r.ok ? ((r.json as { places?: P[] }).places ?? []) : [];
+  const exact = places.find((p) => p["place name"].toLowerCase() === city.toLowerCase()) ?? places[0];
+  return exact
+    ? { status: "ok", lat: Number(exact.latitude), lon: Number(exact.longitude), label: `${exact["place name"]}, ${state}`, postalCode: exact["post code"], source, url }
+    : { status: r.ok ? "empty" : "error", source, url, error: r.error ?? (r.ok ? "no such city" : `HTTP ${r.status}`) };
+}
 
 export async function cityToPoint(location: string): Promise<GeoResult> {
   const key = location.trim().toLowerCase();
   const cached = cityCache.get(key);
   if (cached) return cached;
+  const stateOnly = STATES[key] ?? (key.length === 2 && STATE_ANCHORS[key.toUpperCase()] ? key.toUpperCase() : undefined);
+  if (stateOnly) {
+    const [city, zip] = STATE_ANCHORS[stateOnly]!;
+    const point = await zipToPoint(zip);
+    const out = point.status === "ok" ? { ...point, label: `${city}, ${stateOnly}`, source: "U.S. state center lookup" } : point;
+    cityCache.set(key, out);
+    return out;
+  }
   const [cityRaw, stateRaw] = location.split(",").map((x) => x.trim());
   const st = stateRaw ? (stateRaw.length === 2 ? stateRaw.toUpperCase() : STATES[stateRaw.toLowerCase()]) : undefined;
-  const source = "Zippopotam.us city lookup";
-  if (!cityRaw || !st) {
-    const r: GeoResult = { status: "empty", source, url: "", error: "not a U.S. city, state" };
-    cityCache.set(key, r);
-    return r;
+  if (cityRaw && st) {
+    const out = await cityInState(cityRaw, st);
+    cityCache.set(key, out);
+    return out;
   }
-  const url = `https://api.zippopotam.us/us/${st.toLowerCase()}/${encodeURIComponent(cityRaw.toLowerCase())}`;
-  const r = await getJson(url);
-  type P = { "place name": string; latitude: string; longitude: string; "post code": string };
-  const places = r.ok ? ((r.json as { places?: P[] }).places ?? []) : [];
-  const exact = places.find((p) => p["place name"].toLowerCase() === cityRaw.toLowerCase()) ?? places[0];
-  const out: GeoResult = exact
-    ? { status: "ok", lat: Number(exact.latitude), lon: Number(exact.longitude), label: `${exact["place name"]}, ${st}`, postalCode: exact["post code"], source, url }
-    : { status: r.ok ? "empty" : "error", source, url, error: r.error ?? (r.ok ? "no such city" : `HTTP ${r.status}`) };
+  const source = "OpenStreetMap U.S. place lookup";
+  if (key.length < 3) return { status: "empty", source, url: "", error: "location is too short" };
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=us&addressdetails=1&limit=5&q=${encodeURIComponent(location)}`;
+  const r = await getJson(url, 15_000);
+  type Place = { name?: string; lat: string; lon: string; display_name: string; address?: { city?: string; town?: string; village?: string; municipality?: string; state?: string; country_code?: string } };
+  const places = r.ok && Array.isArray(r.json) ? r.json as Place[] : [];
+  const place = places.find((candidate) => candidate.address?.country_code?.toLowerCase() === "us") ?? places[0];
+  const placeState = place?.address?.state ? STATES[place.address.state.toLowerCase()] : undefined;
+  const placeCity = place?.address?.city ?? place?.address?.town ?? place?.address?.village ?? place?.address?.municipality ?? place?.name;
+  const out = placeCity && placeState
+    ? await cityInState(placeCity, placeState)
+    : { status: r.ok ? "empty" : "error", source, url, error: r.error ?? (r.ok ? "no such U.S. place" : `HTTP ${r.status}`) } as GeoResult;
   cityCache.set(key, out);
   return out;
 }

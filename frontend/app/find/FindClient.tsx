@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { SmileWord } from "@/components/landing/Smile";
 
 type Listing = {
@@ -46,6 +46,11 @@ type Plan = {
 
 const fmt = (c: number) => (c < 0 ? "-$" : "$") + (Math.abs(c) / 100).toFixed(2);
 const SOURCE = { luma: "Luma", devpost: "Devpost", mlh: "MLH" } as const;
+const KM_PER_MILE = 1.609344;
+
+function displayDistance(miles: number, unit: "mi" | "km") {
+  return Math.round(unit === "mi" ? miles : miles * KM_PER_MILE);
+}
 
 async function api<T>(url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -69,6 +74,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
   const [locationInput, setLocationInput] = useState(initialZip);
   const [zip, setZip] = useState(initialZip);
   const [radius, setRadius] = useState(200);
+  const [distanceUnit, setDistanceUnit] = useState<"mi" | "km">("mi");
   const [q, setQ] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [groups, setGroups] = useState<Set<"mlh" | "tech">>(new Set(["mlh", "tech"]));
@@ -97,13 +103,9 @@ export function FindClient({ initialZip }: { initialZip: string }) {
     }
   }, [radius, q, groups]);
 
-  useEffect(() => {
-    if (initialZip) search(initialZip);
-  }, []);
-
   const useTypedLocation = async () => {
     const input = locationInput.trim();
-    if (!input) return setErr("Enter a U.S. city and state or a 5-digit ZIP.");
+    if (!input) return setErr("Enter a U.S. ZIP code, city, state, or city and state.");
     setLoading(true);
     setErr(null);
     try {
@@ -122,8 +124,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
 
   const submitOrigin = () => {
     const input = locationInput.trim();
-    if (!input) return setErr("Enter a U.S. city and state or a 5-digit ZIP.");
-    if (!/^\d{5}$/.test(input) && !input.includes(",")) return setErr("For a city, add the state too, like Galesburg, IL.");
+    if (!input) return setErr("Enter a U.S. ZIP code, city, state, or city and state.");
     useTypedLocation();
   };
 
@@ -165,14 +166,31 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             onChange={(e) => {
               setLocationInput(e.target.value);
             }}
-            autoComplete="postal-code"
-            placeholder="City, state or ZIP code"
-            aria-label="Starting city or ZIP code"
+            autoComplete="address-level2"
+            placeholder="ZIP, city, state, or city + state"
+            aria-label="Starting ZIP, city, or state"
           />
         </label>
         <label className="fd-limit">
           <span>Max distance</span>
-          <span className="fd-number"><input className="dk-in" type="number" min={1} max={3000} value={radius} onChange={(e) => setRadius(Math.min(3000, Math.max(1, Number(e.target.value) || 1)))} aria-label="Maximum route distance in miles" /><b>mi</b></span>
+          <span className="fd-number">
+            <input
+              className="dk-in"
+              type="number"
+              min={1}
+              max={distanceUnit === "mi" ? 3000 : 4828}
+              value={displayDistance(radius, distanceUnit)}
+              onChange={(e) => {
+                const value = Math.max(1, Number(e.target.value) || 1);
+                setRadius(Math.min(3000, distanceUnit === "mi" ? value : value / KM_PER_MILE));
+              }}
+              aria-label={`Maximum route distance in ${distanceUnit === "mi" ? "miles" : "kilometers"}`}
+            />
+            <span className="fd-unit" role="group" aria-label="Distance unit">
+              <button type="button" aria-pressed={distanceUnit === "mi"} onClick={() => setDistanceUnit("mi")}>mi</button>
+              <button type="button" aria-pressed={distanceUnit === "km"} onClick={() => setDistanceUnit("km")}>km</button>
+            </span>
+          </span>
         </label>
         <div className="fd-type-picker">
           <div className="fd-type-heading"><b>What do you want to find?</b><span>Choose one or both</span></div>
@@ -190,7 +208,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           </div>
         </div>
         <button className="dk-btn primary" disabled={loading}>
-          {loading ? "Searching live sources…" : res ? "Update nearby events" : "Find nearby events"}
+          {loading ? "Updating nearby events…" : "Update nearby events"}
         </button>
       </form>
 
@@ -199,14 +217,14 @@ export function FindClient({ initialZip }: { initialZip: string }) {
       {res && (
         <section className="fd-results-head">
           <div className="fd-meta">
-            <span><b>{res.events.length}</b> events within {res.radiusMiles} mi of {res.origin.label ?? res.origin.zip}</span>
+            <span><b>{res.events.length}</b> events within {displayDistance(res.radiusMiles, distanceUnit)} {distanceUnit} of {res.origin.label ?? res.origin.zip}</span>
           </div>
           <form className="fd-event-search" onSubmit={(e) => { e.preventDefault(); search(zip, radius, q); }}>
             <label htmlFor="event-search"><b>Looking for a specific event?</b><span>We’ll tell you clearly if it is outside your travel area.</span></label>
             <div>
               <input id="event-search" className="dk-in" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Try Cal Hacks, AI, Stanford…" aria-label="Search events by name or topic" />
               {q && <button type="button" className="fd-clear" aria-label="Clear event search" onClick={() => { setQ(""); search(zip, radius, ""); }}>×</button>}
-              <button className="dk-btn primary" disabled={loading}>{loading ? "Searching…" : "Search events"}</button>
+              <button className="dk-btn primary" disabled={loading}>{loading ? "Checking events…" : "Search events"}</button>
             </div>
           </form>
         </section>
@@ -221,10 +239,10 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             <span className="fd-outside-mark" aria-hidden="true">↗</span>
             <div>
               <span className="fd-eyebrow">A match exists beyond your limit</span>
-              <h2>{event.name} is outside your {res.radiusMiles}-mile travel area.</h2>
-              <p>The closest matching event is in {event.city ?? event.venue ?? "another city"}, about <b>{distance.toLocaleString()} miles</b> from {res.origin.label ?? res.origin.zip}. Expand your distance to include it, or keep your limit and explore closer events.</p>
+              <h2>{event.name} is outside your {displayDistance(res.radiusMiles, distanceUnit)} {distanceUnit} travel area.</h2>
+              <p>The closest matching event is in {event.city ?? event.venue ?? "another city"}, about <b>{displayDistance(distance, distanceUnit).toLocaleString()} {distanceUnit}</b> from {res.origin.label ?? res.origin.zip}. Expand your distance to include it, or keep your limit and explore closer events.</p>
               <div className="dk-row">
-                <button className="dk-btn primary" onClick={() => { setRadius(expandedRadius); search(zip, expandedRadius, activeQuery); }}>Expand to {expandedRadius.toLocaleString()} mi</button>
+                <button className="dk-btn primary" onClick={() => { setRadius(expandedRadius); search(zip, expandedRadius, activeQuery); }}>Expand to {displayDistance(expandedRadius, distanceUnit).toLocaleString()} {distanceUnit}</button>
                 <a className="dk-btn ghost" href={event.url} target="_blank" rel="noreferrer">View event page ↗</a>
               </div>
             </div>

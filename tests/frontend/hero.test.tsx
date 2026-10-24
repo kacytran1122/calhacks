@@ -31,12 +31,22 @@ describe("landing origin picker", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ zip: "61401", label: "Galesburg, IL" }), { status: 200 })));
     const user = userEvent.setup();
     render(<HeroView onNavigate={push} />);
-    await user.click(screen.getByRole("button", { name: "City" }));
-    await user.type(screen.getByLabelText("Home city and state"), "Galesburg, IL");
+    await user.click(screen.getByRole("button", { name: "City or state" }));
+    await user.type(screen.getByLabelText("Home city or state"), "Galesburg, IL");
     await user.click(screen.getByRole("button", { name: /find trips/i }));
     expect(await screen.findByRole("dialog", { name: "Allow location access?" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Use Galesburg, IL instead" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401"));
+  });
+
+  test("accepts a city without requiring a state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ zip: "61401", label: "Galesburg, IL" }), { status: 200 })));
+    const user = userEvent.setup();
+    render(<HeroView onNavigate={push} />);
+    await user.click(screen.getByRole("button", { name: "City or state" }));
+    await user.type(screen.getByLabelText("Home city or state"), "Galesburg");
+    await user.click(screen.getByRole("button", { name: /find trips/i }));
+    expect(await screen.findByRole("dialog", { name: "Allow location access?" })).toBeVisible();
   });
 
   test("uses the browser location only after the user allows it", async () => {
