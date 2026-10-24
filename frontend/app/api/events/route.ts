@@ -2,7 +2,7 @@ import { discoverEvents, type EventListing } from "@smile/core";
 import { NextResponse, type NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;

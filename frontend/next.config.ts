@@ -15,11 +15,13 @@ const config: NextConfig = {
   transpilePackages: ["@smile/core"],
   serverExternalPackages: ["@coinbase/cdp-sdk", "@x402/fetch", "@x402/core", "@x402/evm", "@x402/next"],
   async rewrites() {
-    if (!backendOrigin) return [];
-    return [
-      { source: "/api/:path*", destination: `${backendOrigin}/api/:path*` },
-      { source: "/desk/:path*", destination: `${backendOrigin}/desk/:path*` },
-    ];
+    const beforeFiles = backendOrigin
+      ? [
+          { source: "/api/:path*", destination: `${backendOrigin}/api/:path*` },
+          { source: "/desk/:path*", destination: `${backendOrigin}/desk/:path*` },
+        ]
+      : [];
+    return { beforeFiles, afterFiles: [], fallback: [] };
   },
 };
 
