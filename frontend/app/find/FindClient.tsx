@@ -66,7 +66,7 @@ function when(e: Listing) {
 
 export function FindClient({ initialZip }: { initialZip: string }) {
   const [zip, setZip] = useState(initialZip);
-  const [radius, setRadius] = useState(150);
+  const [radius, setRadius] = useState(200);
   const [q, setQ] = useState("");
   const [kinds, setKinds] = useState<Set<"hackathon" | "tech">>(new Set(["hackathon", "tech"]));
   const [res, setRes] = useState<Discover | null>(null);
