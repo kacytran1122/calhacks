@@ -15,17 +15,28 @@ export function brightDataKey(): string | undefined {
   return process.env.BRIGHTDATA_API_TOKEN || process.env.BRIGHTDATA_API_KEY || undefined;
 }
 
-let zoneCache: string | undefined;
-async function zone(key: string): Promise<string> {
-  if (process.env.BRIGHTDATA_ZONE) return process.env.BRIGHTDATA_ZONE;
-  if (zoneCache) return zoneCache;
+type ZoneType = "unblocker" | "serp";
+type ActiveZone = { name: string; type: string };
+const zoneCache = new Map<ZoneType, string>();
+
+export function selectActiveZone(zones: ActiveZone[], type: ZoneType): string | undefined {
+  const accepted = type === "unblocker" ? new Set(["unblocker", "web_unlocker"]) : new Set(["serp"]);
+  return zones.find((candidate) => accepted.has(candidate.type.toLowerCase()))?.name;
+}
+
+async function zone(key: string, type: ZoneType): Promise<string> {
+  const configured = type === "unblocker"
+    ? process.env.BRIGHTDATA_UNLOCKER_ZONE || process.env.BRIGHTDATA_ZONE
+    : process.env.BRIGHTDATA_SERP_ZONE;
+  if (configured) return configured;
+  const cached = zoneCache.get(type);
+  if (cached) return cached;
   const res = await fetch(`${API}/zone/get_active_zones`, { headers: { Authorization: `Bearer ${key}` } });
   if (!res.ok) throw new Error(`zone lookup failed: HTTP ${res.status}`);
-  const zones = (await res.json()) as { name: string; type: string }[];
-  const z = zones.find((x) => x.type === "unblocker");
-  if (!z) throw new Error("no Web Unlocker zone on this Bright Data account — add one in the control panel");
-  zoneCache = z.name;
-  return z.name;
+  const name = selectActiveZone((await res.json()) as ActiveZone[], type);
+  if (!name) throw new Error(`no active ${type === "unblocker" ? "Web Unlocker" : "SERP API"} zone on this Bright Data account`);
+  zoneCache.set(type, name);
+  return name;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -33,7 +44,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function request(
   url: string,
   extra: Record<string, string>,
-  { attempts = 3, timeoutMs = 45_000, minBytes = 200 } = {},
+  { attempts = 3, timeoutMs = 45_000, minBytes = 200, zoneType = "unblocker" as ZoneType } = {},
 ): Promise<BdResult> {
   const key = brightDataKey();
   const t0 = Date.now();
@@ -49,7 +60,7 @@ async function request(
         method: "POST",
         signal: ctrl.signal,
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ zone: await zone(key), url, format: "raw", country: "us", ...extra }),
+        body: JSON.stringify({ zone: await zone(key, zoneType), url, format: "raw", country: "us", ...extra }),
       });
       const body = await res.text();
       lastCode = res.headers.get("x-brd-error-code") ?? undefined;
@@ -85,7 +96,7 @@ export async function serp(query: string, attempts = 3): Promise<BdResult<SerpOr
   let used = 0;
   const t0 = Date.now();
   for (let i = 0; i < attempts; i++) {
-    last = await request(url, {}, { attempts: 1, minBytes: 2 });
+    last = await request(url, {}, { attempts: 1, minBytes: 2, zoneType: "serp" });
     used++;
     if (last.status === "ok" && last.body) {
       try {

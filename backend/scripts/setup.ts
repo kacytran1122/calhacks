@@ -19,5 +19,6 @@ const checks: Check[] = [
 console.log("S'mile sponsor integration readiness (values are never printed)\n");
 for (const check of checks) console.log(`${check.ready ? "READY" : "NEEDS INPUT"}  ${check.name} — ${check.detail}`);
 
-if (!set("BRIGHTDATA_ZONE") && brightDataReady) console.log("\nBright Data zone: auto-discover the first active Web Unlocker zone.");
+if (!set("BRIGHTDATA_UNLOCKER_ZONE") && brightDataReady) console.log("\nBright Data Web Unlocker zone: auto-discover the first active matching API.");
+if (!set("BRIGHTDATA_SERP_ZONE") && brightDataReady) console.log("Bright Data SERP zone: auto-discover the first active matching API.");
 if (!payTo && coinbaseSellerReady) console.log("Coinbase seller receiver: CDP will provision/reuse a testnet receiver wallet.");
