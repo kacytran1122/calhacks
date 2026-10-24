@@ -68,7 +68,6 @@ export function FindClient({ initialZip }: { initialZip: string }) {
   const [zip, setZip] = useState(initialZip);
   const [radius, setRadius] = useState(200);
   const [q, setQ] = useState("");
-  const [includeSelfDrive, setIncludeSelfDrive] = useState(true);
   const [kinds, setKinds] = useState<Set<"hackathon" | "tech">>(new Set(["hackathon", "tech"]));
   const [res, setRes] = useState<Discover | null>(null);
   const [loading, setLoading] = useState(false);
@@ -140,11 +139,6 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             Tech events
           </button>
         </div>
-        <label className="fd-drive">
-          <input type="checkbox" checked={includeSelfDrive} onChange={(e) => setIncludeSelfDrive(e.target.checked)} />
-          <span aria-hidden="true"><i /></span>
-          Include self-drive
-        </label>
         <button className="dk-btn primary" disabled={loading}>
           {loading ? "Searching live sources…" : "Find events"}
         </button>
@@ -207,15 +201,16 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             </p>
           )}
         </div>
-        {picked && <PlanPane key={picked.key} zip={zip} maxDistanceMiles={radius} includeSelfDrive={includeSelfDrive} event={picked} onClose={() => setPicked(null)} />}
+        {picked && <PlanPane key={picked.key} zip={zip} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
       </div>
     </div>
   );
 }
 
-function PlanPane({ zip, maxDistanceMiles, includeSelfDrive, event, onClose }: { zip: string; maxDistanceMiles: number; includeSelfDrive: boolean; event: Listing; onClose: () => void }) {
+function PlanPane({ zip, maxDistanceMiles, event, onClose }: { zip: string; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
   const [initials, setInitials] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
+  const [includeSelfDrive, setIncludeSelfDrive] = useState(true);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -291,6 +286,11 @@ function PlanPane({ zip, maxDistanceMiles, includeSelfDrive, event, onClose }: {
           <label className="fd-label">
             Your maximum travel spend
             <span className="fd-money"><b>$</b><input className="dk-in" type="number" min="0" max="10000" step="1" value={budgetUsd} onChange={(e) => setBudgetUsd(e.target.value)} placeholder="e.g. 120" aria-label="Your maximum travel budget in dollars" /></span>
+          </label>
+          <label className="fd-drive">
+            <span>Include self-drive</span>
+            <input type="checkbox" checked={includeSelfDrive} onChange={(e) => setIncludeSelfDrive(e.target.checked)} />
+            <span className="fd-drive-switch" aria-hidden="true"><i /></span>
           </label>
           <p className="dk-note">This is your personal limit. It filters routes but never raises the organizer’s reimbursement cap.</p>
           <button className="dk-btn primary" disabled={!!busy || budgetUsd === "" || Number(budgetUsd) < 0} onClick={doPlan}>
