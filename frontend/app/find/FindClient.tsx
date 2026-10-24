@@ -107,7 +107,7 @@ function liveDirectionsUrl(origin: string, event: Listing, mode: string) {
 
 function RouteInstructions({ option, guide, fare, origin, event, best = false }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; best?: boolean }) {
   const destination = event.venue || event.city || event.name;
-  const directionsUrl = guide?.sourceUrl || liveDirectionsUrl(origin, event, option.mode);
+  const directionsUrl = liveDirectionsUrl(origin, event, option.mode);
   const steps = guide?.steps?.length ? guide.steps : [
     { instruction: `Start at ${origin}.`, detail: `Open the live ${option.mode === "drive" || option.mode === "rideshare" ? "road" : "transit"} directions before leaving so the first departure and delays are current.` },
     { instruction: `Follow the ${modeName(option.mode).toLowerCase()} route to ${destination}.`, detail: "Use the linked live directions for the exact platform, stop, terminal, or pickup point." },
@@ -134,14 +134,36 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false }:
       <div className="dk-row fd-route-links">
         <a className="dk-btn primary" href={directionsUrl} target="_blank" rel="noreferrer">Open live directions ↗</a>
         {fare?.link && <a className="dk-link" href={fare.link} target="_blank" rel="noreferrer">Check fare source ↗</a>}
+        {guide?.sourceUrl && <a className="dk-link" href={guide.sourceUrl} target="_blank" rel="noreferrer">Route data sources ↗</a>}
       </div>
-      {guide?.sourceQuote && <p className="fd-route-source">Route evidence: “{guide.sourceQuote}”</p>}
+      {guide?.sourceQuote && <p className="fd-route-source">Route source: {guide.sourceQuote}</p>}
       {!option.withinCap && <div className="dk-warn">This option is over the organizer cap.</div>}
       {!option.withinBudget && <div className="dk-warn">This option is over your travel budget.</div>}
     </>
   );
   if (best) return <section className="fd-route-card best">{content}</section>;
   return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
+}
+
+function UnpricedRouteGuide({ guide, origin, event }: { guide: RouteGuide; origin: string; event: Listing }) {
+  return (
+    <details className="fd-route-card alternative">
+      <summary><span>{guide.title}</span><b>check fare</b></summary>
+      <div className="fd-route-detail">
+        <div className="fd-route-head"><div><span>Live alternative</span><h3>{guide.title}</h3></div><div className="fd-route-price"><small>fare not published</small></div></div>
+        {guide.durationText && <div className="fd-route-facts"><span>{guide.durationText}</span><span>public GTFS / GTFS-Realtime</span></div>}
+        <ol className="fd-route-steps">
+          {guide.steps.map((step, index) => <li key={`${guide.title}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
+        </ol>
+        <div className="dk-row fd-route-links">
+          <a className="dk-btn primary" href={liveDirectionsUrl(origin, event, guide.mode)} target="_blank" rel="noreferrer">Open live directions ↗</a>
+          <a className="dk-link" href={guide.sourceUrl} target="_blank" rel="noreferrer">Route data sources ↗</a>
+        </div>
+        <p className="fd-route-source">Route source: {guide.sourceQuote}</p>
+        <p className="dk-note">This route is shown for comparison, but S’mile will not display or approve a total until a public source states the fare.</p>
+      </div>
+    </details>
+  );
 }
 
 export function FindClient({ initialZip, initialOrigin }: { initialZip: string; initialOrigin?: string }) {
@@ -463,6 +485,12 @@ function PlanPane({ zip, originText, maxDistanceMiles, event, onClose }: { zip: 
   const routeGuides = (Array.isArray(routeGuide?.data.options) ? routeGuide.data.options : []) as RouteGuide[];
   const pickedRoute = plan?.routes?.options.find((option) => option.mode === plan.routes?.pick?.mode);
   const alternativeRoutes = plan?.routes?.options.filter((option) => option.mode !== plan.routes?.pick?.mode) ?? [];
+  const representedGuideIndexes = new Set<number>();
+  for (const option of plan?.routes?.options ?? []) {
+    const index = routeGuides.findIndex((guide, guideIndex) => guide.mode === option.mode && !representedGuideIndexes.has(guideIndex));
+    if (index >= 0) representedGuideIndexes.add(index);
+  }
+  const additionalRouteGuides = routeGuides.filter((_, index) => !representedGuideIndexes.has(index));
 
   return (
     <aside className="dk-panel fd-plan" aria-label={`Trip plan for ${event.name}`}>
@@ -533,7 +561,7 @@ function PlanPane({ zip, originText, maxDistanceMiles, event, onClose }: { zip: 
         <>
           {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
           {pickedRoute && <RouteInstructions option={pickedRoute} guide={routeGuides.find((guide) => guide.mode === pickedRoute.mode)} fare={fareItems.find((item) => item.mode === pickedRoute.mode)} origin={originText || zip} event={event} best />}
-          {alternativeRoutes.length > 0 && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Open an option for its route and full cost.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={routeGuides.find((guide) => guide.mode === option.mode)} fare={fareItems.find((item) => item.mode === option.mode)} origin={originText || zip} event={event} />)}</section>}
+          {(alternativeRoutes.length > 0 || additionalRouteGuides.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={routeGuides.find((guide) => guide.mode === option.mode)} fare={fareItems.find((item) => item.mode === option.mode)} origin={originText || zip} event={event} />)}{additionalRouteGuides.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
             <i aria-hidden="true">→</i>

@@ -9,6 +9,7 @@ import { weatherAt } from "../integrations/nws";
 import { payAndFetch } from "../integrations/x402";
 import { postEntry } from "../ledger";
 import { llmAvailable, structured } from "../llm";
+import { planPublicTransit, type TransitOption } from "../integrations/transitous";
 import type { EventFacts } from "./scout";
 
 const agent = { kind: "agent" as const, id: "evidence" as const };
@@ -56,24 +57,47 @@ function faresByRules(results: SerpOrganic[]) {
   return out;
 }
 
-async function extractFares(results: SerpOrganic[], from: string, to: string) {
+function quoteStatesAmount(quote: string, amountUsd: number) {
+  const exact = amountUsd.toFixed(2);
+  const short = exact.replace(/\.00$/, "");
+  return quote.includes(`$${exact}`) || quote.includes(`$${short}`);
+}
+
+async function extractFares(results: SerpOrganic[], from: string, to: string, routeContext?: string) {
   const links = new Set(results.map((result) => result.link));
   const corpus = results.map((result) => `${result.title} ${result.description ?? ""}`).join("\n").toLowerCase();
   if (!llmAvailable()) return { fares: faresByRules(results), extractedBy: "rules" };
   try {
     const candidates = await structured(FareCandidates, {
       model: "extract",
-      system: "From these live search results, list total travel fares that are explicitly stated for this exact trip. Copy the link and the exact snippet text. Never estimate or invent a price. Skip anything that is not an explicit dollar fare.",
-      user: JSON.stringify({ from, to, results }),
+      system: "From these live search results, list current adult fares that cover the supplied live itinerary. Copy the link and the exact snippet text. Never estimate or invent a price. A current Metrolink SoCal Day Pass can be the trip total when the itinerary uses Metrolink and the evidence says it includes the local connections. A single-agency local route can use that agency's published regular fare when its transfer rule covers the itinerary. Otherwise, accept only an explicitly stated total for the exact origin and destination. Prefer the newest official agency page and skip superseded prices.",
+      user: JSON.stringify({ from, to, routeContext, results }),
       effort: "low",
     });
     return {
-      fares: candidates.fares.filter((fare) => links.has(fare.link) && corpus.includes(fare.quote.toLowerCase()) && fare.amountUsd > 0 && fare.amountUsd < 1000),
+      fares: candidates.fares.filter((fare) => links.has(fare.link) && corpus.includes(fare.quote.toLowerCase()) && quoteStatesAmount(fare.quote, fare.amountUsd) && fare.amountUsd > 0 && fare.amountUsd < 1000),
       extractedBy: "claude (quotes verified against live snippets)",
     };
   } catch {
     return { fares: faresByRules(results), extractedBy: "rules" };
   }
+}
+
+function officialFareQuery(options: TransitOption[], startsAt?: string) {
+  const agencies = [...new Set(options.flatMap((option) => option.agencies))];
+  if (!agencies.length) return undefined;
+  const travelDate = startsAt ? new Date(startsAt) : new Date();
+  const weekend = travelDate.getDay() === 0 || travelDate.getDay() === 6;
+  if (agencies.some((agency) => /metrolink/i.test(agency))) {
+    return `site:metrolinktrains.com/fare-change-2026 ${weekend ? "Weekend Holiday" : "Weekday"} SoCal Day Pass current price free local transit transfers`;
+  }
+  if (agencies.every((agency) => /metro.*los angeles/i.test(agency))) {
+    return `site:metro.net/fares current regular fare one way free transfers within 2 hours`;
+  }
+  if (agencies.every((agency) => /orange county transportation|octa/i.test(agency))) {
+    return `site:octa.net/getting-around/bus/oc-bus/fares-and-passes/overview current regular one way fare free transfer`;
+  }
+  return `${agencies.join(" ")} current adult fare official`;
 }
 
 async function extractRouteGuides(results: SerpOrganic[], from: string, to: string, requirement?: string) {
@@ -114,10 +138,14 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const venueQ = [event.venue, event.address ?? event.city].filter(Boolean).join(", ");
   const fromCity = args.originText?.trim() || home.label || homeZip;
   const destination = event.address ?? event.venue ?? event.city ?? event.name ?? "event venue";
-  const [stops, fareSerp, directionsSerp] = await Promise.all([
+  const transitPromise = home.status === "ok" && home.lat !== undefined && home.lon !== undefined && event.lat !== undefined && event.lon !== undefined
+    ? planPublicTransit({ from: { lat: home.lat, lon: home.lon }, to: { lat: event.lat, lon: event.lon }, startsAt: event.startsAt })
+    : Promise.resolve({ status: "empty" as const, url: "https://transitous.org/sources/", options: [] as TransitOption[], ms: 0, error: "Coordinates were unavailable for live transit routing." });
+  const [stops, fareSerp, directionsSerp, transit] = await Promise.all([
     venueQ ? serp(`breakfast coffee near ${venueQ}`, 1) : Promise.resolve(null),
     serp(`${fromCity} to ${destination} train bus rideshare flight total fare cost${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
     serp(`${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1),
+    transitPromise,
   ]);
 
   if (stops) {
@@ -125,36 +153,50 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     out.push(push(state, { tripId, kind: "stop", source: "Bright Data SERP API → Google", status: stops.status, data: { query: venueQ, results: top, attempts: stops.attempts, ms: stops.ms }, note: stops.error ?? (stops.errorCode ? `x-brd-error-code=${stops.errorCode}` : undefined) }));
   }
 
-  const fareResults = fareSerp.status === "ok" && fareSerp.body ? fareSerp.body.slice(0, 8) : [];
+  const targetedQuery = officialFareQuery(transit.options, event.startsAt);
+  const targetedFareSerp = targetedQuery ? await serp(targetedQuery, 1) : null;
+  const fareResults = [
+    ...(targetedFareSerp?.status === "ok" && targetedFareSerp.body ? targetedFareSerp.body.slice(0, 8) : []),
+    ...(fareSerp.status === "ok" && fareSerp.body ? fareSerp.body.slice(0, 8) : []),
+  ];
   const directionResults = directionsSerp.status === "ok" && directionsSerp.body ? directionsSerp.body.slice(0, 8) : [];
+  const routeContext = transit.options.length
+    ? [`travel date: ${event.startsAt ?? "not provided"}`, ...transit.options.map((option) => `${option.title}; ${option.durationText}; agencies: ${option.agencies.join(", ")}`)].join("\n")
+    : undefined;
   const [fareExtraction, guideExtraction] = await Promise.all([
-    fareResults.length ? extractFares(fareResults, fromCity, destination) : Promise.resolve({ fares: [] as { mode: string; amountUsd: number; link: string; quote: string }[], extractedBy: "none" }),
+    fareResults.length ? extractFares(fareResults, fromCity, destination, routeContext) : Promise.resolve({ fares: [] as { mode: string; amountUsd: number; link: string; quote: string }[], extractedBy: "none" }),
     directionResults.length ? extractRouteGuides(directionResults, fromCity, destination, args.travelConstraintSummary) : Promise.resolve({ guides: [] as RouteGuide[], extractedBy: "none" }),
   ]);
-  const fares = fareExtraction.fares;
+  const transitFares = transit.options.flatMap((option) => option.amountUsd && option.fareQuote ? [{ mode: option.mode, amountUsd: option.amountUsd, link: option.sourceUrl, quote: option.fareQuote }] : []);
+  const fares = [...transitFares, ...fareExtraction.fares].filter((fare, index, all) => all.findIndex((candidate) => candidate.mode === fare.mode && candidate.amountUsd === fare.amountUsd) === index);
+  const fareStatus = fares.length ? "ok" : targetedFareSerp?.status === "error" ? targetedFareSerp.status : fareSerp.status === "ok" ? "empty" : fareSerp.status;
   out.push(
     push(state, {
       tripId,
       kind: "fare",
-      source: "Bright Data SERP API → Google",
-      status: fareSerp.status === "ok" && fares.length === 0 ? "empty" : fareSerp.status,
-      data: { fares, extractedBy: fareExtraction.extractedBy, attempts: fareSerp.attempts, ms: fareSerp.ms },
-      note: fareSerp.error ?? (fares.length === 0 && fareSerp.status === "ok" ? "Results came back, but none stated an explicit fare. Route Analyst will fall back to the drive estimate." : undefined),
+      source: "Transitous GTFS fares + Bright Data SERP API → official operator pages",
+      status: fareStatus,
+      data: { fares, extractedBy: transitFares.length ? "GTFS fare products and/or Claude with verified public-web quotes" : fareExtraction.extractedBy, attempts: fareSerp.attempts + (targetedFareSerp?.attempts ?? 0), ms: fareSerp.ms + (targetedFareSerp?.ms ?? 0), query: targetedQuery },
+      note: targetedFareSerp?.error ?? fareSerp.error ?? (fares.length === 0 ? "Current route data was found, but no source stated an auditable total fare. S’mile will not invent one." : undefined),
     }),
   );
 
+  const routeGuides: RouteGuide[] = transit.options.length
+    ? transit.options.map((option) => ({ mode: option.mode, title: option.title, durationText: option.durationText, sourceUrl: option.sourceUrl, sourceQuote: option.sourceQuote, steps: option.steps }))
+    : guideExtraction.guides;
   out.push(
     push(state, {
       tripId,
       kind: "route_guide",
-      source: "Bright Data SERP API → Google → Claude",
-      status: directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "empty" : directionsSerp.status,
-      data: { from: fromCity, to: destination, options: guideExtraction.guides, extractedBy: guideExtraction.extractedBy, attempts: directionsSerp.attempts, ms: directionsSerp.ms },
-      note: directionsSerp.error ?? (directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "Live results did not contain enough grounded detail for step-by-step instructions." : undefined),
+      source: transit.options.length ? "Transitous MOTIS → public GTFS and GTFS-Realtime" : "Bright Data SERP API → Google → Claude",
+      url: transit.options.length ? "https://transitous.org/sources/" : undefined,
+      status: transit.options.length ? "ok" : directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "empty" : directionsSerp.status,
+      data: { from: fromCity, to: destination, options: routeGuides, extractedBy: transit.options.length ? "MOTIS live public-transit routing" : guideExtraction.extractedBy, attempts: directionsSerp.attempts, ms: transit.options.length ? transit.ms : directionsSerp.ms },
+      note: transit.options.length ? "Uses public GTFS schedules and GTFS-Realtime where agencies publish it; verify the linked live directions before departure." : transit.error ?? directionsSerp.error ?? (directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "Live results did not contain enough grounded detail for step-by-step instructions." : undefined),
     }),
   );
 
-  return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides: guideExtraction.guides };
+  return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides };
 }
 
 export async function buyWithX402(state: State, tripId: string, url: string, priceCents = 1): Promise<Evidence> {
