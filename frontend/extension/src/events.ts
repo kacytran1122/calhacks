@@ -22,6 +22,23 @@ const hackathonLocations: Array<[RegExp, string]> = [
   [/\bhackprinceton\b/i, "Princeton, NJ"],
   [/\bhackharvard\b/i, "Cambridge, MA"],
   [/\btechnica\b/i, "College Park, MD"],
+  [/\bhackmit\b/i, "Cambridge, MA"],
+  [/\bpennapps\b/i, "Philadelphia, PA"],
+  [/\bhack\s*the\s*north\b/i, "Waterloo, ON, Canada"],
+  [/\btreehacks\b/i, "Stanford, CA"],
+  [/\bhackduke\b/i, "Durham, NC"],
+  [/\bknighthacks\b/i, "Orlando, FL"],
+  [/\bshellhacks\b/i, "Miami, FL"],
+  [/\bswamphacks\b/i, "Gainesville, FL"],
+  [/\bhackgt\b/i, "Atlanta, GA"],
+  [/\bvandyhacks\b/i, "Nashville, TN"],
+  [/\bhackumass\b/i, "Amherst, MA"],
+  [/\bhackbeanpot\b/i, "Boston, MA"],
+  [/\bdubhacks\b/i, "Seattle, WA"],
+  [/\bhackdavis\b/i, "Davis, CA"],
+  [/\birvinehacks\b/i, "Irvine, CA"],
+  [/\bspartahack\b/i, "East Lansing, MI"],
+  [/\bwicshacks\b/i, "Rochester, NY"],
 ];
 
 const hackathonCoordinates: Array<[RegExp, number, number]> = [

@@ -32,3 +32,10 @@ test("uses the event site's icon when no event artwork is available", () => {
   const events = pageEvents(document, "https://gotechnica.org/");
   expect(events[0]).toMatchObject({ name: "Technica", location: "College Park, MD", imageUrl: "https://gotechnica.org/icon.png" });
 });
+
+test("detects more collegiate hackathon destinations from their names", () => {
+  document.head.innerHTML = `<meta property="og:title" content="PennApps XXVIII"><meta property="og:image" content="/social.png">`;
+  document.body.innerHTML = "";
+  const events = pageEvents(document, "https://pennapps.com/");
+  expect(events[0]).toMatchObject({ name: "PennApps XXVIII", location: "Philadelphia, PA", imageUrl: "https://pennapps.com/social.png" });
+});
