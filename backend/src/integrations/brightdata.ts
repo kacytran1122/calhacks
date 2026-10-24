@@ -79,7 +79,13 @@ async function request(
         method: "POST",
         signal: ctrl.signal,
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ zone: zoneName, url, format: "raw", country: "us", ...extra }),
+        body: JSON.stringify({
+          zone: zoneName,
+          url,
+          format: "raw",
+          ...(zoneType === "unblocker" ? { country: "us" } : {}),
+          ...extra,
+        }),
       });
       const body = await res.text();
       lastCode = res.headers.get("x-brd-error-code") ?? undefined;
@@ -111,12 +117,12 @@ export interface SerpOrganic {
 }
 
 export async function serp(query: string, attempts = 3): Promise<BdResult<SerpOrganic[]>> {
-  const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en&gl=us&brd_json=1`;
+  const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en&gl=us`;
   let last: BdResult = { status: "error", attempts: 0, ms: 0 };
   let used = 0;
   const t0 = Date.now();
   for (let i = 0; i < attempts; i++) {
-    last = await request(url, {}, { attempts: 1, timeoutMs: 12_000, minBytes: 2, zoneType: "serp" });
+    last = await request(url, { data_format: "parsed_light" }, { attempts: 1, timeoutMs: 12_000, minBytes: 2, zoneType: "serp" });
     used++;
     if (last.status === "ok" && last.body) {
       try {
