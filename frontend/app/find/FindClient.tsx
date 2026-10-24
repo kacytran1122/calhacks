@@ -168,11 +168,11 @@ export function FindClient({ initialZip }: { initialZip: string }) {
             const w = when(e);
             return (
               <article key={e.key} className={`fd-card ${picked?.key === e.key ? "sel" : ""}`}>
-                <div className="fd-date">
-                  <span>{w.mon}</span>
-                  <b>{w.day}</b>
-                </div>
-                <div className="fd-body">
+                <div className="fd-card-top">
+                  <div className="fd-date">
+                    <span>{w.mon}</span>
+                    <b>{w.day}</b>
+                  </div>
                   <div className="fd-tags">
                     <span className={`fd-kind ${e.kind}`}>{e.kind === "hackathon" ? "Hackathon" : "Tech"}</span>
                     {[e.source, ...(e.alsoOn ?? [])].map((s) => (
@@ -181,6 +181,8 @@ export function FindClient({ initialZip }: { initialZip: string }) {
                       </span>
                     ))}
                   </div>
+                </div>
+                <div className="fd-body">
                   <h3>{e.name}</h3>
                   <div className="dk-mut">
                     {w.time} · {e.venue && e.source !== "luma" ? `${e.venue}, ` : ""}
@@ -188,7 +190,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
                     {e.locationPrecision === "city" && " (city center)"}
                   </div>
                   {e.change && <div className="dk-warn fd-change">⚠ {e.change}</div>}
-                  <div className="dk-row" style={{ marginTop: 8 }}>
+                  <div className="dk-row fd-actions">
                     <button className="dk-btn primary" onClick={() => setPicked(e)}>
                       Plan my trip
                     </button>
