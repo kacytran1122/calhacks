@@ -20,5 +20,5 @@ export { chargeTrip } from "./agents/payments";
 export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";
-export { cityToPoint, zipToPoint, type GeoResult } from "./integrations/geo";
+export { cityToPoint, coordinatesToPoint, zipToPoint, type GeoResult } from "./integrations/geo";
 export { x402Configured, X402_NETWORK } from "./integrations/x402";

@@ -46,6 +46,25 @@ export async function addressToPoint(address: string): Promise<GeoResult> {
   return { status: "ok", lat: m.coordinates.y, lon: m.coordinates.x, label: m.matchedAddress, source, url };
 }
 
+export async function coordinatesToPoint(lat: number, lon: number): Promise<GeoResult> {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=12&addressdetails=1`;
+  const source = "OpenStreetMap reverse geocoder";
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return { status: "error", source, url, error: "invalid coordinates" };
+  }
+  const r = await getJson(url, 15_000);
+  if (!r.ok) return { status: r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? `HTTP ${r.status}` };
+  type Address = { postcode?: string; city?: string; town?: string; village?: string; municipality?: string; county?: string; state?: string; "ISO3166-2-lvl4"?: string; country_code?: string };
+  const address = (r.json as { address?: Address }).address;
+  const postalCode = address?.postcode?.match(/\b\d{5}\b/)?.[0];
+  if (!address || address.country_code?.toLowerCase() !== "us" || !postalCode) {
+    return { status: "empty", source, url, error: "no U.S. ZIP found at this location" };
+  }
+  const city = address.city ?? address.town ?? address.village ?? address.municipality ?? address.county;
+  const state = address["ISO3166-2-lvl4"]?.replace(/^US-/, "") ?? address.state;
+  return { status: "ok", lat, lon, postalCode, label: [city, state].filter(Boolean).join(", ") || postalCode, source, url };
+}
+
 export function haversineMiles(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const R = 3958.8;
   const rad = (d: number) => (d * Math.PI) / 180;

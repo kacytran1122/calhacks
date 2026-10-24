@@ -29,11 +29,20 @@ export interface DiscoverResult {
   origin: { zip: string; label?: string; lat: number; lon: number };
   radiusMiles: number;
   events: EventListing[];
+  outsideRadius: EventListing[];
   unplaced: EventListing[];
   sources: { source: string; status: string; via: string; count: number; ms: number; note?: string }[];
   store: "tigerdata" | "local";
   storeNote?: string;
   classifiedBy: "claude" | "keywords";
+}
+
+export function splitEventMatches(events: EventListing[], radiusMiles: number) {
+  const placed = events.filter((event) => event.distanceMiles !== undefined);
+  return {
+    events: placed.filter((event) => event.distanceMiles! <= radiusMiles),
+    outsideRadius: placed.filter((event) => event.distanceMiles! > radiusMiles).sort((a, b) => a.distanceMiles! - b.distanceMiles!),
+  };
 }
 
 const TECH = /\b(ai|a\.i\.|ml|llms?|gpt|genai|agents?|tech|startups?|founders?|developers?|devs?|code|coding|engineer(ing)?|data|cloud|web3|crypto|blockchain|robot(ics)?|build(ers|ing)?|product|ux|saas|cyber|security|python|javascript|react|open[- ]source|demo day|pitch|venture|vc|hardware|software|quantum)\b/i;
@@ -187,16 +196,18 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
     const t = new Date(e.endsAt ?? e.startsAt).getTime();
     return t >= now.getTime() - 86_400_000 && new Date(e.startsAt).getTime() <= now.getTime() + days * 86_400_000;
   };
-  const events = merged
-    .filter((e) => kinds.includes(e.kind) && matchesEventGroups(e, opts.groups) && inWindow(e) && matches(e) && e.distanceMiles !== undefined && e.distanceMiles <= radiusMiles)
-    .sort((a, b) => (a.startsAt ?? "").localeCompare(b.startsAt ?? "") || (a.distanceMiles ?? 0) - (b.distanceMiles ?? 0));
+  const eligible = merged.filter((e) => kinds.includes(e.kind) && matchesEventGroups(e, opts.groups) && inWindow(e) && matches(e));
+  const split = splitEventMatches(eligible, radiusMiles);
+  const events = split.events.sort((a, b) => (a.startsAt ?? "").localeCompare(b.startsAt ?? "") || (a.distanceMiles ?? 0) - (b.distanceMiles ?? 0));
+  const outsideRadius = terms.length ? split.outsideRadius.slice(0, 5) : [];
   const unplaced = terms.length ? merged.filter((e) => e.locationPrecision === "unknown" && kinds.includes(e.kind) && matchesEventGroups(e, opts.groups) && inWindow(e) && matches(e)).slice(0, 10) : [];
 
   const store = eventStore();
   let storeNote: string | undefined;
   try {
-    const prev = await store.previous([...events, ...unplaced].map((e) => e.key));
-    for (const e of [...events, ...unplaced]) {
+    const visible = [...events, ...outsideRadius, ...unplaced];
+    const prev = await store.previous(visible.map((e) => e.key));
+    for (const e of visible) {
       const p = prev.get(e.key);
       if (!p) continue;
       const notes: string[] = [];
@@ -205,10 +216,10 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
       if (p.venue && e.venue && p.venue !== e.venue) notes.push(`venue changed from "${p.venue}"`);
       if (notes.length) e.change = `${notes.join("; ")} (since ${new Date(p.fetchedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })})`;
     }
-    await store.save([...events, ...unplaced]);
+    await store.save(visible);
   } catch (e) {
     storeNote = `snapshot not saved: ${(e as Error).message}`;
   }
 
-  return { origin, radiusMiles, events, unplaced, sources, store: store.kind, storeNote, classifiedBy };
+  return { origin, radiusMiles, events, outsideRadius, unplaced, sources, store: store.kind, storeNote, classifiedBy };
 }

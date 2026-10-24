@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isMlhEvent, matchesEventGroups, mergeLumaSources } from "../../backend/src/agents/discover";
+import { isMlhEvent, matchesEventGroups, mergeLumaSources, splitEventMatches } from "../../backend/src/agents/discover";
+import type { EventListing } from "../../backend/src/eventStore";
 import { resolveMlhEventUrl, type LumaEvent, type SourceResult } from "../../backend/src/integrations/sources";
 
 const source = (status: SourceResult<LumaEvent>["status"], items: LumaEvent[], via: SourceResult<LumaEvent>["via"] = "direct"): SourceResult<LumaEvent> => ({
@@ -34,4 +35,21 @@ test("combined Luma status reflects events found by a nearby hub", () => {
   assert.equal(result.via, "bright-data");
   assert.deepEqual(result.items, [event]);
   assert.equal(result.note, "also searched from Chicago");
+});
+
+test("matching events outside the travel radius remain available for guidance", () => {
+  const listing = (key: string, distanceMiles: number): EventListing => ({
+    key,
+    source: "mlh",
+    name: key,
+    locationPrecision: "city",
+    url: `https://example.com/${key}`,
+    kind: "hackathon",
+    fetchedAt: "2026-10-24T00:00:00.000Z",
+    via: "direct",
+    distanceMiles,
+  });
+  const result = splitEventMatches([listing("near", 80), listing("far", 1800), listing("mid", 400)], 200);
+  assert.deepEqual(result.events.map((event) => event.key), ["near"]);
+  assert.deepEqual(result.outsideRadius.map((event) => event.key), ["mid", "far"]);
 });

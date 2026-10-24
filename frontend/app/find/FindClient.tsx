@@ -26,6 +26,7 @@ type Discover = {
   origin: { zip: string; label?: string };
   radiusMiles: number;
   events: Listing[];
+  outsideRadius?: Listing[];
   unplaced: Listing[];
   sources: { source: string; status: string; via: string; count: number; ms: number; note?: string }[];
   store: "tigerdata" | "local";
@@ -65,35 +66,107 @@ function when(e: Listing) {
 }
 
 export function FindClient({ initialZip }: { initialZip: string }) {
+  const [locationInput, setLocationInput] = useState(initialZip);
   const [zip, setZip] = useState(initialZip);
   const [radius, setRadius] = useState(200);
   const [q, setQ] = useState("");
+  const [activeQuery, setActiveQuery] = useState("");
   const [groups, setGroups] = useState<Set<"mlh" | "tech">>(new Set(["mlh", "tech"]));
   const [res, setRes] = useState<Discover | null>(null);
   const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [confirmingLocation, setConfirmingLocation] = useState(false);
+  const [confirmedInput, setConfirmedInput] = useState("");
+  const [locationNote, setLocationNote] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<Listing | null>(null);
 
-  const search = useCallback(async (z = zip) => {
+  const search = useCallback(async (z: string, nextRadius = radius, nextQuery = q, nextGroups = groups) => {
     if (!/^\d{5}$/.test(z)) return setErr("Enter a 5-digit ZIP.");
     setLoading(true);
     setErr(null);
     setPicked(null);
     try {
-      const p = new URLSearchParams({ zip: z, radius: String(radius), groups: [...groups].join(",") });
-      if (q.trim()) p.set("q", q.trim());
+      const query = nextQuery.trim();
+      const p = new URLSearchParams({ zip: z, radius: String(nextRadius), groups: [...nextGroups].join(",") });
+      if (query) p.set("q", query);
       setRes(await api<Discover>(`/api/events?${p}`));
+      setActiveQuery(query);
+      setZip(z);
       history.replaceState(null, "", `/find?zip=${z}`);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [zip, radius, q, groups]);
+  }, [radius, q, groups]);
 
   useEffect(() => {
-    if (initialZip) search(initialZip);
+    if (initialZip) {
+      search(initialZip);
+      setConfirmingLocation(true);
+    }
   }, []);
+
+  const useTypedLocation = async () => {
+    const input = locationInput.trim();
+    if (!input) return setErr("Enter a U.S. city and state or a 5-digit ZIP.");
+    setLocating(true);
+    setErr(null);
+    try {
+      const location = /^\d{5}$/.test(input)
+        ? { zip: input, label: input }
+        : await api<{ zip: string; label?: string }>(`/api/location/resolve?city=${encodeURIComponent(input)}`);
+      setZip(location.zip);
+      setLocationInput(location.label ?? input);
+      setConfirmedInput(location.label ?? input);
+      setLocationNote(`Using ${location.label ?? location.zip} as your trip start.`);
+      setConfirmingLocation(false);
+      await search(location.zip);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const useCurrentLocation = async () => {
+    if (!navigator.geolocation) return setErr("This browser doesn’t support location access. Keep the city or ZIP you entered instead.");
+    setLocating(true);
+    setErr(null);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 12_000, maximumAge: 300_000 }),
+      );
+      const location = await api<{ zip: string; label?: string }>(
+        `/api/location/resolve?lat=${encodeURIComponent(position.coords.latitude)}&lon=${encodeURIComponent(position.coords.longitude)}`,
+      );
+      const label = location.label ?? location.zip;
+      setZip(location.zip);
+      setLocationInput(label);
+      setConfirmedInput(label);
+      setLocationNote(`Current location matched to ${label}. Your precise coordinates are not saved.`);
+      setConfirmingLocation(false);
+      await search(location.zip);
+    } catch (e) {
+      const code = typeof e === "object" && e !== null && "code" in e ? Number((e as { code: unknown }).code) : 0;
+      const message = code === 1
+        ? "Location access was not allowed. You can still use the city or ZIP you entered."
+        : "We couldn’t get your current location. You can still use the city or ZIP you entered.";
+      setErr(message);
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const submitOrigin = () => {
+    const input = locationInput.trim();
+    if (!input) return setErr("Enter a U.S. city and state or a 5-digit ZIP.");
+    if (!/^\d{5}$/.test(input) && !input.includes(",")) return setErr("For a city, add the state too, like Galesburg, IL.");
+    if (input === confirmedInput && zip) return search(zip);
+    setErr(null);
+    setConfirmingLocation(true);
+  };
 
   const toggle = (k: "mlh" | "tech") => {
     const n = new Set(groups);
@@ -122,39 +195,99 @@ export function FindClient({ initialZip }: { initialZip: string }) {
         className="fd-search"
         onSubmit={(e) => {
           e.preventDefault();
-          search();
+          submitOrigin();
         }}
       >
-        <input className="dk-in fd-zip" value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" placeholder="Your ZIP" aria-label="Your ZIP code" />
-        <input className="dk-in fd-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search: AI, Stanford, Cal Hacks…" aria-label="Search events" />
+        <label className="fd-origin">
+          <span>Where are you starting?</span>
+          <input
+            className="dk-in"
+            value={locationInput}
+            onChange={(e) => {
+              setLocationInput(e.target.value);
+              setConfirmedInput("");
+              setConfirmingLocation(false);
+              setLocationNote(null);
+            }}
+            autoComplete="postal-code"
+            placeholder="City, state or ZIP code"
+            aria-label="Starting city or ZIP code"
+          />
+        </label>
         <label className="fd-limit">
           <span>Max distance</span>
           <span className="fd-number"><input className="dk-in" type="number" min={1} max={3000} value={radius} onChange={(e) => setRadius(Math.min(3000, Math.max(1, Number(e.target.value) || 1)))} aria-label="Maximum route distance in miles" /><b>mi</b></span>
         </label>
-        <div className="dk-seg fd-types" aria-label="Event types">
-          <button type="button" aria-pressed={groups.has("mlh")} className={groups.has("mlh") ? "on" : ""} onClick={() => toggle("mlh")}>
-            <span>MLH events</span>
-            <small>Official student hackathons</small>
-          </button>
-          <button type="button" aria-pressed={groups.has("tech")} className={groups.has("tech") ? "on" : ""} onClick={() => toggle("tech")}>
-            <span>Tech events</span>
-            <small>Meetups, talks &amp; workshops</small>
-          </button>
+        <div className="fd-type-picker">
+          <div className="fd-type-heading"><b>What do you want to find?</b><span>Choose one or both</span></div>
+          <div className="fd-types" role="group" aria-label="Event types">
+            <button type="button" aria-pressed={groups.has("mlh")} className={groups.has("mlh") ? "on mlh" : "mlh"} onClick={() => toggle("mlh")}>
+              <span className="fd-type-icon" aria-hidden="true">⌁</span>
+              <span><b>MLH events</b><small>Official student hackathons from MLH</small></span>
+              <i aria-hidden="true">✓</i>
+            </button>
+            <button type="button" aria-pressed={groups.has("tech")} className={groups.has("tech") ? "on tech" : "tech"} onClick={() => toggle("tech")}>
+              <span className="fd-type-icon" aria-hidden="true">✦</span>
+              <span><b>Tech events</b><small>Local meetups, talks and workshops</small></span>
+              <i aria-hidden="true">✓</i>
+            </button>
+          </div>
         </div>
         <button className="dk-btn primary" disabled={loading}>
-          {loading ? "Searching live sources…" : "Find events"}
+          {loading ? "Searching live sources…" : res ? "Update nearby events" : "Find nearby events"}
         </button>
       </form>
+
+      {confirmingLocation && (
+        <section className="fd-location-check" aria-live="polite">
+          <div><b>Is {locationInput || "this place"} your current location?</b><span>Choose whether to keep the place you entered or let S’mile match your current GPS to a ZIP.</span></div>
+          <div className="dk-row">
+            <button type="button" className="dk-btn ghost" onClick={useTypedLocation} disabled={locating}>No, keep this place</button>
+            <button type="button" className="dk-btn primary" onClick={useCurrentLocation} disabled={locating}>{locating ? "Checking…" : "Yes, use my location"}</button>
+          </div>
+          <small>GPS is requested only after you choose yes. Precise coordinates are not saved.</small>
+        </section>
+      )}
+
+      {locationNote && <div className="fd-location-note">✓ {locationNote}</div>}
 
       {err && <div className="dk-toast err">{err}</div>}
 
       {res && (
-        <div className="fd-meta">
-          <span>
-            <b>{res.events.length}</b> events within {res.radiusMiles} mi of {res.origin.label ?? res.origin.zip}
-          </span>
-        </div>
+        <section className="fd-results-head">
+          <div className="fd-meta">
+            <span><b>{res.events.length}</b> events within {res.radiusMiles} mi of {res.origin.label ?? res.origin.zip}</span>
+          </div>
+          <form className="fd-event-search" onSubmit={(e) => { e.preventDefault(); search(zip, radius, q); }}>
+            <label htmlFor="event-search"><b>Looking for a specific event?</b><span>We’ll tell you clearly if it is outside your travel area.</span></label>
+            <div>
+              <input id="event-search" className="dk-in" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Try Cal Hacks, AI, Stanford…" aria-label="Search events by name or topic" />
+              {q && <button type="button" className="fd-clear" aria-label="Clear event search" onClick={() => { setQ(""); search(zip, radius, ""); }}>×</button>}
+              <button className="dk-btn primary" disabled={loading}>{loading ? "Searching…" : "Search events"}</button>
+            </div>
+          </form>
+        </section>
       )}
+
+      {res && activeQuery && res.events.length === 0 && (res.outsideRadius?.length ?? 0) > 0 && (() => {
+        const event = res.outsideRadius![0]!;
+        const distance = event.distanceMiles ?? res.radiusMiles;
+        const expandedRadius = Math.max(res.radiusMiles + 1, Math.ceil(distance));
+        return (
+          <section className="fd-outside" role="status">
+            <span className="fd-outside-mark" aria-hidden="true">↗</span>
+            <div>
+              <span className="fd-eyebrow">A match exists beyond your limit</span>
+              <h2>{event.name} is outside your {res.radiusMiles}-mile travel area.</h2>
+              <p>The closest matching event is in {event.city ?? event.venue ?? "another city"}, about <b>{distance.toLocaleString()} miles</b> from {res.origin.label ?? res.origin.zip}. Expand your distance to include it, or keep your limit and explore closer events.</p>
+              <div className="dk-row">
+                <button className="dk-btn primary" onClick={() => { setRadius(expandedRadius); search(zip, expandedRadius, activeQuery); }}>Expand to {expandedRadius.toLocaleString()} mi</button>
+                <a className="dk-btn ghost" href={event.url} target="_blank" rel="noreferrer">View event page ↗</a>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
 
       <div className={`fd-grid ${picked ? "with-plan" : ""}`}>
         <div className="fd-list">
@@ -196,7 +329,7 @@ export function FindClient({ initialZip }: { initialZip: string }) {
               </article>
             );
           })}
-          {res && res.events.length === 0 && <p className="dk-mut">No MLH or tech events found in that radius in the next 90 days. Try a wider radius.</p>}
+          {res && res.events.length === 0 && !(activeQuery && (res.outsideRadius?.length ?? 0) > 0) && <p className="dk-mut">{activeQuery ? `No MLH or tech events matching “${activeQuery}” were found in the next 90 days.` : "No MLH or tech events found in that radius in the next 90 days. Try a wider radius."}</p>}
           {res && res.unplaced.length > 0 && (
             <p className="dk-mut">
               {res.unplaced.length} more match your search but list only a venue name we can’t place on a map: {res.unplaced.map((u) => u.name).join(", ")}.
