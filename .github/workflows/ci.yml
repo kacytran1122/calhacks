@@ -1,0 +1,51 @@
+name: S'mile Frontend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smile-frontend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-tests:
+    name: Frontend interaction tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+      - name: Reject internal agent notes
+        shell: bash
+        run: |
+          if find . -path ./.git -prune -o -type f \( -iname 'AGENT.md' -o -iname 'AGENTS.md' -o -iname 'AGENT_HANDOFF.md' -o -iname '*agent*communication*.md' -o -iname '*handoff*.md' \) -print -quit | grep -q .; then
+            echo "Internal agent notes must not be committed."
+            exit 1
+          fi
+      - run: npm ci --prefix tests
+      - run: npm run test:frontend --prefix tests
+
+  source-artifact:
+    name: Package verified frontend source
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: frontend-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smile-frontend-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            frontend
+            tests/frontend
