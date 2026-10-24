@@ -151,14 +151,6 @@ export function FindClient({ initialZip }: { initialZip: string }) {
           <span>
             <b>{res.events.length}</b> events within {res.radiusMiles} mi of {res.origin.label ?? res.origin.zip}
           </span>
-          {res.sources.map((s) => (
-            <span key={s.source} className={`fd-src ${s.status === "ok" ? "ok" : "bad"}`} title={s.note ?? ""}>
-              {SOURCE[s.source as keyof typeof SOURCE] ?? s.source} · {s.status} · {s.count} · {s.via === "bright-data" ? "Bright Data" : "direct"}
-            </span>
-          ))}
-          <span className="fd-src">snapshots → {res.store === "tigerdata" ? "TigerData" : "local file"}</span>
-          <span className="fd-src">sorted by {res.classifiedBy === "claude" ? "Claude" : "keyword rules"}</span>
-          {res.storeNote && <span className="dk-warn">{res.storeNote}</span>}
         </div>
       )}
 
