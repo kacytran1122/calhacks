@@ -205,7 +205,7 @@ export interface PickedEvent {
 
 export async function planTrip(
   state: State,
-  args: { zip: string; originText?: string; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; travelConstraints?: TravelConstraints & { raw: string } },
+  args: { zip: string; originText?: string; originCoordinates?: { lat: number; lon: number }; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; travelConstraints?: TravelConstraints & { raw: string } },
 ) {
   const travelerId = newId("T-live");
   state.travelers.push({ id: travelerId, initials: args.initials ?? "YOU", school: "Lens user", homeZip: args.zip });
@@ -237,7 +237,7 @@ export async function planTrip(
   }
   if (scoutEvidenceId) state.evidence.find((e) => e.id === scoutEvidenceId)!.tripId = trip.id;
 
-  const g = await gatherEvidence(state, { tripId: trip.id, homeZip: args.zip, originText: args.originText, event: { ...(facts ?? { extractedBy: picked ? "json-ld" : "lens-hints", verified: Boolean(picked) }), name: event.name, venue: event.venue, city: event.city, startsAt: event.startsAt, lat: event.lat, lon: event.lon }, travelConstraintSummary: args.travelConstraints?.summary });
+  const g = await gatherEvidence(state, { tripId: trip.id, homeZip: args.zip, originText: args.originText, originCoordinates: args.originCoordinates, event: { ...(facts ?? { extractedBy: picked ? "json-ld" : "lens-hints", verified: Boolean(picked) }), name: event.name, venue: event.venue, city: event.city, startsAt: event.startsAt, lat: event.lat, lon: event.lon }, travelConstraintSummary: args.travelConstraints?.summary });
   if (g.miles === undefined) {
     appendAudit(state, { actor: orch, action: "plan.blocked", subject: trip.id, reason: "Couldn't compute distance (ZIP or venue location unavailable)", refs: g.evidence.map((e) => e.id) });
     return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes: null, inbox: null };

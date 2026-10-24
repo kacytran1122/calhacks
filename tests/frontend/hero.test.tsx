@@ -59,7 +59,7 @@ describe("landing origin picker", () => {
     await user.click(screen.getByRole("button", { name: /find trips/i }));
     expect(getCurrentPosition).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Allow location" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=Galesburg%2C%20IL&gps=1"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=Galesburg%2C%20IL&gps=1&lat=40.95&lon=-90.37"));
   });
 
   test("falls back to the entered location when browser permission is denied", async () => {

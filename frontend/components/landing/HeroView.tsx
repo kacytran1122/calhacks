@@ -16,7 +16,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
   const [pendingOrigin, setPendingOrigin] = useState<PendingOrigin | null>(null);
   const [message, setMessage] = useState<{ kind: "hint" | "error"; text: string } | null>(null);
 
-  const findUrl = (origin: PendingOrigin, gps = false) => `/find?zip=${origin.zip}&origin=${encodeURIComponent(origin.label)}${gps ? "&gps=1" : ""}`;
+  const findUrl = (origin: PendingOrigin, coordinates?: { lat: number; lon: number }) => `/find?zip=${origin.zip}&origin=${encodeURIComponent(origin.label)}${coordinates ? `&gps=1&lat=${coordinates.lat}&lon=${coordinates.lon}` : ""}`;
 
   const selectMode = (next: OriginMode) => {
     setMode(next);
@@ -74,7 +74,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
       const response = await fetch(`/api/location/resolve?lat=${encodeURIComponent(position.coords.latitude)}&lon=${encodeURIComponent(position.coords.longitude)}`);
       const result = (await response.json()) as { zip?: string; label?: string; error?: string };
       if (!response.ok || !result.zip) throw new Error(result.error ?? "We couldn’t match your location to a ZIP code.");
-      onNavigate(findUrl({ zip: result.zip, label: result.label ?? "Current location" }, true));
+      onNavigate(findUrl({ zip: result.zip, label: result.label ?? "Current location" }, { lat: position.coords.latitude, lon: position.coords.longitude }));
     } catch {
       if (pendingOrigin) onNavigate(findUrl(pendingOrigin));
     } finally {

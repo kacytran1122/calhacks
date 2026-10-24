@@ -4,7 +4,7 @@ import type { State } from "../store";
 import { newId } from "../store";
 import type { Evidence } from "../types";
 import { serp, type SerpOrganic } from "../integrations/brightdata";
-import { haversineMiles, zipToPoint } from "../integrations/geo";
+import { haversineMiles, placeToPoint, zipToPoint } from "../integrations/geo";
 import { weatherAt } from "../integrations/nws";
 import { payAndFetch } from "../integrations/x402";
 import { postEntry } from "../ledger";
@@ -118,13 +118,17 @@ async function extractRouteGuides(results: SerpOrganic[], from: string, to: stri
   }
 }
 
-export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; originText?: string; event: EventFacts & { city?: string }; travelConstraintSummary?: string }) {
+export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; originText?: string; originCoordinates?: { lat: number; lon: number }; event: EventFacts & { city?: string }; travelConstraintSummary?: string }) {
   const { tripId, homeZip, event } = args;
   const out: Evidence[] = [];
 
   authorize(state, agent, "feeds.read", tripId);
-  const home = await zipToPoint(homeZip);
-  out.push(push(state, { tripId, kind: "geocode", source: home.source, url: home.url, status: home.status, data: { zip: homeZip, lat: home.lat, lon: home.lon, label: home.label }, note: home.error }));
+  const enteredPlace = args.originText?.trim() && args.originText.trim() !== homeZip ? await placeToPoint(args.originText.trim()) : undefined;
+  const zipPoint = await zipToPoint(homeZip);
+  const home = args.originCoordinates
+    ? { ...zipPoint, status: "ok" as const, lat: args.originCoordinates.lat, lon: args.originCoordinates.lon, label: args.originText?.trim() || zipPoint.label, source: "Browser geolocation", url: undefined }
+    : enteredPlace?.status === "ok" ? enteredPlace : zipPoint;
+  out.push(push(state, { tripId, kind: "geocode", source: home.source, url: home.url, status: home.status, data: args.originCoordinates ? { zip: homeZip, label: home.label, preciseLocationRetained: false } : { zip: homeZip, lat: home.lat, lon: home.lon, label: home.label }, note: home.error }));
 
   let miles: number | undefined;
   if (home.status === "ok" && event.lat !== undefined && event.lon !== undefined) miles = Math.round(haversineMiles({ lat: home.lat!, lon: home.lon! }, { lat: event.lat, lon: event.lon }));

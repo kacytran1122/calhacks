@@ -106,6 +106,25 @@ const STATE_ANCHORS: Record<string, [string, string]> = {
 };
 
 const cityCache = new Map<string, GeoResult>();
+const placeCache = new Map<string, GeoResult>();
+
+export async function placeToPoint(location: string): Promise<GeoResult> {
+  const key = location.trim().toLowerCase();
+  const cached = placeCache.get(key);
+  if (cached) return cached;
+  const source = "OpenStreetMap U.S. place lookup";
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=us&addressdetails=1&limit=5&q=${encodeURIComponent(location)}`;
+  if (key.length < 2) return { status: "empty", source, url, error: "location is too short" };
+  const r = await getJson(url, 5_000);
+  type Place = { lat: string; lon: string; display_name: string; address?: { postcode?: string; country_code?: string } };
+  const places = r.ok && Array.isArray(r.json) ? r.json as Place[] : [];
+  const place = places.find((candidate) => candidate.address?.country_code?.toLowerCase() === "us") ?? places[0];
+  const out: GeoResult = place
+    ? { status: "ok", lat: Number(place.lat), lon: Number(place.lon), label: place.display_name, postalCode: place.address?.postcode?.match(/\b\d{5}\b/)?.[0], source, url }
+    : { status: r.ok ? "empty" : r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? (r.ok ? "no such U.S. place" : `HTTP ${r.status}`) };
+  placeCache.set(key, out);
+  return out;
+}
 
 async function cityInState(city: string, state: string): Promise<GeoResult> {
   const url = `https://api.zippopotam.us/us/${state.toLowerCase()}/${encodeURIComponent(city.toLowerCase())}`;

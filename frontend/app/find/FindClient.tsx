@@ -166,9 +166,10 @@ function UnpricedRouteGuide({ guide, origin, event }: { guide: RouteGuide; origi
   );
 }
 
-export function FindClient({ initialZip, initialOrigin }: { initialZip: string; initialOrigin?: string }) {
+export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }: { initialZip: string; initialOrigin?: string; initialLat?: number; initialLon?: number }) {
   const [locationInput, setLocationInput] = useState(initialOrigin || initialZip);
   const [resolvedInput, setResolvedInput] = useState(initialOrigin || initialZip);
+  const [originCoordinates, setOriginCoordinates] = useState(initialLat !== undefined && initialLon !== undefined ? { lat: initialLat, lon: initialLon } : undefined);
   const [zip, setZip] = useState(initialZip);
   const [radius, setRadius] = useState(200);
   const [distanceUnit, setDistanceUnit] = useState<"mi" | "km">("mi");
@@ -188,17 +189,21 @@ export function FindClient({ initialZip, initialOrigin }: { initialZip: string; 
     try {
       const query = nextQuery.trim();
       const p = new URLSearchParams({ zip: z, radius: String(nextRadius), groups: [...nextGroups].join(",") });
+      if (originCoordinates) {
+        p.set("lat", String(originCoordinates.lat));
+        p.set("lon", String(originCoordinates.lon));
+      }
       if (query) p.set("q", query);
       setRes(await api<Discover>(`/api/events?${p}`));
       setActiveQuery(query);
       setZip(z);
-      history.replaceState(null, "", `/find?zip=${z}&origin=${encodeURIComponent(originLabel || z)}`);
+      history.replaceState(null, "", `/find?zip=${z}&origin=${encodeURIComponent(originLabel || z)}${originCoordinates ? `&gps=1&lat=${originCoordinates.lat}&lon=${originCoordinates.lon}` : ""}`);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [radius, q, groups, locationInput]);
+  }, [radius, q, groups, locationInput, originCoordinates]);
 
   const useTypedLocation = async () => {
     const input = locationInput.trim();
@@ -266,6 +271,7 @@ export function FindClient({ initialZip, initialOrigin }: { initialZip: string; 
             value={locationInput}
             onChange={(e) => {
               setLocationInput(e.target.value);
+              setOriginCoordinates(undefined);
             }}
             autoComplete="address-level2"
             placeholder="ZIP, city, state, or city + state"
@@ -401,13 +407,13 @@ export function FindClient({ initialZip, initialOrigin }: { initialZip: string; 
             </p>
           )}
         </div>
-        {picked && <PlanPane key={picked.key} zip={zip} originText={locationInput} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
+        {picked && <PlanPane key={picked.key} zip={zip} originText={locationInput} originCoordinates={originCoordinates} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
       </div>
     </div>
   );
 }
 
-function PlanPane({ zip, originText, maxDistanceMiles, event, onClose }: { zip: string; originText: string; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
+function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event, onClose }: { zip: string; originText: string; originCoordinates?: { lat: number; lon: number }; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
   const [initials, setInitials] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
   const [constraintText, setConstraintText] = useState("");
@@ -451,6 +457,7 @@ function PlanPane({ zip, originText, maxDistanceMiles, event, onClose }: { zip: 
       const p = await api<Plan>("/api/plan", {
         zip,
         originText: originText || zip,
+        originCoordinates,
         initials: initials || undefined,
         travelerBudgetCents: Math.round(Number(budgetUsd) * 100),
         maxDistanceMiles,
