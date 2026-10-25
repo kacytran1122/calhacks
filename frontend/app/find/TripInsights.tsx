@@ -7,9 +7,9 @@ import { HourChart } from "./HourChart";
 type Point = { lat: number; lon: number };
 type Range = { p10: number; p50: number; p90: number };
 type HourPrice = { hour: number; period: string; uber: Range; lyft: Range };
-type FlightHour = { hour: number; period: string; factor: number; range: Range };
+type FlightHour = { hour: number; period: string; factor: number; range: Range; past: number | null };
 type PriceOut = {
-  rideshare: { uber: Range; lyft: Range; miles: number; minutes: number; departAt: string; departHour: number; period: string; byHour: HourPrice[]; cheapestOnTime: HourPrice | null; caveat: string } | null;
+  rideshare: { uber: Range; lyft: Range; miles: number; minutes: number; departAt: string; departHour: number; period: string; byHour: HourPrice[]; pastByHour: (number | null)[]; cheapestOnTime: HourPrice | null; caveat: string } | null;
   airfare: { from: { code: string; city: string }; to: { code: string; city: string }; miles: number; range: Range; byHour: FlightHour[]; cheapestHour: FlightHour | null; caveat: string } | null;
   drive: { status: string; source: string; miles: number; minutes: number };
   models: { rideshare: { metrics: Record<string, number>; data: Record<string, unknown> }; airfare: { metrics: Record<string, number>; data: Record<string, unknown> } };
@@ -169,7 +169,9 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
             </span>
           </div>
           <HourChart
-            title={`${brand === "uber" ? "Uber" : "Lyft"} price by departure hour (same trip, same day)`}
+            title={`${brand === "uber" ? "Uber" : "Lyft"} price by departure hour: past pattern vs predicted`}
+            past={price.rideshare.pastByHour}
+            pastLabel="past: what riders paid per mile at that hour (NYC, similar trips), × your distance"
             bars={price.rideshare.byHour.map((h) => ({ hour: h.hour, period: h.period, ...h[brand] }))}
             mine={price.rideshare.departHour}
             best={price.rideshare.cheapestOnTime?.hour}
@@ -178,7 +180,9 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
       )}
       {price?.airfare && price.airfare.byHour.length > 0 && (
         <HourChart
-          title={`Flight ${price.airfare.from.code} → ${price.airfare.to.code} by departure hour (nonstop)`}
+          title={`Flight ${price.airfare.from.code} → ${price.airfare.to.code} by departure hour: past pattern vs predicted`}
+          past={price.airfare.byHour.map((h) => h.past)}
+          pastLabel="past: how nonstop fares varied by departure hour, × this route's fare"
           bars={price.airfare.byHour.map((h) => ({ hour: h.hour, period: h.period, ...h.range }))}
           best={price.airfare.cheapestHour?.hour}
         />
