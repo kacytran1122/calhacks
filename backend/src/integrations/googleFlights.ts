@@ -162,7 +162,9 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
   const snapshotId = trigger.body?.snapshotId;
   let collectionState = "starting";
   if (trigger.status === "ok" && snapshotId) {
+    let checks = 0;
     while (Date.now() - started < timeoutMs - 700) {
+      checks += 1;
       const remaining = timeoutMs - (Date.now() - started);
       const snapshot = await readDatasetSnapshot<unknown>(snapshotId, Math.min(4_000, remaining));
       collectionState = snapshot.body?.state ?? collectionState;
@@ -186,6 +188,7 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
       if (snapshot.status === "error" || snapshot.status === "blocked") {
         return { ...base, status: snapshot.status, snapshotId, collectionState, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: snapshot.error ?? "The live fare collection failed." };
       }
+      if (requestedSnapshot && checks >= 1) break;
       await new Promise((resolve) => setTimeout(resolve, Math.min(1_200, Math.max(0, timeoutMs - (Date.now() - started) - 700))));
     }
     return { ...base, status: "timeout", snapshotId, collectionState, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: "The live fare is still being collected. S’mile will keep checking this snapshot." };

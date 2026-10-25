@@ -111,6 +111,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
   const [heat, setHeat] = useState<Heat | null>(null);
   const [err, setErr] = useState<{ price?: string; heat?: string }>({});
   const [brand, setBrand] = useState<"uber" | "lyft">("uber");
+  const [flightPollingEnded, setFlightPollingEnded] = useState(false);
   const flightPolls = useRef(0);
 
   useEffect(() => {
@@ -119,6 +120,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
     setFlight(undefined);
     setHeat(null);
     setErr({});
+    setFlightPollingEnded(false);
     flightPolls.current = 0;
     call<PriceOut>("/api/price-estimate", { from, to, startsAt, timeZone, fromState, toState }).then(setPrice, (e) => setErr((x) => ({ ...x, price: (e as Error).message })));
     call<FlightCheck | null>("/api/live-flight-price", { from, to, startsAt, fromState, toState }).then(setFlight, () => setFlight(null));
@@ -127,13 +129,16 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
 
   useEffect(() => {
     const snapshotId = flight?.live.snapshotId;
-    if (!from || !to || !startsAt || !snapshotId || flight.live.status !== "timeout" || flightPolls.current >= 12) return;
+    if (!from || !to || !startsAt || !snapshotId || flight.live.status !== "timeout" || flightPollingEnded) return;
     const timer = window.setTimeout(() => {
       flightPolls.current += 1;
-      call<FlightCheck | null>("/api/live-flight-price", { from, to, startsAt, fromState, toState, snapshotId }).then(setFlight, () => undefined);
-    }, 5_000);
+      call<FlightCheck | null>("/api/live-flight-price", { from, to, startsAt, fromState, toState, snapshotId }).then((next) => {
+        setFlight(next);
+        if (next?.live.status === "timeout" && flightPolls.current >= 36) setFlightPollingEnded(true);
+      }, () => undefined);
+    }, 10_000);
     return () => window.clearTimeout(timer);
-  }, [flight, from, to, startsAt, fromState, toState]);
+  }, [flight, flightPollingEnded, from, to, startsAt, fromState, toState]);
 
   if (!from || !to || !startsAt) return null;
   const rows = price
@@ -188,7 +193,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
                 {flight.differencePct !== null ? ` · ${Math.abs(flight.differencePct)}% ${flight.differencePct < 0 ? "below" : flight.differencePct > 0 ? "above" : "at"} the midpoint` : ""}
               </p>
             ) : flight.live.status === "timeout" && flight.live.snapshotId ? (
-              <p>Collecting the current fare now. The pricing agent will update this card automatically while keeping the trained forecast visible.</p>
+              <p>{flightPollingEnded ? "Google Flights is still processing this live search. The trained forecast stays visible, and the trip watcher can continue checking after you leave this page." : "Collecting the current fare now. The pricing agent will update this card automatically while keeping the trained forecast visible."}</p>
             ) : (
               <p>No exact live fare was verified in this check. The forecast remains planning evidence, not a quoted price.</p>
             )}

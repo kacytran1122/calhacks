@@ -113,3 +113,18 @@ test("a pending live collection is resumed with the same snapshot", async (t) =>
   assert.equal(second.amountUsd, 188);
   assert.equal(triggers, 1);
 });
+
+test("resuming a running collection checks once instead of holding the request open", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  let progressChecks = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    progressChecks += 1;
+    return new Response(JSON.stringify({ status: "running" }), { status: 200 });
+  });
+  const started = Date.now();
+  const quote = await liveGoogleFlightQuote({ fromAirport: "SFO", toAirport: "DEN", departDate: "2027-01-16", snapshotId: "s_running123", timeoutMs: 3_000 });
+  assert.equal(quote.status, "timeout");
+  assert.equal(quote.snapshotId, "s_running123");
+  assert.equal(progressChecks, 1);
+  assert.ok(Date.now() - started < 500);
+});
