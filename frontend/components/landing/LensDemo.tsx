@@ -110,7 +110,7 @@ export function LensDemo() {
           </div>
           <a className="lens-install" href="https://chromewebstore.google.com/" target="_blank" rel="noopener noreferrer">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><path d="M12 8h9.16M8.54 14 3.96 6.07M15.46 14l-4.58 7.94" /></svg>
-            Add to Chrome <span aria-hidden="true">↗</span>
+            Get the extension
           </a>
         </div>
         <figure className="lens-preview reveal">
