@@ -148,6 +148,61 @@ export async function scrapeDataset<T = unknown>(datasetId: string, input: Recor
   }
 }
 
+export async function triggerDataset(datasetId: string, input: Record<string, unknown>[], timeoutMs = 5_000): Promise<BdResult<{ snapshotId: string }>> {
+  const key = brightDataKey();
+  const t0 = Date.now();
+  if (!key) return { status: "error", attempts: 0, ms: 0, error: "BRIGHTDATA_API_TOKEN is not set" };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const params = new URLSearchParams({ dataset_id: datasetId, notify: "false", include_errors: "true" });
+    const res = await fetch(`${API}/datasets/v3/trigger?${params}`, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    const text = await res.text();
+    if (!res.ok) return { status: res.status === 403 || res.status === 429 ? "blocked" : "error", attempts: 1, ms: Date.now() - t0, error: `Bright Data trigger HTTP ${res.status}: ${text.slice(0, 240)}` };
+    const snapshotId = (JSON.parse(text) as { snapshot_id?: string }).snapshot_id;
+    if (!snapshotId || !/^s(?:d)?_[A-Za-z0-9]+$/.test(snapshotId)) return { status: "error", attempts: 1, ms: Date.now() - t0, error: "Bright Data did not return a valid snapshot ID" };
+    return { status: "ok", body: { snapshotId }, attempts: 1, ms: Date.now() - t0 };
+  } catch (e) {
+    const timedOut = (e as Error).name === "AbortError" || (e as Error).name === "TimeoutError";
+    return { status: timedOut ? "timeout" : "error", attempts: 1, ms: Date.now() - t0, error: timedOut ? "Bright Data did not start the collection within five seconds" : (e as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function readDatasetSnapshot<T = unknown>(snapshotId: string, timeoutMs = 5_000): Promise<BdResult<{ snapshotId: string; state: string; records?: T }>> {
+  const key = brightDataKey();
+  const t0 = Date.now();
+  if (!key) return { status: "error", attempts: 0, ms: 0, error: "BRIGHTDATA_API_TOKEN is not set" };
+  if (!/^s(?:d)?_[A-Za-z0-9]+$/.test(snapshotId)) return { status: "error", attempts: 0, ms: 0, error: "Invalid Bright Data snapshot ID" };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const progressResponse = await fetch(`${API}/datasets/v3/progress/${snapshotId}`, { signal: ctrl.signal, headers: { Authorization: `Bearer ${key}` } });
+    if (!progressResponse.ok) return { status: progressResponse.status === 403 || progressResponse.status === 429 ? "blocked" : "error", attempts: 1, ms: Date.now() - t0, error: `Bright Data progress HTTP ${progressResponse.status}` };
+    const progress = await progressResponse.json() as { status?: string; error_message?: string };
+    if (progress.status !== "ready") {
+      const failed = progress.status === "failed" || progress.status === "canceled";
+      return { status: failed ? "error" : "timeout", body: { snapshotId, state: progress.status ?? "running" }, attempts: 1, ms: Date.now() - t0, error: failed ? progress.error_message ?? `Bright Data snapshot ${progress.status}` : undefined };
+    }
+    const resultResponse = await fetch(`${API}/datasets/v3/snapshot/${snapshotId}?format=json`, { signal: ctrl.signal, headers: { Authorization: `Bearer ${key}` } });
+    const text = await resultResponse.text();
+    if (!resultResponse.ok) return { status: resultResponse.status === 403 || resultResponse.status === 429 ? "blocked" : "error", attempts: 1, ms: Date.now() - t0, error: `Bright Data snapshot HTTP ${resultResponse.status}: ${text.slice(0, 240)}` };
+    const records = JSON.parse(text) as T;
+    return { status: Array.isArray(records) && records.length === 0 ? "empty" : "ok", body: { snapshotId, state: "ready", records }, attempts: 1, ms: Date.now() - t0 };
+  } catch (e) {
+    const timedOut = (e as Error).name === "AbortError" || (e as Error).name === "TimeoutError";
+    return { status: timedOut ? "timeout" : "error", attempts: 1, ms: Date.now() - t0, error: timedOut ? "Bright Data snapshot status timed out" : (e as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface SerpOrganic {
   link: string;
   title: string;

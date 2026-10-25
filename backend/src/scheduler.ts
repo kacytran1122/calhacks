@@ -39,7 +39,7 @@ const DAY = 86_400_000;
 export interface SchedulerDeps {
   now?: Date;
   prices?: (args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string }) => Promise<PriceEstimate>;
-  flightPrices?: (args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; timeoutMs?: number }) => Promise<FlightPriceCheck | null>;
+  flightPrices?: (args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; snapshotId?: string; timeoutMs?: number }) => Promise<FlightPriceCheck | null>;
   heat?: (args: { lat: number; lon: number; at: string }) => Promise<HeatMap>;
   discover?: (opts: DiscoverOptions) => Promise<DiscoverResult>;
 }
@@ -80,7 +80,9 @@ export function priceWatchTargets(state: State, now: Date) {
   return upcoming(state, now, PRICE_DAYS).flatMap(({ trip, event }) => {
     const from = homeOf(state, trip.id);
     const to = venueOf(event);
-    return (trip.mode === "rideshare" || trip.mode === "flight") && from && to && trip.quoteCents > 0 ? [{ trip, event, from, to }] : [];
+    const pending = [...state.evidence].reverse().find((item) => item.tripId === trip.id && item.kind === "price_watch" && item.data.liveStatus === "timeout" && typeof item.data.liveSnapshotId === "string" && item.data.liveCollectionState !== "ready");
+    const snapshotId = pending?.data.liveSnapshotId as string | undefined;
+    return (trip.mode === "rideshare" || trip.mode === "flight") && from && to && trip.quoteCents > 0 ? [{ trip, event, from, to, snapshotId }] : [];
   });
 }
 
@@ -117,6 +119,8 @@ export function applyPriceWatch(state: State, results: { tripId: string; estimat
       observedAt: flight?.live.observedAt,
       sourceUrl: flight?.live.sourceUrl,
       bookingUrl: flight?.live.bookingUrl,
+      liveSnapshotId: flight?.live.snapshotId,
+      liveCollectionState: flight?.live.collectionState,
       predictedCents: predicted.cents,
       range: predicted.range,
       signal: flight?.signal,
@@ -233,7 +237,7 @@ async function priceWatchJob(deps: SchedulerDeps, now: Date): Promise<Omit<JobRe
       const args = { from: t.from, to: t.to, startsAt: t.event.startsAt, fromState: t.from.state, toState: stateCodeFromLabel(t.event.city) };
       const estimate = await runAgent(pricingCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)(args));
       const flight = t.trip.mode === "flight"
-        ? await runAgent(flightPriceCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.flightPrices ?? checkFlightPrice)({ ...args, timeoutMs: 10_000 }))
+        ? await runAgent(flightPriceCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.flightPrices ?? checkFlightPrice)({ ...args, snapshotId: t.snapshotId, timeoutMs: 10_000 }))
         : undefined;
       results.push({ tripId: t.trip.id, estimate, flight });
     } catch {

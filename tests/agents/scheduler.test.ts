@@ -56,7 +56,7 @@ test("price_watch compares a live Google Flights fare with the trained forecast 
     trip.quoteCents = 20_000;
   });
   const flightPrices = async () => ({
-    live: { status: "ok", amountUsd: 150, currency: "USD", fromAirport: "PIA", toAirport: "SFO", departDate: "2026-11-13", observedAt: NOW.toISOString(), sourceUrl: "https://www.google.com/travel/flights?q=PIA+SFO", via: "Bright Data Google Flights scraper", ms: 800 },
+    live: { status: "ok", amountUsd: 150, currency: "USD", fromAirport: "PIA", toAirport: "SFO", departDate: "2026-11-13", observedAt: NOW.toISOString(), sourceUrl: "https://www.google.com/travel/flights?q=PIA+SFO", via: "Bright Data Google Flights scraper", ms: 800, snapshotId: "s_scheduler123", collectionState: "ready" },
     prediction: { range: range(190) },
     signal: "below_prediction" as const,
     differencePct: -21,
@@ -68,6 +68,8 @@ test("price_watch compares a live Google Flights fare with the trained forecast 
   const evidence = state.evidence.find((item) => item.tripId === "TR-L-test" && item.kind === "price_watch")!;
   assert.equal(evidence.data.liveCents, 15_000);
   assert.equal(evidence.data.predictedCents, 19_000);
+  assert.equal(evidence.data.liveSnapshotId, "s_scheduler123");
+  assert.equal(evidence.data.liveCollectionState, "ready");
   assert.match(notices()[0]!.question, /Live Google Flights check.*\$150\.00.*forecast is \$152\.00–\$247\.00/);
 });
 

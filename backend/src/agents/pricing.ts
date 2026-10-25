@@ -55,7 +55,7 @@ export async function estimatePrices(args: { from: Point; to: Point; startsAt: s
   };
 }
 
-export async function checkFlightPrice(args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; sourceUrl?: string; timeoutMs?: number }): Promise<FlightPriceCheck | null> {
+export async function checkFlightPrice(args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; sourceUrl?: string; snapshotId?: string; timeoutMs?: number }): Promise<FlightPriceCheck | null> {
   const fromState = args.fromState?.trim().toUpperCase();
   const toState = args.toState?.trim().toUpperCase();
   if (!fromState || !toState || fromState === toState || !/^[A-Z]{2}$/.test(fromState) || !/^[A-Z]{2}$/.test(toState)) return null;
@@ -66,6 +66,7 @@ export async function checkFlightPrice(args: { from: Point; to: Point; startsAt:
     toAirport: prediction.to.code,
     departDate: dayBefore(args.startsAt),
     sourceUrl: args.sourceUrl,
+    snapshotId: args.snapshotId,
     timeoutMs: args.timeoutMs,
   });
   if (live.status !== "ok" || live.amountUsd === undefined) return { live, prediction, signal: "unavailable", differencePct: null };

@@ -16,7 +16,7 @@ type PriceOut = {
   models: { rideshare: { metrics: Record<string, number>; data: Record<string, unknown> }; airfare: { metrics: Record<string, number>; data: Record<string, unknown> } };
 };
 type FlightCheck = {
-  live: { status: string; amountUsd?: number; currency: "USD"; fromAirport: string; toAirport: string; departDate: string; observedAt: string; sourceUrl: string; bookingUrl?: string; provider?: string; scope?: string; via: string; note?: string };
+  live: { status: string; amountUsd?: number; currency: "USD"; fromAirport: string; toAirport: string; departDate: string; observedAt: string; sourceUrl: string; bookingUrl?: string; provider?: string; scope?: string; via: string; snapshotId?: string; collectionState?: string; note?: string };
   prediction: { range: Range };
   signal: "below_prediction" | "within_prediction" | "above_prediction" | "unavailable";
   differencePct: number | null;
@@ -111,6 +111,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
   const [heat, setHeat] = useState<Heat | null>(null);
   const [err, setErr] = useState<{ price?: string; heat?: string }>({});
   const [brand, setBrand] = useState<"uber" | "lyft">("uber");
+  const flightPolls = useRef(0);
 
   useEffect(() => {
     if (!from || !to || !startsAt) return;
@@ -118,10 +119,21 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
     setFlight(undefined);
     setHeat(null);
     setErr({});
+    flightPolls.current = 0;
     call<PriceOut>("/api/price-estimate", { from, to, startsAt, timeZone, fromState, toState }).then(setPrice, (e) => setErr((x) => ({ ...x, price: (e as Error).message })));
     call<FlightCheck | null>("/api/live-flight-price", { from, to, startsAt, fromState, toState }).then(setFlight, () => setFlight(null));
     call<Heat>(`/api/heat?lat=${to.lat}&lon=${to.lon}&at=${encodeURIComponent(startsAt)}`).then(setHeat, (e) => setErr((x) => ({ ...x, heat: (e as Error).message })));
   }, [from?.lat, from?.lon, to?.lat, to?.lon, startsAt, timeZone, fromState, toState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const snapshotId = flight?.live.snapshotId;
+    if (!from || !to || !startsAt || !snapshotId || flight.live.status !== "timeout" || flightPolls.current >= 12) return;
+    const timer = window.setTimeout(() => {
+      flightPolls.current += 1;
+      call<FlightCheck | null>("/api/live-flight-price", { from, to, startsAt, fromState, toState, snapshotId }).then(setFlight, () => undefined);
+    }, 5_000);
+    return () => window.clearTimeout(timer);
+  }, [flight, from, to, startsAt, fromState, toState]);
 
   if (!from || !to || !startsAt) return null;
   const rows = price
@@ -175,6 +187,8 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
                 <strong>{usd(flight.live.amountUsd)}</strong> observed now · forecast midpoint {usd(flight.prediction.range.p50)}
                 {flight.differencePct !== null ? ` · ${Math.abs(flight.differencePct)}% ${flight.differencePct < 0 ? "below" : flight.differencePct > 0 ? "above" : "at"} the midpoint` : ""}
               </p>
+            ) : flight.live.status === "timeout" && flight.live.snapshotId ? (
+              <p>Collecting the current fare now. The pricing agent will update this card automatically while keeping the trained forecast visible.</p>
             ) : (
               <p>No exact live fare was verified in this check. The forecast remains planning evidence, not a quoted price.</p>
             )}
