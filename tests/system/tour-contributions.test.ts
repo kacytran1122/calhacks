@@ -55,7 +55,7 @@ test("multipart API validates real uploaded bytes, permission, origins, duplicat
   `;
   execFileSync(process.execPath, ["--conditions=react-server", "--import", path.join(root, "backend/node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], {
     cwd: root,
-    env: { ...process.env, NODE_ENV: "production", VERCEL: "", TIGER_DATABASE_URL: "", SMILE_DATA_DIR: directory, TSX_TSCONFIG_PATH: path.join(root, "frontend/tsconfig.json") },
+    env: { ...process.env, NODE_ENV: "production", VERCEL: "", TIGER_DATABASE_URL: "", TOUR_CONTRIBUTION_STORAGE: "sqlite", SMILE_DATA_DIR: directory, TSX_TSCONFIG_PATH: path.join(root, "frontend/tsconfig.json") },
     timeout: 30_000,
     stdio: "pipe",
   });

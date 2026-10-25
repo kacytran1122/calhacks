@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { rootCertificates } from "node:tls";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { TOUR_UPLOAD_LIMITS, PostgresTourContributionStore, TourContributionError, TourContributionStore, normalizeTourPhotos, tourContributionOriginAllowed, tourContributionPgOptions, tourContributionStore, type TourContributionInput, type TourContributionPgClient, type TourContributionPgPool } from "../../backend/src/tourContributions";
 
 const sharp = createRequire(new URL("../../backend/package.json", import.meta.url))("sharp");
@@ -348,21 +351,85 @@ test("selects the configured TigerData database before receiving uploads", () =>
   finally { if (before === undefined) delete process.env.TIGER_DATABASE_URL; else process.env.TIGER_DATABASE_URL = before; }
 });
 
+test("selects an explicit database without silently falling back and rejects invalid settings", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-tour-provider-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const backend = fileURLToPath(new URL("../../backend/", import.meta.url));
+  const source = new URL("../../backend/src/tourContributions.ts", import.meta.url).href;
+  const script = `
+    import assert from "node:assert/strict";
+    import { tourContributionStore, TourContributionError } from ${JSON.stringify(source)};
+    const unavailable = (error) => error instanceof TourContributionError && error.status === 503;
+    process.env.TIGER_DATABASE_URL = "postgresql://user:unused@database.example/test?sslmode=require";
+    process.env.TOUR_CONTRIBUTION_STORAGE = "sqlite";
+    assert.equal(tourContributionStore().kind, "sqlite");
+    process.env.TOUR_CONTRIBUTION_STORAGE = "tigerdata";
+    assert.equal(tourContributionStore().kind, "tigerdata");
+    process.env.TOUR_CONTRIBUTION_STORAGE = "";
+    assert.equal(tourContributionStore().kind, "tigerdata");
+    process.env.TIGER_DATABASE_URL = "";
+    assert.equal(tourContributionStore().kind, "sqlite");
+    process.env.TOUR_CONTRIBUTION_STORAGE = "tigerdata";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.TOUR_CONTRIBUTION_STORAGE = "unknown";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.VERCEL = "1";
+    for (const provider of ["sqlite", "tigerdata", ""]) {
+      process.env.TOUR_CONTRIBUTION_STORAGE = provider;
+      assert.throws(() => tourContributionStore(), unavailable);
+    }
+  `;
+  execFileSync(process.execPath, ["--import", path.join(backend, "node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], { cwd: backend, env: { ...process.env, VERCEL: "", SMILE_DATA_DIR: directory }, timeout: 30_000, stdio: "pipe" });
+});
+
 test("keeps certificate and hostname verification for every supported PostgreSQL TLS mode", () => {
   const { Client } = createRequire(new URL("../../backend/package.json", import.meta.url))("pg");
   for (const mode of [undefined, "prefer", "require", "verify-ca", "verify-full"]) {
     const options = tourContributionPgOptions(`postgresql://user:unused@database.example/test${mode ? `?sslmode=${mode}` : ""}`);
-    assert.equal(new URL(options.connectionString).searchParams.get("sslmode"), "verify-full");
+    assert.equal(new URL(options.connectionString).searchParams.has("sslmode"), false);
     assert.equal(options.ssl.rejectUnauthorized, true);
     const actual = new Client(options).connectionParameters.ssl;
     assert.ok(actual);
     assert.notEqual(actual.rejectUnauthorized, false);
     assert.equal(actual.checkServerIdentity, undefined);
   }
-  const options = tourContributionPgOptions("postgresql://user:unused@database.example/test?sslmode=require&sslrootcert=%2Fprivate%2Fca.pem&uselibpqcompat=true");
-  assert.equal(new URL(options.connectionString).searchParams.get("sslrootcert"), "/private/ca.pem");
   for (const mode of ["disable", "no-verify", "allow", ""]) assert.throws(() => tourContributionPgOptions(`postgresql://user:unused@database.example/test?sslmode=${mode}`), status(503));
   assert.throws(() => tourContributionPgOptions("https://database.example/test?sslmode=require"), status(503));
+});
+
+test("passes an explicitly trusted inline CA to PostgreSQL without losing hostname verification", () => {
+  const { Client } = createRequire(new URL("../../backend/package.json", import.meta.url))("pg");
+  for (const mode of [undefined, "prefer", "require", "verify-ca", "verify-full"]) {
+    const options = tourContributionPgOptions(`postgresql://user:unused@database.example/test?uselibpqcompat=true${mode ? `&sslmode=${mode}` : ""}`, { caPem: rootCertificates[0]!.replace(/\n/g, "\\n") });
+    const actual = new Client(options).connectionParameters.ssl;
+    assert.equal(actual.ca, rootCertificates[0]!.trim());
+    assert.equal(actual.rejectUnauthorized, true);
+    assert.equal(actual.checkServerIdentity, undefined);
+    assert.equal(new URL(options.connectionString).searchParams.has("uselibpqcompat"), false);
+  }
+});
+
+test("prefers the connection root certificate over an inline CA and the optional CA file", (t) => {
+  const { Client } = createRequire(new URL("../../backend/package.json", import.meta.url))("pg");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-tour-ca-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "provider-ca.pem");
+  fs.writeFileSync(file, rootCertificates[1]!);
+  const url = new URL("postgresql://user:unused@database.example/test?sslmode=verify-full");
+  url.searchParams.set("sslrootcert", file);
+  const preferred = tourContributionPgOptions(url.toString(), { caPem: rootCertificates[0]!, caFile: "/missing/ignored-ca.pem" });
+  assert.equal(new Client(preferred).connectionParameters.ssl.ca, rootCertificates[1]!.trim());
+  assert.equal(new URL(preferred.connectionString).searchParams.has("sslrootcert"), false);
+  const inline = tourContributionPgOptions("postgresql://user:unused@database.example/test", { caPem: rootCertificates[0]!, caFile: file });
+  assert.equal(inline.ssl.ca, rootCertificates[0]!.trim());
+  const fromFile = tourContributionPgOptions("postgresql://user:unused@database.example/test", { caFile: file });
+  assert.equal(new Client(fromFile).connectionParameters.ssl.ca, rootCertificates[1]!.trim());
+});
+
+test("rejects malformed or unreadable custom CA configuration without leaking connection details", () => {
+  for (const trust of [{ caPem: "not a certificate" }, { caPem: "-----BEGIN CERTIFICATE-----broken-----END CERTIFICATE-----" }, { caFile: "/missing/private-ca.pem" }]) assert.throws(() => tourContributionPgOptions("postgresql://private-user:private-password@database.example/test?sslmode=require", trust), (error: unknown) => status(503)(error) && !/private-user|private-password|private-ca/.test((error as Error).message));
+  assert.throws(() => tourContributionPgOptions("postgresql://user:unused@database.example/test?ssl=no-verify"), status(503));
+  assert.throws(() => tourContributionPgOptions("postgresql://user:unused@database.example/test?ssl=false"), status(503));
 });
 
 test("allows the real production origin through the backend proxy and rejects foreign or missing origins", () => {
