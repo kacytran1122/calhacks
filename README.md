@@ -78,7 +78,7 @@ npm run test:system --prefix backend
 The test pyramid lives entirely under `tests/`:
 
 - `tests/frontend`: user interaction and location-entry behavior.
-- `tests/backend`: policy boundaries, deterministic seed data, geocoding validation, and ledger balance.
+- `tests/backend`: policy boundaries, deterministic seed data, geocoding validation, ledger balance, price-model parity, and heat scoring.
 - `tests/agents`: least privilege, Photon event filtering, 40-case evaluation, and adversarial controls.
 - `tests/system`: sign-in, role isolation, trip-token scope, approval, booking, and repository-structure checks.
 
@@ -98,6 +98,36 @@ No production deployment occurs without an explicitly configured hosting environ
 | Photon 2.0 | `@smile` group conversation and private trip-scoped approval links |
 | TigerData | Time-series snapshots for event date and venue changes |
 | Visa | Reviewed, exact-amount travel basket; signed Visa Acceptance sandbox authorization when configured, capture disabled |
+| Open-Meteo | Live forecast and ERA5 history for the venue heat map (no key) |
+| OpenStreetMap | Map tiles for the heat map |
+
+## Price prediction and heat map
+
+Two planning aids in the trip pane, built the UrbanLens way (https://github.com/LambSystems/urbanlens): **a model produces evidence, plain code decides**.
+
+**Price outlook.** Gradient-boosted quantile models predict a p10 / p50 / p90 range for transport whose price moves with time and demand:
+
+| Model | Trained on (public data) | Held-out test | Typical error (p50) | Simple baseline | p10–p90 holds |
+|---|---|---|---|---|---|
+| Rideshare (Uber, Lyft) | 5.0M NYC TLC high-volume trips, Feb + Aug 2026 | last week of Aug 2026, 665,722 trips | $5.54 (R² 0.83) | rate card $7.16 (R² 0.74) | 79% |
+| Airfare | U.S. DOT Consumer Airfare Report, 2015–2025 | last 4 quarters, 8,281 routes | $32.64 (R² 0.51) | distance only $51.47 (R² 0.12) | 73% |
+
+- Rideshare uses the live OSRM road distance and drive time, the departure hour and weekday, and the company. It is learned from New York City prices, which the UI says.
+- Airfare picks the nearest airports with real scheduled traffic, counting ground travel at the policy's IRS mileage rate, so a cheaper fare 80 miles away doesn't win.
+- Estimates are never the approvable amount: a traveler still approves an exact, live-quoted price.
+- Training runs on a GPU in `backend/ml/notebooks/smile_price_models.ipynb` (XGBoost). Trees are exported to compact JSON in `backend/ml/models/` and evaluated in TypeScript (`backend/src/ml/gbdt.ts`); the notebook and `tests/backend/price-models.test.ts` both check the TypeScript numbers against XGBoost.
+
+**Heat at the venue** (`backend/src/agents/heat.ts`), following the UrbanLens pipeline:
+
+```text
+select region (grid around the venue)
+  -> thermal evidence per cell (feels-like °F at kickoff, GFS + ECMWF via Open-Meteo)
+  -> hotspot candidates: discard cells < 1°F above the area median
+  -> severity (NWS heat-index bands) × confidence (lead time × model agreement)
+  -> ranked hotspots on an OpenStreetMap map
+```
+
+UrbanLens derives its thermal evidence from satellite imagery with ThermalGen; S'mile has no satellite model, so its evidence is live forecast temperature, or the same date over the last three years (ERA5) when the event is more than 15 days out. Values are relative planning evidence, not calibrated measurements. Forecast models are a few miles across, so small hotspots inside a neighborhood are usually not resolvable.
 
 ## Safety boundaries
 
