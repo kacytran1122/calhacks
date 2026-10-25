@@ -59,7 +59,7 @@ export function ContributionForm({ initialEvent = "", initialUrl = "", initialLo
     }
   };
 
-  if (receipt) return <section className="tc-receipt" role="status"><span className="tc-eyebrow">Safely received</span><h2>Thank you for the new perspective.</h2><p>Your {receipt.photoCount} {receipt.photoCount === 1 ? "photo has" : "photos have"} been saved for <b>{receipt.eventName}</b>. We’ll review the material before deciding whether a 3D tour can be built.</p><p className="tc-receipt-id">Submission reference<br /><code>{receipt.receiptId}</code></p><p>Nothing has been published, and a new tour is not available yet.</p><div className="tc-receipt-actions"><button type="button" className="tc-submit" onClick={() => setReceipt(null)}>Contribute another batch</button><a href="/">Return to events</a></div></section>;
+  if (receipt) return <section className="tc-receipt" role="status"><span className="tc-eyebrow">Safely received</span><h2>Thank you for the new perspective.</h2><p>Your {receipt.photoCount} {receipt.photoCount === 1 ? "photo has" : "photos have"} been saved for <b>{receipt.eventName}</b>. We’ll review the material before deciding whether a 3D tour can be built.</p><p className="tc-receipt-id">Submission reference<br /><code>{receipt.receiptId}</code></p><p>Nothing has been published, and a new tour is not available yet.</p><div className="tc-receipt-actions"><button type="button" className="tc-submit" onClick={() => setReceipt(null)}>Contribute another batch</button><a href="/finding-events">Return to events</a></div></section>;
 
   return <form className="tc-form" onSubmit={submit}>
     <fieldset disabled={busy}>

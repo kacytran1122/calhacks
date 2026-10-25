@@ -3,9 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { PhotonJoinDialog } from "../../frontend/app/find/PhotonJoinDialog";
 
-beforeEach(() => window.history.replaceState(null, "", "/"));
+beforeEach(() => {
+  window.history.replaceState(null, "", "/");
+  vi.unstubAllGlobals();
+});
 
-test("opens an accessible in-page setup dialog without putting the trip token in the URL or DOM", async () => {
+test("opens an accessible in-page QR dialog without exposing the trip token or asking for contact details", async () => {
+  vi.stubGlobal("fetch", vi.fn(() => new Promise(() => undefined)));
   const user = userEvent.setup();
   render(<PhotonJoinDialog tripId="TR-L-test" tripToken="private-trip-token" eventName="Cal Hacks 13.0" />);
 
@@ -13,10 +17,12 @@ test("opens an accessible in-page setup dialog without putting the trip token in
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await user.click(trigger);
 
-  const dialog = screen.getByRole("dialog", { name: "Open your S’mile chat" });
+  const dialog = screen.getByRole("dialog", { name: "Creating your secure QR…" });
   expect(dialog).toBeVisible();
   expect(dialog).toHaveAttribute("aria-modal", "true");
-  expect(screen.getByLabelText("iMessage phone or Apple Account email")).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Creating your secure QR…" })).toHaveFocus());
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   expect(window.location.href).toBe("http://localhost:3000/");
   expect(document.body.innerHTML).not.toContain("private-trip-token");
 
@@ -25,57 +31,50 @@ test("opens an accessible in-page setup dialog without putting the trip token in
   await waitFor(() => expect(trigger).toHaveFocus());
 });
 
-test("provisions the real Photon assignment in the dialog and renders its Messages QR", async () => {
+test("creates the prefilled dedicated-line QR immediately and sends no contact data", async () => {
+  const starterMessage = "@smile open my route SMILE-2345-6789-ABCD-EFGH";
+  const messageUrl = `sms:+14155550199?&body=${encodeURIComponent(starterMessage)}`;
   const fetcher = vi.fn(async () => ({
     ok: true,
-    json: async () => ({
-      assignedPhoneNumber: "+14155550199",
-      messageUrl: "sms:+14155550199",
-      starterMessage: "@smile I’m planning a trip to Cal Hacks 13.0.",
-      reused: false,
-    }),
+    json: async () => ({ messageUrl, starterMessage, expiresAt: "2026-10-25T12:15:00.000Z" }),
   }));
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<PhotonJoinDialog tripId="TR-L-test" tripToken="private-trip-token" eventName="Cal Hacks 13.0" />);
 
   await user.click(screen.getByRole("button", { name: /Message @smile privately in iMessage/ }));
-  await user.type(screen.getByLabelText("iMessage phone or Apple Account email"), "(415) 555-0123");
-  await user.click(screen.getByRole("checkbox"));
-  await user.click(screen.getByRole("button", { name: "Create QR code" }));
 
-  expect(await screen.findByRole("heading", { name: "Scan, then send first" })).toHaveFocus();
-  const qr = screen.getByLabelText("QR code that opens your assigned S’mile conversation in Messages").querySelector("svg");
+  expect(await screen.findByRole("heading", { name: "Scan, then send the message" })).toHaveFocus();
+  const qr = screen.getByLabelText("QR code that opens the dedicated @smile conversation in Messages").querySelector("svg");
   expect(qr).not.toBeNull();
-  expect(qr?.querySelector("title")).toHaveTextContent("Open your private S’mile conversation in Messages");
-  expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", "sms:+14155550199");
-  expect(screen.getByText("@smile I’m planning a trip to Cal Hacks 13.0.")).toBeVisible();
-  expect(window.location.href).toBe("http://localhost:3000/");
+  expect(qr?.querySelector("title")).toHaveTextContent("Open @smile in Messages with the route request filled in");
+  expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", messageUrl);
+  expect(screen.getByText(starterMessage)).toBeVisible();
+  expect(screen.getByText(/iMessage cannot open a website tab automatically/i)).toBeVisible();
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
 
   expect(fetcher).toHaveBeenCalledTimes(1);
   const [, request] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
-  expect(JSON.parse(String(request.body))).toEqual({
-    handle: "(415) 555-0123",
-    consent: true,
-    tripId: "TR-L-test",
-    tripToken: "private-trip-token",
-  });
+  expect(JSON.parse(String(request.body))).toEqual({ tripId: "TR-L-test", tripToken: "private-trip-token" });
 
-  await user.click(screen.getByRole("button", { name: "Copy starter message" }));
+  await user.click(screen.getByRole("button", { name: "Copy message" }));
   expect(screen.getByRole("button", { name: "Message copied" })).toBeVisible();
 });
 
-test("keeps setup in the popup when Photon cannot assign a line", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({ error: "All shared iMessage seats are in use." }) })));
+test("keeps the popup open with a retry when the dedicated line is unavailable", async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "A dedicated Photon iMessage line has not been configured yet." }) })
+    .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Still unavailable." }) });
+  vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<PhotonJoinDialog tripId="TR-L-test" tripToken="private-trip-token" eventName="Cal Hacks 13.0" />);
 
   await user.click(screen.getByRole("button", { name: /Message @smile privately in iMessage/ }));
-  await user.type(screen.getByLabelText("iMessage phone or Apple Account email"), "person@icloud.com");
-  await user.click(screen.getByRole("checkbox"));
-  await user.click(screen.getByRole("button", { name: "Create QR code" }));
-
-  expect(await screen.findByRole("alert")).toHaveTextContent("All shared iMessage seats are in use.");
-  expect(screen.getByLabelText("iMessage phone or Apple Account email")).toHaveValue("person@icloud.com");
+  expect(await screen.findByRole("alert")).toHaveTextContent("A dedicated Photon iMessage line has not been configured yet.");
   expect(screen.getByRole("dialog")).toBeVisible();
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Still unavailable.");
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

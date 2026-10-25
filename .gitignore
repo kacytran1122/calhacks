@@ -11,3 +11,7 @@ next-env.d.ts
 *.tsbuildinfo
 coverage/
 test-results/
+.vercel
+.railway
+/frontend/out/
+npm-debug.log*

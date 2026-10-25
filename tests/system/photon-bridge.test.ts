@@ -18,7 +18,11 @@ after(() => fs.rmSync(dir, { recursive: true, force: true }));
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const body = (overrides: Record<string, unknown> = {}) => ({ projectId: "pho_prj_test", messageId: "message-1", spaceId: "direct-1", senderId: "human-1", text: "@smile hello", ...overrides });
 const request = (value: unknown, secret = "test-bridge-secret") => new Request("http://localhost/api/chat/photon", { method: "POST", headers: { "content-type": "application/json", "x-smile-photon-secret": secret }, body: JSON.stringify(value) });
-const configure = () => { process.env.PHOTON_BRIDGE_SECRET = "test-bridge-secret"; process.env.PHOTON_PROJECT_ID = "pho_prj_test"; };
+const configure = () => {
+  process.env.PHOTON_BRIDGE_SECRET = "test-bridge-secret";
+  process.env.PHOTON_PROJECT_ID = "pho_prj_test";
+  process.env.PHOTON_LINE_ADDRESS = "+14155550199";
+};
 
 test("checks secret before attempting to parse JSON", async () => {
   delete process.env.PHOTON_BRIDGE_SECRET;
@@ -61,6 +65,37 @@ test("only @smile mentions trigger a response including punctuation and case var
     assert.match(result.replies[0].text, /home ZIP/);
     assert.equal(result.replies[0].approvalPath, undefined);
   }
+});
+
+test("claims a trip QR before general chat and returns only an opaque same-site map handoff", async () => {
+  configure();
+  const join = core.createPhotonTripHandoff({ tripId: "TR-L-map-test", travelerId: "T-map-test" });
+  const firstValue = body({ spaceId: "handoff-direct", messageId: "handoff-first", senderId: "handoff-human", text: join.starterMessage });
+  const firstResponse = await POST(request(firstValue));
+  assert.equal(firstResponse.status, 200);
+  const first = await firstResponse.json();
+  assert.equal(first.replies.length, 1);
+  assert.match(first.replies[0].text, /secure route link is ready/i);
+  assert.match(first.replies[0].mapPath, /^\/map\?handoff=phm1_[A-Za-z0-9_-]{43}$/);
+  assert.doesNotMatch(JSON.stringify(first), /TR-L-map-test|T-map-test|SMILE-/);
+  const token = new URL(`https://smilefromhereto.work${first.replies[0].mapPath}`).searchParams.get("handoff");
+  assert.deepEqual(core.resolvePhotonMapHandoff(token), {
+    tripId: "TR-L-map-test",
+    travelerId: "T-map-test",
+    expiresAt: core.resolvePhotonMapHandoff(token)?.expiresAt,
+  });
+
+  const replay = await (await POST(request({ ...firstValue, messageId: "handoff-replay" }))).json();
+  assert.equal(replay.replies[0].mapPath, first.replies[0].mapPath);
+  assert.match(replay.replies[0].text, /ready again/i);
+
+  const stolen = await (await POST(request({ ...firstValue, messageId: "handoff-stolen", senderId: "someone-else" }))).json();
+  assert.equal(stolen.replies[0].mapPath, undefined);
+  assert.match(stolen.replies[0].text, /already been claimed/i);
+
+  const malformed = await (await POST(request(body({ spaceId: "handoff-malformed", messageId: "handoff-malformed", text: "@smile open my route not-a-code" })))).json();
+  assert.equal(malformed.replies[0].mapPath, undefined);
+  assert.match(malformed.replies[0].text, /not valid/i);
 });
 
 test("replays identical concurrent deliveries without duplicate transcript and rejects altered payload", async () => {

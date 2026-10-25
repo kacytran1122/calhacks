@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 type Credentials = { tripId: string; tripToken: string };
 type JoinResult = {
-  assignedPhoneNumber: string;
   messageUrl: string;
   starterMessage: string;
-  reused: boolean;
+  expiresAt: string;
 };
 
 function credentialsFromHash(): Credentials | null {
@@ -20,12 +19,11 @@ function credentialsFromHash(): Credentials | null {
 
 export function ChatClient() {
   const [credentials, setCredentials] = useState<Credentials | null | undefined>(undefined);
-  const [handle, setHandle] = useState("");
-  const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<JoinResult | null>(null);
-  const [copied, setCopied] = useState<"number" | "message" | null>(null);
+  const [copied, setCopied] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const credentials = credentialsFromHash();
@@ -34,64 +32,74 @@ export function ChatClient() {
     if (values.has("trip") || values.has("token")) {
       window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
     }
+    return () => requestRef.current?.abort();
   }, []);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const requestQr = async () => {
     if (!credentials || loading) return;
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
     setLoading(true);
     setError(null);
     try {
       const response = await fetch("/api/chat/photon/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ handle, consent, tripId: credentials.tripId, tripToken: credentials.tripToken }),
+        body: JSON.stringify({ tripId: credentials.tripId, tripToken: credentials.tripToken }),
+        signal: controller.signal,
       });
       const body = await response.json().catch(() => ({})) as Partial<JoinResult> & { error?: string };
-      if (!response.ok || !body.assignedPhoneNumber || !body.messageUrl || !body.starterMessage) {
-        throw new Error(body.error || "Private iMessage setup is temporarily unavailable.");
+      if (!response.ok || !body.messageUrl || !body.starterMessage || !body.expiresAt) {
+        throw new Error(body.error || "The secure iMessage QR is temporarily unavailable.");
       }
       setResult(body as JoinResult);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Private iMessage setup is temporarily unavailable.");
+      if ((cause as Error).name !== "AbortError") {
+        setError(cause instanceof Error ? cause.message : "The secure iMessage QR is temporarily unavailable.");
+      }
     } finally {
-      setLoading(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
   };
 
-  const copy = async (kind: "number" | "message", value: string) => {
+  const copy = async () => {
+    if (!result) return;
     try {
-      await navigator.clipboard.writeText(value);
-      setCopied(kind);
-      window.setTimeout(() => setCopied((current) => current === kind ? null : current), 1800);
+      await navigator.clipboard.writeText(result.starterMessage);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1_800);
     } catch {
-      setError("Copy was blocked by this browser. Select the text below and copy it manually.");
+      setError("Copy was blocked by this browser. Select the message below and copy it manually.");
     }
   };
 
   return (
     <main className="pj-shell">
       <header className="pj-nav">
-        <a href="/" className="pj-brand" aria-label="Back to S’mile home">S’mile</a>
+        <a href="/landing" className="pj-brand" aria-label="Back to home">S’mile</a>
         <span className="pj-private"><i aria-hidden="true" /> Private iMessage</span>
       </header>
 
       <section className="pj-hero" aria-labelledby="photon-title">
         <div className="pj-copy">
-          <p className="pj-kicker">Travel together, privately</p>
+          <p className="pj-kicker">Your route, sent privately</p>
           <h1 id="photon-title">Message <em>@smile</em><br />from iMessage.</h1>
-          <p className="pj-lede">Get route help and meet nearby travelers without joining a public group chat. Photon gives you a private one-to-one line; S’mile shares only matched travelers’ initials.</p>
+          <p className="pj-lede">Scan one QR to open the dedicated @smile line. The route request is already filled in, and this website never asks for your phone number or email address.</p>
           <ol className="pj-steps" aria-label="How it works">
-            <li><span>1</span><div><b>Connect your sending identity</b><small>Use the exact phone or email checked in Messages → Send &amp; Receive.</small></div></li>
-            <li><span>2</span><div><b>Open or scan the Messages link</b><small>The QR is generated locally for the real number Photon assigns to you.</small></div></li>
-            <li><span>3</span><div><b>Send the first message</b><small>Begin every question and follow-up with <strong>@smile</strong>.</small></div></li>
+            <li><span>1</span><div><b>Create the secure QR</b><small>It contains a short-lived code for this trip, not your trip token.</small></div></li>
+            <li><span>2</span><div><b>Scan and send</b><small>The message begins with @smile so the assistant can respond.</small></div></li>
+            <li><span>3</span><div><b>Tap the route link</b><small>iMessage cannot open a browser tab automatically; @smile replies with the secure map link.</small></div></li>
           </ol>
         </div>
 
-        <section className="pj-card" aria-label="Connect private iMessage">
+        <section className="pj-card" aria-label="Open @smile in iMessage">
           <div className="pj-card-top">
             <span className="pj-orb" aria-hidden="true">☺</span>
-            <div><b>S’mile on Messages</b><small>Powered by Photon · one-to-one</small></div>
+            <div><b>@smile on Messages</b><small>Dedicated line · one-to-one conversation</small></div>
           </div>
 
           {credentials === undefined ? (
@@ -100,53 +108,39 @@ export function ChatClient() {
             <div className="pj-gate">
               <span className="pj-gate-icon" aria-hidden="true">↗</span>
               <h2>Plan a trip first</h2>
-              <p>Your trip result creates a private, expiring connection link. This prevents automated signups from taking the limited Photon seats.</p>
-              <a className="pj-button primary" href="/find">Find an event and plan my trip</a>
+              <p>Your current trip result creates a private, expiring QR. No contact details are collected.</p>
+              <a className="pj-button primary" href="/finding-events">Find an event and plan my trip</a>
               <small>Already planned? Use “Message @smile privately” in your trip result.</small>
             </div>
           ) : result ? (
             <div className="pj-ready" aria-live="polite">
               <div className="pj-ready-copy">
-                <p className="pj-kicker">Your private line is ready</p>
-                <h2>Scan, then send first.</h2>
-                <p>Open this conversation from the same phone number or Apple Account email you entered.</p>
+                <p className="pj-kicker">Your secure QR is ready</p>
+                <h2>Scan, then send the message.</h2>
+                <p>Send the filled-in request within 15 minutes. @smile will reply with your secure map link.</p>
               </div>
-              <figure className="pj-qr" aria-label="QR code that opens your assigned S’mile conversation in Messages">
-                <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#201f1d" title="Open your private S’mile conversation in Messages" />
+              <figure className="pj-qr" aria-label="QR code that opens the dedicated @smile conversation in Messages">
+                <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#201f1d" title="Open @smile in Messages with the route request filled in" />
               </figure>
               <a className="pj-button primary" href={result.messageUrl}>Open Messages</a>
-              <button className="pj-button secondary" type="button" onClick={() => copy("number", result.assignedPhoneNumber)}>
-                {copied === "number" ? "Number copied" : `Copy number · ${result.assignedPhoneNumber}`}
-              </button>
               <div className="pj-message">
-                <small>Copy this, then paste and send it in Messages</small>
+                <small>The QR fills in this private request</small>
                 <code>{result.starterMessage}</code>
-                <button type="button" onClick={() => copy("message", result.starterMessage)}>{copied === "message" ? "Copied" : "Copy message"}</button>
+                <button type="button" onClick={copy}>{copied ? "Copied" : "Copy message"}</button>
               </div>
-              <p className="pj-warning"><b>Blue bubble check:</b> if the conversation is green, confirm that the identity you entered is active under Messages → Send &amp; Receive. Photon can reply only after you send first.</p>
-              {result.reused && <p className="pj-reused">We found your existing private assignment—no extra Photon seat was used.</p>}
+              <p className="pj-warning"><b>One final tap:</b> browsers cannot be opened automatically after an iMessage. Tap the secure route link in @smile’s reply.</p>
             </div>
           ) : (
-            <form className="pj-form" onSubmit={submit}>
-              <div>
-                <p className="pj-kicker">Connect to Photon</p>
-                <h2>Which identity sends your iMessages?</h2>
-                <p>On iPhone: Settings → Apps → Messages → Send &amp; Receive. Enter the selected phone number or Apple Account email exactly.</p>
-              </div>
-              <label className="pj-field">
-                <span>iMessage phone or Apple Account email</span>
-                <input value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="(415) 555-0123 or you@icloud.com" autoComplete="username" spellCheck={false} maxLength={254} required />
-              </label>
-              <label className="pj-consent">
-                <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} required />
-                <span>I agree that this identity is sent securely to Photon so it can assign my private Messages number. S’mile does not display it to other travelers.</span>
-              </label>
+            <div className="pj-gate">
+              <span className="pj-gate-icon" aria-hidden="true">↗</span>
+              <h2>Create your Messages QR</h2>
+              <p>No phone number or email address is requested. The QR opens the dedicated line with an @smile route request ready to send.</p>
               {error && <p className="pj-error" role="alert">{error}</p>}
-              <button className="pj-button primary" type="submit" disabled={loading || !handle.trim() || !consent}>
-                {loading ? "Asking Photon…" : "Create my private Messages link"}
+              <button className="pj-button primary" type="button" disabled={loading} onClick={() => void requestQr()}>
+                {loading ? "Creating secure QR…" : error ? "Try again" : "Create Messages QR"}
               </button>
-              <p className="pj-fine">The assignment uses one of the project’s limited shared-line seats. <a href="/privacy">Privacy details</a></p>
-            </form>
+              <p className="pj-fine">The claim code expires after 15 minutes and works for one direct conversation.</p>
+            </div>
           )}
           {result && error && <p className="pj-error" role="alert">{error}</p>}
         </section>

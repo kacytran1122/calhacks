@@ -17,7 +17,7 @@ export type PhotonMessage = {
   space: PhotonSpace;
 };
 type DeliveryMeta = { seq: number; replyExpected?: boolean };
-type BridgeReply = { id: string; text: string; approvalPath?: string };
+type BridgeReply = { id: string; text: string; approvalPath?: string; mapPath?: string };
 type PhotonClient = Pick<Photon, "projects">;
 type Runtime = { photon?: PhotonClient; socket?: Socket; retryBaseMs?: number; retryMaxMs?: number };
 
@@ -124,17 +124,33 @@ async function callBrain(config: Config, message: PhotonMessage, text: string): 
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) throw new Error(`S’mile bridge ${response.status}: request failed`);
   if (!record(body) || !Array.isArray(body.replies) || body.replies.length > 20) throw new Error("S’mile bridge returned invalid replies.");
-  if (body.replies.some((reply) => !record(reply) || !identifier(reply.id) || typeof reply.text !== "string" || !reply.text.trim() || reply.text.length > 20_000 || (reply.approvalPath !== undefined && typeof reply.approvalPath !== "string"))) throw new Error("S’mile bridge returned an invalid reply.");
+  if (body.replies.some((reply) => !record(reply) || !identifier(reply.id) || typeof reply.text !== "string" || !reply.text.trim() || reply.text.length > 20_000 || (reply.approvalPath !== undefined && typeof reply.approvalPath !== "string") || (reply.mapPath !== undefined && typeof reply.mapPath !== "string"))) throw new Error("S’mile bridge returned an invalid reply.");
   const replies = body.replies as BridgeReply[];
   for (const reply of replies) {
-    if (!reply.approvalPath) continue;
-    const url = new URL(reply.approvalPath, config.webUrl);
-    if (url.origin !== new URL(config.webUrl).origin || url.username || url.password) throw new Error("S’mile approval must use the configured website.");
+    if (reply.approvalPath) {
+      const url = new URL(reply.approvalPath, config.webUrl);
+      if (url.origin !== new URL(config.webUrl).origin || url.username || url.password) throw new Error("S’mile approval must use the configured website.");
+    }
+    if (reply.mapPath) {
+      const url = new URL(reply.mapPath, config.webUrl);
+      const keys = [...url.searchParams.keys()];
+      const token = url.searchParams.get("handoff") ?? "";
+      if (
+        url.origin !== new URL(config.webUrl).origin
+        || url.username
+        || url.password
+        || url.pathname !== "/map"
+        || url.hash
+        || keys.length !== 1
+        || keys[0] !== "handoff"
+        || !/^phm1_[A-Za-z0-9_-]{43}$/.test(token)
+      ) throw new Error("S’mile map handoff must use the configured website and an opaque map token.");
+    }
   }
   return replies;
 }
 
-const idempotency = (messageId: string, channel: "room" | "dm", index: number) => `smile:${messageId}:${channel}:${index}`;
+const idempotency = (messageId: string, channel: "room" | "dm" | "map", index: number) => `smile:${messageId}:${channel}:${index}`;
 
 export async function processMessage(photon: PhotonClient, config: Config, message: PhotonMessage) {
   const text = textOf(message.content);
@@ -155,18 +171,33 @@ export async function processMessage(photon: PhotonClient, config: Config, messa
     });
     if (roomDelivery.status === "failed") throw new Error("Photon did not accept the room reply.");
 
-    if (!reply.approvalPath) continue;
-    const approvalUrl = new URL(reply.approvalPath, config.webUrl).toString();
-    const privateDelivery = await photon.projects.sendMessage({
-      path: { id: config.projectId },
-      headers: { "idempotency-key": idempotency(message.id, "dm", index) },
-      body: {
-        spaceId: message.space.id,
-        senderId: agent.id,
-        content: { type: "text", format: "plain", text: `Private approval for your S’mile trip: ${approvalUrl}\n\nThis link is scoped to one trip and expires in 24 hours. Don’t forward it.` },
-      },
-    });
-    if (privateDelivery.status === "failed") throw new Error("Photon did not accept the private reply.");
+    if (reply.approvalPath) {
+      const approvalUrl = new URL(reply.approvalPath, config.webUrl).toString();
+      const privateDelivery = await photon.projects.sendMessage({
+        path: { id: config.projectId },
+        headers: { "idempotency-key": idempotency(message.id, "dm", index) },
+        body: {
+          spaceId: message.space.id,
+          senderId: agent.id,
+          content: { type: "text", format: "plain", text: `Private approval for your S’mile trip: ${approvalUrl}\n\nThis link is scoped to one trip and expires in 24 hours. Don’t forward it.` },
+        },
+      });
+      if (privateDelivery.status === "failed") throw new Error("Photon did not accept the private reply.");
+    }
+
+    if (reply.mapPath) {
+      const mapUrl = new URL(reply.mapPath, config.webUrl).toString();
+      const mapDelivery = await photon.projects.sendMessage({
+        path: { id: config.projectId },
+        headers: { "idempotency-key": idempotency(message.id, "map", index) },
+        body: {
+          spaceId: message.space.id,
+          senderId: agent.id,
+          content: { type: "text", format: "plain", text: `Open your route: ${mapUrl}\n\nThis link is scoped to one trip and expires in 12 hours. Don’t forward it.` },
+        },
+      });
+      if (mapDelivery.status === "failed") throw new Error("Photon did not accept the map link.");
+    }
   }
 }
 

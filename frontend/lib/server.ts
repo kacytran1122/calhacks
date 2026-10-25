@@ -32,7 +32,12 @@ export function integrations() {
   return {
     claude: llmAvailable(),
     brightData: Boolean(brightDataKey()),
-    photon: Boolean(process.env.PHOTON_PROJECT_ID && process.env.PHOTON_BRIDGE_SECRET),
+    photon: Boolean(
+      /^pho_prj_[A-Za-z0-9_-]+$/.test(process.env.PHOTON_PROJECT_ID ?? "")
+      && /^pho_sk_[A-Za-z0-9_-]+$/.test(process.env.PHOTON_API_KEY ?? "")
+      && (process.env.PHOTON_BRIDGE_SECRET?.trim().length ?? 0) >= 16
+      && /^\+[1-9]\d{7,14}$/.test(process.env.PHOTON_LINE_ADDRESS ?? ""),
+    ),
     visa: visaAcceptanceConfigured() ? "sandbox" as const : "simulated" as const,
   };
 }

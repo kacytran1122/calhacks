@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
 import { FindClient } from "../../frontend/app/find/FindClient";
@@ -321,6 +321,14 @@ test("shows the best route first with detailed steps, total cost, and alternativ
     const url = String(input);
     if (url.startsWith("/api/location/resolve")) return response({ zip: "90095", label: "UCLA" });
     if (url === "/api/plan") return response(plan);
+    if (url === "/api/chat/photon/join") {
+      const starterMessage = "@smile open my route SMILE-2345-6789-ABCD-EFGH";
+      return response({
+        messageUrl: `sms:+14155550199?&body=${encodeURIComponent(starterMessage)}`,
+        starterMessage,
+        expiresAt: "2026-10-25T12:15:00.000Z",
+      });
+    }
     return response({ ...result, origin: { zip: "90095", label: "UCLA" }, events: [event] });
   });
   vi.stubGlobal("fetch", fetcher);
@@ -343,7 +351,10 @@ test("shows the best route first with detailed steps, total cost, and alternativ
   const photonButton = screen.getByRole("button", { name: /Message @smile privately in iMessage/ });
   expect(screen.queryByRole("link", { name: /Message @smile privately in iMessage/ })).not.toBeInTheDocument();
   await user.click(photonButton);
-  expect(screen.getByRole("dialog", { name: "Open your S’mile chat" })).toBeVisible();
+  const photonDialog = await screen.findByRole("dialog", { name: "Scan, then send the message" });
+  expect(photonDialog).toBeVisible();
+  expect(within(photonDialog).queryByRole("textbox")).not.toBeInTheDocument();
+  expect(within(photonDialog).queryByRole("checkbox")).not.toBeInTheDocument();
   expect(window.location.href).toBe(beforeHref);
   expect(document.body.innerHTML).not.toContain("token");
 });

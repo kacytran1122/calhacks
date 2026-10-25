@@ -1,30 +1,17 @@
-import { Cta, Footer } from "@/components/landing/Closing";
-import { Faq } from "@/components/landing/Faq";
-import { Header } from "@/components/landing/Header";
-import { Hero } from "@/components/landing/Hero";
-import { HowItWorks } from "@/components/landing/HowItWorks";
-import { LensDemo } from "@/components/landing/LensDemo";
-import { RevealObserver } from "@/components/landing/Reveal";
-import { Why } from "@/components/landing/Why";
-import { TravelHome } from "@/components/travel/TravelHome";
 import type { Metadata } from "next";
-import "./desk/desk.css";
-import "./find/find.css";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { alternates: { canonical: "/" } };
+export const metadata: Metadata = { alternates: { canonical: "/landing" } };
 
-export default function Landing() {
-  return (
-    <TravelHome>
-      <Header />
-      <Hero />
-      <Why />
-      <HowItWorks />
-      <LensDemo />
-      <Faq />
-      <Cta />
-      <Footer />
-      <RevealObserver />
-    </TravelHome>
-  );
+const LEGACY_LOCATION_KEYS = ["zip", "origin", "gps", "lat", "lon"] as const;
+
+export default async function RootRedirect({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const incoming = await searchParams;
+  const legacyLocation = new URLSearchParams();
+  for (const key of LEGACY_LOCATION_KEYS) {
+    const value = incoming[key];
+    if (typeof value === "string") legacyLocation.set(key, value);
+  }
+  const query = legacyLocation.toString();
+  redirect(query ? `/landing?${query}` : "/landing");
 }

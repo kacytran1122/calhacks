@@ -1,6 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { ChatBusy, ChatReplayConflict, ChatStorageUnavailable } from "@smile/core";
+import {
+  ChatBusy,
+  ChatReplayConflict,
+  ChatStorageUnavailable,
+  claimPhotonTripHandoff,
+  PhotonHandoffStorageUnavailable,
+} from "@smile/core";
 import { handleMessage, parseMention } from "@/lib/chat";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +44,37 @@ export async function POST(req: Request) {
     return NextResponse.json({ replies: [] });
 
   const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  try {
+    const handoff = claimPhotonTripHandoff(text as string, {
+      projectId: projectId as string,
+      spaceId: spaceId as string,
+      senderId: senderId as string,
+    });
+    if (handoff.kind !== "none") {
+      const id = `photon-handoff-${hash([projectId, spaceId, messageId]).slice(0, 24)}`;
+      if (handoff.kind === "ready") {
+        return NextResponse.json({ replies: [{
+          id,
+          text: handoff.reused
+            ? "Your secure route link is ready again. Tap the link in the next message to open the map."
+            : "Your secure route link is ready. Tap the link in the next message to open the map.",
+          mapPath: handoff.mapPath,
+        }] });
+      }
+      const textByKind = {
+        invalid: "That route code is not valid. Return to your trip page and create a new Messages QR.",
+        expired: "That route code or map access has expired. Return to your trip page and create a new Messages QR.",
+        used: "That route code has already been claimed in another conversation. Return to your trip page and create a new Messages QR.",
+      } as const;
+      return NextResponse.json({ replies: [{ id, text: textByKind[handoff.kind] }] });
+    }
+  } catch (error) {
+    if (error instanceof PhotonHandoffStorageUnavailable) {
+      return NextResponse.json({ error: error.message }, { status: 503, headers: { "Retry-After": String(error.retryAfter ?? 5) } });
+    }
+    return NextResponse.json({ error: "The secure route handoff is temporarily unavailable." }, { status: 503, headers: { "Retry-After": "5" } });
+  }
+
   const sender = `Traveler ${hash([projectId, senderId]).slice(0, 24).toUpperCase()}`;
   const requestId = `photon:${hash([projectId, spaceId, messageId])}`;
   try {

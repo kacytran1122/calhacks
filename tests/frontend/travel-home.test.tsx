@@ -10,13 +10,13 @@ const result = { origin: { zip: "61401", label: "Galesburg, IL" }, radiusMiles: 
 
 beforeEach(() => {
   clearTravelSession();
-  window.history.replaceState(null, "", "/");
+  window.history.replaceState(null, "", "/landing");
   vi.stubGlobal("scrollTo", vi.fn());
 });
 
 afterEach(() => clearTravelSession());
 
-test("starts at the landing page and keeps the event planner and updates at the clean root URL", async () => {
+test("starts at the landing page and moves the event planner to its canonical URL", async () => {
   const fetcher = vi.fn(() => response(result));
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
@@ -25,11 +25,11 @@ test("starts at the landing page and keeps the event planner and updates at the 
   await user.click(screen.getByRole("button", { name: /find trips/i }));
   await user.click(screen.getByRole("button", { name: "Use 61401 instead" }));
   expect(await screen.findByLabelText("Starting ZIP, city, or state")).toHaveValue("61401");
-  expect(window.location.pathname + window.location.search + window.location.hash).toBe("/");
+  expect(window.location.pathname + window.location.search + window.location.hash).toBe("/finding-events");
   expect(fetcher).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Update nearby events" }));
   expect(await screen.findByLabelText("Search events by name or topic")).toBeVisible();
-  expect(window.location.pathname + window.location.search + window.location.hash).toBe("/");
+  expect(window.location.pathname + window.location.search + window.location.hash).toBe("/finding-events");
   expect(JSON.stringify(window.history.state)).not.toContain("61401");
 });
 
@@ -56,7 +56,8 @@ test("keeps exact GPS in memory but never in browser history or tab storage", as
 
 test("restores only the entered location after a fresh page load and explains that GPS was not kept", () => {
   window.sessionStorage.setItem("smile.travel-origin.v1", JSON.stringify({ version: 1, active: true, zip: "61401", label: "61401", usedDeviceLocation: true }));
-  render(<TravelHome><Hero /></TravelHome>);
+  window.history.replaceState(null, "", "/finding-events");
+  render(<TravelHome initialView="events"><Hero /></TravelHome>);
   expect(screen.getByLabelText("Starting ZIP, city, or state")).toHaveValue("61401");
   expect(screen.getByRole("status")).toHaveTextContent("Your precise location is not kept after a refresh");
   expect(restoreTravelSession()?.origin.coordinates).toBeUndefined();
@@ -64,24 +65,27 @@ test("restores only the entered location after a fresh page load and explains th
 
 test("home and browser navigation switch views without adding personal information to the URL", async () => {
   rememberTravelOrigin({ zip: "61401", label: "Galesburg, IL" });
+  window.history.replaceState({ smileView: "events" }, "", "/finding-events");
   const user = userEvent.setup();
-  render(<TravelHome><Hero /></TravelHome>);
+  render(<TravelHome initialView="events"><Hero /></TravelHome>);
   expect(screen.getByLabelText("Starting ZIP, city, or state")).toHaveValue("Galesburg, IL");
   await user.click(screen.getByRole("link", { name: "S’mile home" }));
   expect(screen.getByLabelText("Home ZIP code")).toBeVisible();
   expect(restoreTravelSession()).toBeNull();
+  window.history.replaceState({ smileView: "events" }, "", "/finding-events");
   act(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { smileView: "events" } })));
   expect(screen.getByLabelText("Starting ZIP, city, or state")).toHaveValue("Galesburg, IL");
+  window.history.replaceState({ smileView: "landing" }, "", "/landing");
   act(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { smileView: "landing" } })));
   expect(screen.getByLabelText("Home ZIP code")).toBeVisible();
-  expect(window.location.pathname + window.location.search).toBe("/");
+  expect(window.location.pathname + window.location.search).toBe("/landing");
 });
 
 test("replaces legacy root query documents and expires GPS instead of retaining personal router history", () => {
-  window.history.replaceState(null, "", "/?zip=61401&origin=61401&lat=33.6405&lon=-117.8443");
+  window.history.replaceState(null, "", "/landing?zip=61401&origin=61401&lat=33.6405&lon=-117.8443");
   const redirect = vi.fn();
   render(<TravelHome onLegacyRootRedirect={redirect}><Hero /></TravelHome>);
-  expect(redirect).toHaveBeenCalledExactlyOnceWith("/");
+  expect(redirect).toHaveBeenCalledExactlyOnceWith("/finding-events");
   expect(screen.getByRole("status")).toHaveTextContent("Opening your trip planner at its new address");
   expect(restoreTravelSession()).toEqual({ origin: { zip: "61401", label: "61401" }, locationExpired: true });
   expect(window.sessionStorage.getItem("smile.travel-origin.v1")).not.toMatch(/33\.6405|117\.8443/);
@@ -89,20 +93,21 @@ test("replaces legacy root query documents and expires GPS instead of retaining 
 
 test.each(["lens", "faq"])("an explicit %s landing link takes precedence over an active event session", (section) => {
   rememberTravelOrigin({ zip: "61401", label: "Galesburg, IL" });
-  window.history.replaceState(null, "", `/#${section}`);
+  window.history.replaceState(null, "", `/landing#${section}`);
   render(<TravelHome><Hero /><section id={section}>{section} section</section></TravelHome>);
   expect(screen.getByLabelText("Home ZIP code")).toBeVisible();
   expect(screen.getByText(`${section} section`)).toBeVisible();
   expect(screen.queryByLabelText("Starting ZIP, city, or state")).not.toBeInTheDocument();
-  expect(window.location.pathname + window.location.hash).toBe(`/#${section}`);
+  expect(window.location.pathname + window.location.hash).toBe(`/landing#${section}`);
   expect(restoreTravelSession()).toBeNull();
 });
 
 test("a later landing anchor leaves the planner without losing the requested section", () => {
   rememberTravelOrigin({ zip: "61401", label: "61401" });
-  render(<TravelHome><Hero /><section id="lens">Extension section</section></TravelHome>);
+  window.history.replaceState({ smileView: "events" }, "", "/finding-events");
+  render(<TravelHome initialView="events"><Hero /><section id="lens">Extension section</section></TravelHome>);
   expect(screen.getByLabelText("Starting ZIP, city, or state")).toBeVisible();
-  window.history.replaceState(window.history.state, "", "/#lens");
+  window.history.replaceState(window.history.state, "", "/landing#lens");
   act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
   expect(screen.getByText("Extension section")).toBeVisible();
   expect(screen.getByLabelText("Home ZIP code")).toBeVisible();
@@ -110,15 +115,16 @@ test("a later landing anchor leaves the planner without losing the requested sec
 });
 
 test("a legacy root query preserves an explicit landing section during document replacement", () => {
-  window.history.replaceState(null, "", "/?zip=61401&origin=61401#faq");
+  window.history.replaceState(null, "", "/landing?zip=61401&origin=61401#faq");
   const redirect = vi.fn();
   render(<TravelHome onLegacyRootRedirect={redirect}><Hero /></TravelHome>);
-  expect(redirect).toHaveBeenCalledExactlyOnceWith("/#faq");
+  expect(redirect).toHaveBeenCalledExactlyOnceWith("/landing#faq");
   expect(restoreTravelSession()).toBeNull();
 });
 
 test("changing a GPS starting point to a typed place replaces the saved fallback", async () => {
   rememberTravelOrigin({ zip: "61401", label: "Current location", coordinates: { lat: 33.6405, lon: -117.8443 }, enteredOrigin: { zip: "61401", label: "61401" } });
+  window.history.replaceState({ smileView: "events" }, "", "/finding-events");
   const fetcher = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url.startsWith("/api/location/resolve?lat=")) return response({ zip: "92697", label: "Irvine, CA" });
@@ -127,7 +133,7 @@ test("changing a GPS starting point to a typed place replaces the saved fallback
   });
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
-  render(<TravelHome><Hero /></TravelHome>);
+  render(<TravelHome initialView="events"><Hero /></TravelHome>);
   await waitFor(() => expect(screen.getByLabelText("Starting ZIP, city, or state")).toHaveValue("Irvine, CA"));
   fireEvent.change(screen.getByLabelText("Starting ZIP, city, or state"), { target: { value: "UCLA" } });
   await user.click(screen.getByRole("button", { name: "Update nearby events" }));
@@ -143,4 +149,12 @@ test("an inactive tab session leaves the landing page visible", () => {
   render(<TravelHome><Hero /></TravelHome>);
   expect(screen.getByLabelText("Home ZIP code")).toBeVisible();
   expect(screen.queryByLabelText("Starting ZIP, city, or state")).not.toBeInTheDocument();
+});
+
+test("a direct event-page visit without a saved starting point returns to the landing page", () => {
+  window.history.replaceState(null, "", "/finding-events");
+  const redirect = vi.fn();
+  render(<TravelHome initialView="events" onLegacyRootRedirect={redirect}><Hero /></TravelHome>);
+  expect(redirect).toHaveBeenCalledExactlyOnceWith("/landing");
+  expect(screen.getByRole("link", { name: "Continue to S’mile" })).toHaveAttribute("href", "/landing");
 });

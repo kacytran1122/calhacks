@@ -98,7 +98,7 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
   return (
     <div className="dk">
       <header className="dk-top">
-        <a href="/" className="brand" aria-label="S’mile home">
+        <a href="/landing" className="brand" aria-label="S’mile home">
           <SmileWord />
         </a>
         <span className="dk-desk">Desk</span>
@@ -827,7 +827,7 @@ function SignIn({ onDone }: { onDone: () => void }) {
   return (
     <div className="dk">
       <header className="dk-top">
-        <a href="/" className="brand" aria-label="S’mile home">
+        <a href="/landing" className="brand" aria-label="S’mile home">
           <SmileWord />
         </a>
         <span className="dk-desk">Desk</span>
@@ -882,7 +882,7 @@ function TravelerApproval({ link, onExit }: { link: { token: string; tripId: str
   return (
     <div className="dk">
       <header className="dk-top">
-        <a href="/" className="brand" aria-label="S’mile home">
+        <a href="/landing" className="brand" aria-label="S’mile home">
           <SmileWord />
         </a>
         <span className="dk-desk">Your trip</span>
@@ -940,7 +940,7 @@ export function PublicPlanner({ initialZip }: { initialZip: string }) {
   return (
     <div className="dk">
       <header className="dk-top">
-        <a href="/" className="brand" aria-label="S’mile home">
+        <a href="/landing" className="brand" aria-label="S’mile home">
           <SmileWord />
         </a>
         <span className="dk-desk">Plan a trip</span>

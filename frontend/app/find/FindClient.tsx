@@ -307,7 +307,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, 
   return (
     <div className="dk">
       <header className="dk-top">
-        <a href="/" className="brand" aria-label="S’mile home" onClick={onHome ? (event) => { event.preventDefault(); onHome(); } : undefined}>
+        <a href="/landing" className="brand" aria-label="S’mile home" onClick={onHome ? (event) => { event.preventDefault(); onHome(); } : undefined}>
           <SmileWord />
         </a>
         <span className="dk-desk">Find events</span>

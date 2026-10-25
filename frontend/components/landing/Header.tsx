@@ -44,7 +44,7 @@ export function Header() {
   return (
     <header className={`top${open ? " menu-open" : ""}`}>
       <div className="wrap">
-        <a className="brand" href="#" aria-label="S’mile home">
+        <a className="brand" href="/landing" aria-label="S’mile home">
           <SmileWord />
         </a>
         <nav className="links" id="nav">

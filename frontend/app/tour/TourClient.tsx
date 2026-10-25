@@ -444,7 +444,7 @@ export function TourClient() {
           <div className={styles.welcomeCard}>
             <h1>JavaScript is required for this 3D tour</h1>
             <p>Please enable JavaScript to explore the building model, or return to the event planner.</p>
-            <Link className={`${styles.button} ${styles.primary}`} href="/">
+            <Link className={`${styles.button} ${styles.primary}`} href="/finding-events">
               Back to events
             </Link>
           </div>
@@ -504,7 +504,7 @@ export function TourClient() {
           <p>James West Alumni Center · two-floor concept</p>
         </div>
         <div className={styles.actions}>
-          <Link className={styles.button} href="/">
+          <Link className={styles.button} href="/finding-events">
             Back to events
           </Link>
           <select

@@ -37,4 +37,16 @@ export { converse, amountsGrounded, prepareChatTravel, updateChatTravelMemory, T
 export { runDue, runJob, dueJobs, priceWatchTargets, JOBS, type JobId, type JobResult, type SchedulerDeps } from "./scheduler";
 export { compareCarbon, estimateCarbon, organizerCarbon, tripCarbon, FACTORS as EMISSION_FACTORS, CARBON_SOURCES, CARBON_METHOD, type CarbonEstimate, type CarbonComparison, type OrganizerCarbon } from "./carbon";
 export * from "./tourContributions";
-export { assignPhotonDirectChat, normalizeImessageHandle, photonJoinFingerprint, PhotonJoinError, type PhotonJoinResult } from "./photonJoin";
+export {
+  claimPhotonTripHandoff,
+  createPhotonTripHandoff,
+  photonHandoffFingerprint,
+  resolvePhotonMapHandoff,
+  PHOTON_HANDOFF_MAP_TOKEN_PATTERN,
+  PhotonHandoffError,
+  PhotonHandoffStorageUnavailable,
+  type PhotonHandoffClaim,
+  type PhotonHandoffIdentity,
+  type PhotonHandoffJoinResult,
+  type PhotonMapHandoff,
+} from "./photonHandoff";

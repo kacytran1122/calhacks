@@ -6,6 +6,10 @@ import { expireTravelMemory, legacyTravelOrigin, rememberTravelOrigin, restoreTr
 
 const TravelNavigation = createContext<((origin: TravelOrigin) => void) | null>(null);
 const replaceRootDocument = (href: string) => window.location.replace(href);
+const LANDING_PATH = "/landing";
+const FINDING_EVENTS_PATH = "/finding-events";
+
+export type TravelView = "landing" | "events";
 
 export function useTravelNavigation() {
   const navigate = useContext(TravelNavigation);
@@ -13,9 +17,9 @@ export function useTravelNavigation() {
   return navigate;
 }
 
-export function TravelHome({ children, onLegacyRootRedirect = replaceRootDocument }: { children: ReactNode; onLegacyRootRedirect?: (href: string) => void }) {
+export function TravelHome({ children, initialView = "landing", onLegacyRootRedirect = replaceRootDocument }: { children: ReactNode; initialView?: TravelView; onLegacyRootRedirect?: (href: string) => void }) {
   const [session, setSession] = useState<TravelSession | null>(null);
-  const [migrating, setMigrating] = useState(false);
+  const [migrationTarget, setMigrationTarget] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -25,24 +29,44 @@ export function TravelHome({ children, onLegacyRootRedirect = replaceRootDocumen
       if (imported) rememberTravelOrigin(imported);
       expireTravelMemory();
       if (landingAnchor) setTravelViewActive(false);
-      setMigrating(true);
-      onLegacyRootRedirect(landingAnchor ? `/${landingAnchor}` : "/");
+      const destination = landingAnchor ? `${LANDING_PATH}${landingAnchor}` : imported ? FINDING_EVENTS_PATH : LANDING_PATH;
+      setMigrationTarget(destination);
+      onLegacyRootRedirect(destination);
       return;
     }
-    if (landingAnchor) setTravelViewActive(false);
-    const restored = landingAnchor ? null : restoreTravelSession();
-    setSession(restored);
-    window.history.replaceState({ ...window.history.state, smileView: restored ? "events" : "landing" }, "", landingAnchor ? `/${landingAnchor}` : "/");
-    const onPopState = (event: PopStateEvent) => {
-      const active = !window.location.hash && event.state?.smileView === "events";
+
+    if (initialView === "events" && !landingAnchor) {
+      const restored = restoreTravelSession();
+      if (!restored) {
+        setTravelViewActive(false);
+        setMigrationTarget(LANDING_PATH);
+        onLegacyRootRedirect(LANDING_PATH);
+        return;
+      }
+      setSession(restored);
+      window.history.replaceState({ ...window.history.state, smileView: "events" }, "", FINDING_EVENTS_PATH);
+    } else {
+      setTravelViewActive(false);
+      setSession(null);
+      window.history.replaceState({ ...window.history.state, smileView: "landing" }, "", `${LANDING_PATH}${landingAnchor}`);
+    }
+
+    const onPopState = () => {
+      const active = !window.location.hash && window.location.pathname === FINDING_EVENTS_PATH;
       setTravelViewActive(active);
-      setSession(active ? restoreTravelSession() : null);
+      const restored = active ? restoreTravelSession() : null;
+      if (active && !restored) {
+        setMigrationTarget(LANDING_PATH);
+        onLegacyRootRedirect(LANDING_PATH);
+        return;
+      }
+      setSession(restored);
     };
     const onHashChange = () => {
       if (!window.location.hash) return;
       setSession(null);
       setTravelViewActive(false);
-      window.history.replaceState({ ...window.history.state, smileView: "landing" }, "", `/${window.location.hash}`);
+      window.history.replaceState({ ...window.history.state, smileView: "landing" }, "", `${LANDING_PATH}${window.location.hash}`);
     };
     window.addEventListener("popstate", onPopState);
     window.addEventListener("hashchange", onHashChange);
@@ -50,23 +74,23 @@ export function TravelHome({ children, onLegacyRootRedirect = replaceRootDocumen
       window.removeEventListener("popstate", onPopState);
       window.removeEventListener("hashchange", onHashChange);
     };
-  }, [onLegacyRootRedirect]);
+  }, [initialView, onLegacyRootRedirect]);
 
   const beginTrip = useCallback((origin: TravelOrigin) => {
     rememberTravelOrigin(origin);
     setSession({ origin, locationExpired: false });
-    window.history.pushState({ ...window.history.state, smileView: "events" }, "", "/");
+    window.history.pushState({ ...window.history.state, smileView: "events" }, "", FINDING_EVENTS_PATH);
     window.scrollTo?.({ top: 0 });
   }, []);
 
   const onHome = () => {
     setSession(null);
     setTravelViewActive(false);
-    window.history.pushState({ ...window.history.state, smileView: "landing" }, "", "/");
+    window.history.pushState({ ...window.history.state, smileView: "landing" }, "", LANDING_PATH);
     window.scrollTo?.({ top: 0 });
   };
 
-  if (migrating) return <main className="dk"><p role="status">Opening your trip planner at its new address…</p><a href="/">Continue to S’mile</a></main>;
+  if (migrationTarget) return <main className="dk"><p role="status">Opening your trip planner at its new address…</p><a href={migrationTarget}>Continue to S’mile</a></main>;
 
   return (
     <TravelNavigation.Provider value={beginTrip}>

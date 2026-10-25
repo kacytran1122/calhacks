@@ -9,7 +9,7 @@ export default function PrivacyPage() {
   return (
     <main style={{ minHeight: "100vh", background: "#fffaf2", color: "#29163d", padding: "clamp(2rem, 7vw, 5rem) 1.25rem", fontFamily: "system-ui, sans-serif" }}>
       <article style={{ maxWidth: 760, margin: "0 auto", lineHeight: 1.65 }}>
-        <a href="/" style={{ color: "#29163d", fontWeight: 900, textDecoration: "none", fontSize: "1.2rem" }}>s’☺mile</a>
+        <a href="/landing" style={{ color: "#29163d", fontWeight: 900, textDecoration: "none", fontSize: "1.2rem" }}>s’☺mile</a>
         <h1 style={{ fontSize: "clamp(2.4rem, 8vw, 4.8rem)", lineHeight: .96, letterSpacing: "-.055em", margin: "2rem 0 1rem" }}>Trip Planner privacy</h1>
         <p style={{ color: "#6f6075", fontSize: "1.05rem" }}>Last updated October 25, 2026</p>
         <p>S’mile Trip Planner has one purpose: build the fastest route and clear alternatives from a traveler’s chosen starting point to the collegiate hackathon they are viewing.</p>
@@ -27,7 +27,7 @@ export default function PrivacyPage() {
         <section style={sectionStyle}>
           <h2 style={headingStyle}>Storage and retention</h2>
           <p>The extension stores only the starting text you entered and your self-drive preference in Chrome local storage so the next plan is faster. It does not store precise GPS coordinates. The route endpoint does not intentionally persist your route request. Hosting providers may retain ordinary security logs such as IP address, request time, and error details for limited operational purposes.</p>
-          <p>On the website, nearby-event searches stay at the root address without adding your starting point to the URL. Your typed starting place and whether the event view is open may be remembered in this tab’s session storage. Precise GPS coordinates remain in page memory only and are not saved there or in browser history state. After a full refresh, please allow location access again if you want to use your precise location instead of your typed starting point. Older links may already contain location details; opening one removes those details from the current address, but cannot remove earlier copies, logs, or history entries elsewhere.</p>
+          <p>On the website, nearby-event searches stay at the /finding-events address without adding your starting point to the URL. Your typed starting place and whether the event view is open may be remembered in this tab’s session storage. Precise GPS coordinates remain in page memory only and are not saved there or in browser history state. After a full refresh, please allow location access again if you want to use your precise location instead of your typed starting point. Older links may already contain location details; opening one removes those details from the current address, but cannot remove earlier copies, logs, or history entries elsewhere.</p>
         </section>
 
         <section style={sectionStyle}>
@@ -37,7 +37,7 @@ export default function PrivacyPage() {
 
         <section style={sectionStyle}>
           <h2 style={headingStyle}>Optional iMessage conversations</h2>
-          <p>If you choose the iMessage join flow, S’mile sends the phone number or email you enter to Photon so Photon can create or reuse a shared-line assignment for your private one-to-one conversation. Photon retains the assignment that connects your iMessage address to the assigned line. S’mile does not intentionally save the raw address in its own chat database. The join page then creates a Messages link and QR code for that assigned line.</p>
+          <p>If you choose the iMessage handoff, S’mile creates a short-lived claim code and a QR for its dedicated Photon line. The website does not request or collect your phone number or email address. Photon delivers the message from your private conversation; S’mile stores only a keyed hash of the Photon sender identity for the secure handoff and never exposes that identity, the original trip token, or Photon credentials to the browser.</p>
           <p>The agent responds only to messages that explicitly mention @smile. Photon delivers those messages to S’mile, and the message and relevant saved conversation history may be sent to Anthropic to prepare a reply. The extension does not read your Messages app.</p>
           <p>S’mile saves a limited conversation history, your travel preferences and follow-up answers, selected events, and message results on its persistent server so context survives restarts and retries do not create duplicate trips. Sender and direct-conversation identifiers are hashed for internal chat storage, but anything you type in a message can still contain personal information. Saved message results and trip records remain until removed by an administrator; please use the contact below for a deletion request. Approval links appear in the same private conversation and should not be forwarded.</p>
         </section>

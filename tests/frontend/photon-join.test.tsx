@@ -3,62 +3,58 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ChatClient } from "../../frontend/app/chat/ChatClient";
 
-beforeEach(() => window.history.replaceState(null, "", "/chat"));
+beforeEach(() => {
+  window.history.replaceState(null, "", "/chat");
+  vi.unstubAllGlobals();
+});
 
-test("does not provision a Photon seat without a trip-scoped link", async () => {
+test("does not create a Photon handoff without a trip-scoped link", async () => {
   const fetcher = vi.fn();
   vi.stubGlobal("fetch", fetcher);
   render(<ChatClient />);
   expect(await screen.findByRole("heading", { name: "Plan a trip first" })).toBeVisible();
-  expect(screen.getByRole("link", { name: "Find an event and plan my trip" })).toHaveAttribute("href", "/find");
+  expect(screen.getByRole("link", { name: "Find an event and plan my trip" })).toHaveAttribute("href", "/finding-events");
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-test("creates a visitor-specific Messages QR instead of a simulated group chat", async () => {
+test("creates a prefilled dedicated-line Messages QR without collecting a phone number or email", async () => {
   window.history.replaceState(null, "", "/chat#trip=TR-L-test&token=private-trip-token");
+  const starterMessage = "@smile open my route SMILE-2345-6789-ABCD-EFGH";
+  const messageUrl = `sms:+14155550199?&body=${encodeURIComponent(starterMessage)}`;
   const fetcher = vi.fn(async () => ({
     ok: true,
-    json: async () => ({
-      assignedPhoneNumber: "+14155550199",
-      messageUrl: "sms:+14155550199",
-      starterMessage: "@smile I’m planning a trip. My home ZIP is _____ and the event link is _____.",
-      reused: false,
-    }),
+    json: async () => ({ messageUrl, starterMessage, expiresAt: "2026-10-25T12:15:00.000Z" }),
   }));
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<ChatClient />);
   expect(window.location.pathname).toBe("/chat");
   expect(window.location.hash).toBe("");
-  await user.type(await screen.findByLabelText("iMessage phone or Apple Account email"), "(415) 555-0123");
-  await user.click(screen.getByRole("checkbox"));
-  await user.click(screen.getByRole("button", { name: "Create my private Messages link" }));
+  expect(await screen.findByRole("heading", { name: "Create your Messages QR" })).toBeVisible();
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Create Messages QR" }));
 
-  expect(await screen.findByRole("heading", { name: "Scan, then send first." })).toBeVisible();
-  const qr = screen.getByLabelText("QR code that opens your assigned S’mile conversation in Messages").querySelector("svg");
+  expect(await screen.findByRole("heading", { name: "Scan, then send the message." })).toBeVisible();
+  const qr = screen.getByLabelText("QR code that opens the dedicated @smile conversation in Messages").querySelector("svg");
   expect(qr).not.toBeNull();
-  expect(qr?.querySelector("title")).toHaveTextContent("Open your private S’mile conversation in Messages");
-  expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", "sms:+14155550199");
-  expect(screen.getByText(/^@smile I’m planning/)).toBeVisible();
-  expect(screen.queryByText(/Group chat · web preview/i)).not.toBeInTheDocument();
+  expect(qr?.querySelector("title")).toHaveTextContent("Open @smile in Messages with the route request filled in");
+  expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", messageUrl);
+  expect(screen.getByText(starterMessage)).toBeVisible();
+  expect(screen.getByText(/cannot be opened automatically after an iMessage/i)).toBeVisible();
   expect(fetcher).toHaveBeenCalledTimes(1);
   const [, request] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
-  expect(JSON.parse(String(request.body))).toEqual({
-    handle: "(415) 555-0123",
-    consent: true,
-    tripId: "TR-L-test",
-    tripToken: "private-trip-token",
-  });
+  expect(JSON.parse(String(request.body))).toEqual({ tripId: "TR-L-test", tripToken: "private-trip-token" });
 });
 
-test("keeps the form available when Photon cannot assign a line", async () => {
+test("keeps a contact-free retry available when QR creation fails", async () => {
   window.history.replaceState(null, "", "/chat#trip=TR-L-test&token=private-trip-token");
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({ error: "All shared iMessage seats are in use." }) })));
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({ error: "A dedicated Photon iMessage line has not been configured yet." }) })));
   const user = userEvent.setup();
   render(<ChatClient />);
-  await user.type(await screen.findByLabelText("iMessage phone or Apple Account email"), "person@icloud.com");
-  await user.click(screen.getByRole("checkbox"));
-  await user.click(screen.getByRole("button", { name: "Create my private Messages link" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("All shared iMessage seats are in use.");
-  expect(screen.getByLabelText("iMessage phone or Apple Account email")).toHaveValue("person@icloud.com");
+  await user.click(await screen.findByRole("button", { name: "Create Messages QR" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("A dedicated Photon iMessage line has not been configured yet.");
+  expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
 });

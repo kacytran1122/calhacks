@@ -13,7 +13,7 @@ import { processMessage, start, type Config, type PhotonMessage } from "../../ba
 
 type Sent = { path: { id: string }; headers: { "idempotency-key": string }; body: { spaceId: string; senderId: string; parentMessageId?: string; content: { text: string } } };
 type BrainBody = { projectId: string; messageId: string; spaceId: string; senderId: string; text: string };
-type Reply = { id: string; text: string; approvalPath?: string };
+type Reply = { id: string; text: string; approvalPath?: string; mapPath?: string };
 const incoming = (id = "msg_1", spaceId = "direct_1", text = "@smile help me travel"): PhotonMessage => ({
   id, platform: "imessage", status: "received", content: { type: "text", format: "plain", text },
   sentBy: { id: "human_1", kind: "human", platform: "imessage" }, receivedBy: { id: "agent_1", kind: "agent", platform: "imessage" },
@@ -114,6 +114,19 @@ test("sends replies and approval links into the same direct chat without creatin
   assert.equal(f.spaces.length, 0);
 });
 
+test("delivers a validated opaque map handoff in the same direct chat", async (t) => {
+  const token = `phm1_${"a".repeat(43)}`;
+  const f = await fixture(t, [{ id: "reply_1", text: "Your route is ready.", mapPath: `/map?handoff=${token}` }]);
+  await processMessage(f.photon, f.config, incoming());
+  assert.equal(f.sent.length, 2);
+  assert.doesNotMatch(f.sent[0]!.body.content.text, /phm1_|https?:/);
+  assert.match(f.sent[1]!.body.content.text, new RegExp(`${f.config.webUrl}/map\\?handoff=${token}`));
+  assert.match(f.sent[1]!.body.content.text, /expires in 12 hours/i);
+  assert.deepEqual(f.sent.map((message) => message.headers["idempotency-key"]), ["smile:msg_1:room:0", "smile:msg_1:map:0"]);
+  assert.ok(f.sent.every((message) => message.body.spaceId === "direct_1"));
+  assert.equal(f.spaces.length, 0);
+});
+
 test("retries partial reply and approval deliveries using exactly the same Photon idempotency keys", async (t) => {
   const f = await fixture(t, [{ id: "reply_1", text: "Your plan is ready.", approvalPath: "/desk#approve=token" }]);
   f.fail.count = 1;
@@ -131,9 +144,17 @@ test("does not silently accept a failed or malformed brain response or an off-si
   f.controls.status = 503;
   await assert.rejects(processMessage(f.photon, f.config, incoming()), /bridge 503/);
   f.controls.status = 200;
-  for (const raw of ["", "{}", "{\"replies\":[{}]}", JSON.stringify({ replies: [{ id: "r", text: "Ready", approvalPath: "https://other.example/approve" }] })]) {
+  for (const raw of [
+    "",
+    "{}",
+    "{\"replies\":[{}]}",
+    JSON.stringify({ replies: [{ id: "r", text: "Ready", approvalPath: "https://other.example/approve" }] }),
+    JSON.stringify({ replies: [{ id: "r", text: "Ready", mapPath: `https://other.example/map?handoff=phm1_${"a".repeat(43)}` }] }),
+    JSON.stringify({ replies: [{ id: "r", text: "Ready", mapPath: `/desk?handoff=phm1_${"a".repeat(43)}` }] }),
+    JSON.stringify({ replies: [{ id: "r", text: "Ready", mapPath: "/map?handoff=not-opaque" }] }),
+  ]) {
     f.controls.raw = raw;
-    await assert.rejects(processMessage(f.photon, f.config, incoming()), /invalid repl|configured website/);
+    await assert.rejects(processMessage(f.photon, f.config, incoming()), /invalid repl|configured website|map handoff/);
   }
   assert.equal(f.sent.length, 0);
 });

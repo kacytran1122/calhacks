@@ -26,13 +26,13 @@ Only these product areas live at the repository root. Generated files, credentia
 5. Send the trip, evidence, and consent trail to the organizer desk.
 6. Reconcile receipts, settlements, check-ins, and policy into balanced books.
 
-The public traveler entry point is `https://smilefromhereto.work/`. Finding nearby events changes the view at that same address instead of putting a ZIP code, starting place, or GPS coordinates in the URL. The typed starting point is remembered in tab-scoped session storage; precise coordinates remain only in page memory and are not retained after a full refresh. Older `/find` links still open, then normalize to the root address.
+The public traveler entry point is `https://smilefromhereto.work/landing`. Finding nearby events moves to `/finding-events`, while route guidance lives at `/map`. The typed starting point is remembered in tab-scoped session storage; precise coordinates remain only in page memory and are not retained after a full refresh. The root address and older `/find` links redirect to the canonical paths without retaining legacy location parameters in the address bar.
 
 ## Architecture
 
 | Area | Responsibility |
 |---|---|
-| `frontend/app` | Landing page, event search, traveler planning, chat, and organizer desk |
+| `frontend/app` | Landing page, event search, traveler planning, GPS route guidance, chat, and organizer desk |
 | `frontend/extension` | Read-only Chrome extension for public event pages |
 | `backend/src/agents` | Scout, Evidence, Route, Discover, Heat, Pricing, and the @smile Concierge |
 | `backend/src/scheduler.ts` | Wakes the agents on a timer: backlog, price, weather, and event-date checks |
@@ -112,25 +112,25 @@ No production deployment occurs without an explicitly configured hosting environ
 | Anthropic | Public-page extraction, explanations, audit defense, and the @smile concierge that chooses its tools; amounts remain deterministic |
 | Bright Data | Live logged-out event, route, fare, and stop pages |
 | Hyphenate track | Our organizer finance implementation: evidence matching, exception routing, control totals, and close readiness; not a Hyphenate API integration |
-| Photon 2.0 | Private one-to-one `@smile` iMessage conversations and trip-scoped approval links |
+| Photon 2.0 | Private one-to-one `@smile` iMessage conversations and short-lived route handoffs |
 | TigerData | Time-series event snapshots for detecting event-date and venue changes |
 | Neon | Independent private PostgreSQL storage adapter for venue-photo submissions and actual image bytes |
 | Visa | Traveler-approved fare binding, category and expiry controls, replay protection, and signed sandbox authorization with capture disabled |
 | Open-Meteo | Live forecast and ERA5 history for the venue heat map (no key) |
-| OpenStreetMap | Map tiles for the heat map; OSRM road distance and drive time |
+| OpenStreetMap | Map tiles and place search for `/map`; OSRM road routes, alternatives, maneuver progress, road distance, and drive time |
 | U.S. EPA, CARB | Published emission factors for the CO₂e estimates (no key) |
 
 ## Private iMessage conversations
 
 The Photon 2.0 worker accepts only one-to-one iMessage spaces. It responds only when a message explicitly mentions `@smile`, sends its reply to that same private conversation, and ignores group events. Every follow-up answer must include the mention as well. Exact-price approval links appear only in the requesting traveler's direct chat.
 
-Photon's managed shared iMessage lines are assigned per traveler. The `/chat` join flow asks for the phone number or email registered with iMessage, creates or reuses that traveler's shared-line assignment after explicit consent, and then shows a traveler-specific Messages link and QR code. The browser never receives the Photon project key. Group-chat support and a dedicated line are not required for this flow.
+The trip result creates a short-lived QR for the project's dedicated Photon iMessage line. The prefilled message contains only an expiring claim code; the website never asks for the traveler's phone number or email address, and the browser never receives the Photon project key or trip token. After the traveler sends the message, `@smile` replies in that private conversation with an opaque, expiring `https://smilefromhereto.work/map` handoff.
 
 Run the web API on the persistent Railway web service with `SMILE_DATA_DIR` pointing to its mounted volume. Chat transcripts, each sender's preferences, follow-up answers, event selections, and exact message results live in `chat.db` there. Vercel must proxy `/api` to that service; chat refuses to use an ephemeral serverless filesystem. Each direct Photon space is isolated as its own room. Multiple processes sharing the same database serialize each room with expiring, renewed locks. Separate machines with separate volumes are not a shared chat cluster.
 
-Keep the Photon worker's cursor on its own persistent volume using `PHOTON_CURSOR_FILE` or `SMILE_DATA_DIR`. Set the same `PHOTON_PROJECT_ID` and `PHOTON_BRIDGE_SECRET` on the worker and web API, set the project-scoped `PHOTON_API_KEY` on both services, and point `SMILE_WEB_URL` at the web API's HTTPS origin. The key needs the Photon permissions used for shared-line assignments as well as message transport. The worker forwards the original message ID; the bridge reuses the saved response for retries, and the planner stores its trip result with the books so a repeated message does not create another trip or mandate.
+Keep the Photon worker's cursor on its own persistent volume using `PHOTON_CURSOR_FILE` or `SMILE_DATA_DIR`. Set the same `PHOTON_PROJECT_ID` and `PHOTON_BRIDGE_SECRET` on the worker and web API, set the project-scoped `PHOTON_API_KEY` on both services, configure the dedicated E.164 address as `PHOTON_LINE_ADDRESS`, and set `SMILE_WEB_URL=https://smilefromhereto.work`. The worker forwards the original message ID; the bridge reuses the saved response for retries, and the planner stores its trip result with the books so a repeated message does not create another trip or mandate.
 
-Automated tests exercise direct-space filtering, explicit-mention filtering, private approvals, restart recovery, concurrent delivery, replay conflicts, and remembered travel preferences without sending real iMessages. For live verification, complete the `/chat` join flow with an iMessage-enabled number, scan the resulting QR code or open its Messages link, send one message without the mention, then send `@smile` and a follow-up that also includes `@smile`. Confirm that only the two mentioned messages receive one reply each before calling the deployment live-tested.
+Automated tests exercise direct-space filtering, explicit-mention filtering, one-conversation claim codes, opaque map handoffs, restart recovery, concurrent delivery, replay conflicts, and remembered travel preferences without sending real iMessages. For live verification, create a trip, scan its QR code, send the prefilled `@smile open my route …` message, and tap the secure `/map` link in the reply. Confirm that the link opens the correct route and that a different sender cannot claim the same code before calling the deployment live-tested.
 
 ## Venue tours and photo contributions
 

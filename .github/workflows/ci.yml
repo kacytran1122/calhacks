@@ -82,7 +82,7 @@ jobs:
       - run: npm test --prefix frontend
       - name: Photon bridge and persistent direct chat
         run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/photon-bridge.test.ts
-      - name: Photon private iMessage assignment
+      - name: Photon dedicated-line QR and map handoff
         run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/photon-join.test.ts
       - name: Venue photo upload integration
         run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/tour-contributions.test.ts
@@ -141,6 +141,7 @@ jobs:
           path: |
             frontend/.next
             frontend/public/3d-tour
+            frontend/public/map-assets
             frontend/extension/dist
             backend/src
             backend/hyphenate

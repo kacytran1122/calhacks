@@ -2,13 +2,12 @@
 
 import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 type JoinResult = {
-  assignedPhoneNumber: string;
   messageUrl: string;
   starterMessage: string;
-  reused: boolean;
+  expiresAt: string;
 };
 
 type PhotonJoinDialogProps = {
@@ -17,27 +16,53 @@ type PhotonJoinDialogProps = {
   eventName: string;
 };
 
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
 export function PhotonJoinDialog({ tripId, tripToken, eventName }: PhotonJoinDialogProps) {
   const [open, setOpen] = useState(false);
-  const [handle, setHandle] = useState("");
-  const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<JoinResult | null>(null);
   const [copied, setCopied] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const readyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const requestRef = useRef<AbortController | null>(null);
+
+  const requestQr = useCallback(async () => {
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const response = await fetch("/api/chat/photon/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tripId, tripToken }),
+        signal: controller.signal,
+      });
+      const body = await response.json().catch(() => ({})) as Partial<JoinResult> & { error?: string };
+      if (!response.ok || !body.messageUrl || !body.starterMessage || !body.expiresAt) {
+        throw new Error(body.error || "The secure iMessage QR is temporarily unavailable.");
+      }
+      setResult(body as JoinResult);
+    } catch (cause) {
+      if ((cause as Error).name !== "AbortError") {
+        setError(cause instanceof Error ? cause.message : "The secure iMessage QR is temporarily unavailable.");
+      }
+    } finally {
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
+    }
+  }, [tripId, tripToken]);
 
   const reset = useCallback(() => {
     requestRef.current?.abort();
     requestRef.current = null;
-    setHandle("");
-    setConsent(false);
     setLoading(false);
     setError(null);
     setResult(null);
@@ -53,13 +78,14 @@ export function PhotonJoinDialog({ tripId, tripToken, eventName }: PhotonJoinDia
   const launch = () => {
     reset();
     setOpen(true);
+    void requestQr();
   };
 
   useEffect(() => {
     if (!open) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    const focusTimer = window.setTimeout(() => headingRef.current?.focus(), 0);
 
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -90,49 +116,17 @@ export function PhotonJoinDialog({ tripId, tripToken, eventName }: PhotonJoinDia
   }, [close, open]);
 
   useEffect(() => {
-    if (result) readyHeadingRef.current?.focus();
-  }, [result]);
+    if (open && (result || error)) headingRef.current?.focus();
+  }, [error, open, result]);
 
   useEffect(() => () => requestRef.current?.abort(), []);
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (loading) return;
-    const controller = new AbortController();
-    requestRef.current?.abort();
-    requestRef.current = controller;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/chat/photon/join", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ handle, consent, tripId, tripToken }),
-        signal: controller.signal,
-      });
-      const body = await response.json().catch(() => ({})) as Partial<JoinResult> & { error?: string };
-      if (!response.ok || !body.assignedPhoneNumber || !body.messageUrl || !body.starterMessage) {
-        throw new Error(body.error || "Private iMessage setup is temporarily unavailable.");
-      }
-      setResult(body as JoinResult);
-    } catch (cause) {
-      if ((cause as Error).name !== "AbortError") {
-        setError(cause instanceof Error ? cause.message : "Private iMessage setup is temporarily unavailable.");
-      }
-    } finally {
-      if (requestRef.current === controller) {
-        requestRef.current = null;
-        setLoading(false);
-      }
-    }
-  };
 
   const copyStarter = async () => {
     if (!result) return;
     try {
       await navigator.clipboard.writeText(result.starterMessage);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+      window.setTimeout(() => setCopied(false), 1_800);
     } catch {
       setError("Copy was blocked by this browser. Select the message and copy it manually.");
     }
@@ -159,49 +153,43 @@ export function PhotonJoinDialog({ tripId, tripToken, eventName }: PhotonJoinDia
             aria-busy={loading}
             onKeyDown={keepFocusInside}
           >
-            <button type="button" className="fd-photon-close" aria-label="Close iMessage setup" onClick={close}>×</button>
+            <button type="button" className="fd-photon-close" aria-label="Close iMessage QR" onClick={close}>×</button>
             <div className="fd-photon-top">
               <span className="fd-photon-orb" aria-hidden="true">☺</span>
-              <div><b>S’mile on iMessage</b><small>Private travel help for {eventName}</small></div>
+              <div><b>@smile on iMessage</b><small>Your route to {eventName}</small></div>
             </div>
 
             {result ? (
               <div className="fd-photon-ready" aria-live="polite">
-                <p className="fd-photon-kicker">Your private line is ready</p>
-                <h2 id="photon-dialog-title" ref={readyHeadingRef} tabIndex={-1}>Scan, then send first</h2>
-                <p id="photon-dialog-description">Scan with your phone, or open Messages on this device. Send the starter message so Photon can reply.</p>
-                <figure className="fd-photon-qr" aria-label="QR code that opens your assigned S’mile conversation in Messages">
-                  <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#2b1b3d" title="Open your private S’mile conversation in Messages" />
+                <p className="fd-photon-kicker">Your secure QR is ready</p>
+                <h2 id="photon-dialog-title" ref={headingRef} tabIndex={-1}>Scan, then send the message</h2>
+                <p id="photon-dialog-description">The QR opens the dedicated @smile conversation with your one-time route request already filled in. Send it within 15 minutes.</p>
+                <figure className="fd-photon-qr" aria-label="QR code that opens the dedicated @smile conversation in Messages">
+                  <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#2b1b3d" title="Open @smile in Messages with the route request filled in" />
                 </figure>
                 <a className="dk-btn primary fd-photon-open" href={result.messageUrl}>Open Messages</a>
                 <div className="fd-photon-message">
-                  <small>Copy, paste, and send this first</small>
+                  <small>The QR fills in this private request</small>
                   <code>{result.starterMessage}</code>
-                  <button type="button" onClick={copyStarter}>{copied ? "Message copied" : "Copy starter message"}</button>
+                  <button type="button" onClick={copyStarter}>{copied ? "Message copied" : "Copy message"}</button>
                 </div>
-                <p className="fd-photon-note"><b>Blue bubble check:</b> use the same phone number or Apple Account email you entered. Include <b>@smile</b> in every follow-up.</p>
-                {result.reused && <p className="fd-photon-reused">Your existing private assignment was reused.</p>}
+                <p className="fd-photon-note"><b>One final tap:</b> iMessage cannot open a website tab automatically. After you send, @smile replies with a secure map link; tap that link to open your route.</p>
                 {error && <p className="fd-photon-error" role="alert">{error}</p>}
               </div>
+            ) : error ? (
+              <div className="fd-photon-form">
+                <p className="fd-photon-kicker">QR not ready</p>
+                <h2 id="photon-dialog-title" ref={headingRef} tabIndex={-1}>Try the secure handoff again</h2>
+                <p id="photon-dialog-description" className="fd-photon-error" role="alert">{error}</p>
+                <button className="dk-btn primary fd-photon-submit" type="button" onClick={() => void requestQr()}>Try again</button>
+                <p className="fd-photon-fine">This website never asks for your phone number or email address.</p>
+              </div>
             ) : (
-              <form className="fd-photon-form" onSubmit={submit}>
-                <p className="fd-photon-kicker">Connect privately</p>
-                <h2 id="photon-dialog-title">Open your S’mile chat</h2>
-                <p id="photon-dialog-description">Enter the exact identity selected under Settings → Apps → Messages → Send &amp; Receive.</p>
-                <label className="fd-photon-field">
-                  <span>iMessage phone or Apple Account email</span>
-                  <input ref={inputRef} value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="(415) 555-0123 or you@icloud.com" autoComplete="username" spellCheck={false} maxLength={254} required />
-                </label>
-                <label className="fd-photon-consent">
-                  <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} required />
-                  <span>I agree that this identity is sent securely to Photon so it can assign my private Messages number. It is not shown to other travelers.</span>
-                </label>
-                {error && <p className="fd-photon-error" role="alert">{error}</p>}
-                <button className="dk-btn primary fd-photon-submit" type="submit" disabled={loading || !handle.trim() || !consent}>
-                  {loading ? "Creating your private line…" : "Create QR code"}
-                </button>
-                <p className="fd-photon-fine">You send the first message. Every message to the assistant must include <b>@smile</b>.</p>
-              </form>
+              <div className="fd-photon-form" role="status">
+                <p className="fd-photon-kicker">Preparing iMessage</p>
+                <h2 id="photon-dialog-title" ref={headingRef} tabIndex={-1}>Creating your secure QR…</h2>
+                <p id="photon-dialog-description">No phone number or email address is requested. Your trip token stays on the server.</p>
+              </div>
             )}
           </div>
         </div>,

@@ -13,6 +13,17 @@ const config: NextConfig = {
   outputFileTracingRoot: path.resolve(process.cwd(), ".."),
   turbopack: { root: path.resolve(process.cwd(), "..") },
   transpilePackages: ["@smile/core"],
+  async headers() {
+    return [
+      {
+        source: "/map",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, max-age=0" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [
       {

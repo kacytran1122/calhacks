@@ -178,7 +178,7 @@ export function LensDemo() {
                       <button aria-pressed={includeDrive} onClick={() => setIncludeDrive(true)}><b>Yes, include driving</b><small>Compare a road route too</small></button>
                       <button aria-pressed={!includeDrive} onClick={() => setIncludeDrive(false)}><b>No self-drive</b><small>Public transit only</small></button>
                     </div>
-                    <a href="/" className="lens-real-plan">Plan your trip <span aria-hidden="true">→</span></a>
+                    <a href="/landing#approve" className="lens-real-plan">Plan your trip <span aria-hidden="true">→</span></a>
                   </div>
                 </aside>
               </div>

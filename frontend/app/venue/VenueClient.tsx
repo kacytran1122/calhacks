@@ -95,7 +95,7 @@ export function VenueClient() {
     };
     return (<div className="vn">
       <header className="vn-top">
-        <a href="/" className="brand" aria-label="S’mile home">
+        <a href="/landing" className="brand" aria-label="S’mile home">
           <SmileWord />
         </a>
         <div className="vn-title">
