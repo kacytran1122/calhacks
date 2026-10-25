@@ -164,6 +164,7 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
     : await triggerDataset(datasetId, [{ url: sourceUrl }], Math.min(5_000, timeoutMs));
   const snapshotId = trigger.body?.snapshotId;
   let collectionState = "starting";
+  let datasetNote: string | undefined;
   if (trigger.status === "ok" && snapshotId) {
     let checks = 0;
     while (Date.now() - started < timeoutMs - 700) {
@@ -173,7 +174,11 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
       collectionState = snapshot.body?.state ?? collectionState;
       if ((snapshot.status === "ok" || snapshot.status === "empty") && snapshot.body?.records) {
         const best = candidatesFromDataset(snapshot.body.records)[0];
-        if (!best) return { ...base, status: "empty", snapshotId, collectionState: "ready", via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: "The live collection completed without a verifiable USD fare." };
+        if (!best) {
+          collectionState = "ready";
+          datasetNote = "The structured collection completed without a verifiable USD fare.";
+          break;
+        }
         return {
           ...base,
           status: "ok",
@@ -194,10 +199,10 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
       if (requestedSnapshot && checks >= 1) break;
       await new Promise((resolve) => setTimeout(resolve, Math.min(1_200, Math.max(0, timeoutMs - (Date.now() - started) - 700))));
     }
-    return { ...base, status: "timeout", snapshotId, collectionState, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: "The live fare is still being collected. S’mile will keep checking this snapshot." };
+    if (!datasetNote) return { ...base, status: "timeout", snapshotId, collectionState, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: "The live fare is still being collected. S’mile will keep checking this snapshot." };
   }
 
-  const remaining = timeoutMs - (Date.now() - started);
+  const remaining = datasetNote ? Math.max(8_000, timeoutMs - (Date.now() - started)) : timeoutMs - (Date.now() - started);
   if (remaining < 1_500) return { ...base, status: trigger.status, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: trigger.error ?? "The live collection could not be started." };
   const page = await unlock(sourceUrl, "markdown", { attempts: 1, timeoutMs: remaining });
   if (page.status === "ok" && page.body && llmAvailable()) {
@@ -210,13 +215,13 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
         effort: "low",
       });
       if (extracted.amountUsd && extracted.exactQuote && quoteContains(extracted.exactQuote, extracted.amountUsd) && text.toLowerCase().includes(extracted.exactQuote.toLowerCase())) {
-        return { ...base, status: "ok", amountUsd: extracted.amountUsd, provider: extracted.provider ?? "Google Flights", scope: extracted.scope ?? "Lowest visible fare for this route and date", via: "Bright Data Web Unlocker → grounded extraction", ms: Date.now() - started };
+        return { ...base, status: "ok", amountUsd: extracted.amountUsd, provider: extracted.provider ?? "Google Flights", scope: extracted.scope ?? "Lowest visible fare for this route and date", via: "Bright Data Web Unlocker → grounded extraction", ms: Date.now() - started, snapshotId, collectionState };
       }
     } catch {
       // The result below preserves the source failure without inventing a price.
     }
   }
 
-  const note = [trigger.error, page.error, page.status === "ok" ? "No exact route-and-date fare could be verified in the returned page." : undefined].filter(Boolean).join("; ");
-  return { ...base, status: trigger.status === "timeout" || page.status === "timeout" ? "timeout" : trigger.status === "blocked" || page.status === "blocked" ? "blocked" : "empty", via: "Bright Data Google Flights scraper + Web Unlocker fallback", ms: Date.now() - started, note };
+  const note = [datasetNote, trigger.error, page.error, page.status === "ok" ? "No exact route-and-date fare could be verified in the returned page." : undefined].filter(Boolean).join("; ");
+  return { ...base, status: trigger.status === "timeout" || page.status === "timeout" ? "timeout" : trigger.status === "blocked" || page.status === "blocked" ? "blocked" : "empty", via: "Bright Data Google Flights scraper + Web Unlocker fallback", ms: Date.now() - started, snapshotId, collectionState, note };
 }

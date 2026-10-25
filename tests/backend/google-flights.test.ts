@@ -51,6 +51,42 @@ test("live fare rejects nested values in another currency", async (t) => {
   assert.equal(quote.amountUsd, undefined);
 });
 
+test("a completed collection without a fare inspects the same live Google Flights page", async (t) => {
+  const token = process.env.BRIGHTDATA_API_TOKEN;
+  const zone = process.env.BRIGHTDATA_UNLOCKER_ZONE;
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  process.env.BRIGHTDATA_UNLOCKER_ZONE = "test-unlocker";
+  delete process.env.ANTHROPIC_API_KEY;
+  t.after(() => {
+    if (token === undefined) delete process.env.BRIGHTDATA_API_TOKEN;
+    else process.env.BRIGHTDATA_API_TOKEN = token;
+    if (zone === undefined) delete process.env.BRIGHTDATA_UNLOCKER_ZONE;
+    else process.env.BRIGHTDATA_UNLOCKER_ZONE = zone;
+    if (anthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = anthropic;
+  });
+  let unlockedUrl = "";
+  t.mock.method(globalThis, "fetch", async (input, init) => {
+    const url = String(input);
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    if (url.includes("/snapshot/")) return new Response(JSON.stringify([{ route: "SFO-DEN", currency: "USD" }]), { status: 200 });
+    if (url.endsWith("/request")) {
+      const body = JSON.parse(String(init?.body)) as { url?: string };
+      unlockedUrl = body.url ?? "";
+      return new Response("Google Flights SFO to DEN on January 16, 2027. Current lowest fare $109. ".repeat(4), { status: 200 });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  });
+
+  const quote = await liveGoogleFlightQuote({ fromAirport: "SFO", toAirport: "DEN", departDate: "2027-01-16", snapshotId: "s_empty123", timeoutMs: 3_000 });
+  assert.equal(quote.status, "empty");
+  assert.equal(quote.snapshotId, "s_empty123");
+  assert.equal(quote.collectionState, "ready");
+  assert.equal(unlockedUrl, quote.sourceUrl);
+  assert.match(quote.via, /Web Unlocker fallback/);
+});
+
 test("live fare uses Bright Data structured Google Flights output", async (t) => {
   const before = process.env.BRIGHTDATA_API_TOKEN;
   process.env.BRIGHTDATA_API_TOKEN = "test-token";
