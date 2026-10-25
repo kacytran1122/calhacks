@@ -22,6 +22,8 @@ const incoming = (id = "msg_1", spaceId = "group_1", text = "@smile help us trav
 const eventFor = (message: PhotonMessage, projectId = "pho_prj_test") => ({ id: `evt_${message.id}`, type: "message.received", source: "imessage.photon", data: { projectId, object: message } });
 
 async function fixture(t: TestContext, replies: Reply[] = [{ id: "reply_1", text: "Take the airport train to the venue." }]) {
+  const logs: unknown[][] = [];
+  t.mock.method(console, "info", (...args: unknown[]) => { logs.push(args); });
   const directory = await mkdtemp(join(tmpdir(), "smile-photon-test-"));
   const calls: BrainBody[] = [];
   const controls = { status: 200, raw: undefined as string | undefined };
@@ -58,7 +60,7 @@ async function fixture(t: TestContext, replies: Reply[] = [{ id: "reply_1", text
     },
     createOrGetSpace: async (value: unknown) => { spaces.push(value); return { id: "private_1" }; },
   } } as unknown as Photon;
-  return { config, calls, controls, photon, sent, effects, spaces, fail };
+  return { config, calls, controls, photon, sent, effects, spaces, fail, logs };
 }
 
 class FakeSocket extends EventEmitter {
@@ -145,6 +147,7 @@ test("persists the cursor only after all deliveries succeed and replays failed m
   const socket = new FakeSocket();
   t.after(() => socket.disconnect());
   await start(f.config, { photon: f.photon, socket: socket as unknown as Socket, retryBaseMs: 30, retryMaxMs: 100 });
+  assert.match(JSON.stringify(f.logs), /S’mile connected to Photon 2\.0 at cursor 0/);
   socket.deliver(incoming("first"), 1);
   await until(async () => { try { return (await cursorOf(f.config)).seq === 1; } catch { return false; } }, "initial cursor");
   f.fail.count = 1;
@@ -258,6 +261,7 @@ test("the standalone worker stays alive until its reconnect timer fires", async 
   const directory = await mkdtemp(join(tmpdir(), "smile-photon-lifecycle-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const source = `
+    if (process.env.NODE_TEST_CONTEXT) throw new Error('Standalone worker inherited the test runner context');
     import { EventEmitter } from 'node:events';
     import { start } from ${JSON.stringify(new URL("../../backend/photon/index.ts", import.meta.url).href)};
     class Socket extends EventEmitter {
@@ -271,8 +275,10 @@ test("the standalone worker stays alive until its reconnect timer fires", async 
     await start({ projectId: 'pho_prj_test', apiKey: 'pho_sk_test', bridgeSecret: 'test-secret', webUrl: 'https://smile.example', apiOrigin: 'https://api.photon.codes', cursorFile: ${JSON.stringify(join(directory, "cursor.json"))} }, { photon: { projects: { get: async () => ({}) } }, socket, retryBaseMs: 20 });
     socket.emit('delivery', {}, { seq: -1 });
   `;
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
   const output = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
-    cwd: fileURLToPath(new URL("../../backend", import.meta.url)), encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"],
+    cwd: fileURLToPath(new URL("../../backend", import.meta.url)), env: environment, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"],
   });
   assert.match(output, /RECONNECTED/);
 });

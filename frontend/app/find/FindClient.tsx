@@ -398,6 +398,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
                 <button className="dk-btn primary" onClick={() => { setRadius(expandedRadius); search(zip, expandedRadius, activeQuery); }}>Expand to {displayDistance(expandedRadius, distanceUnit).toLocaleString()} {distanceUnit}</button>
                 <a className="dk-btn ghost" href={event.url} target="_blank" rel="noreferrer">View event page ↗</a>
               </div>
+              <VenueTourAction event={event} />
             </div>
           </section>
         );

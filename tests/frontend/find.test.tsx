@@ -154,6 +154,7 @@ test("explains when a named event is beyond the selected distance", async () => 
 
   expect(await screen.findByText("Cal Hacks 13.0 is outside your 200 mi travel area.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Expand to 1,850 mi" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Immerse in a 3D tour" })).toHaveAttribute("href", "/venue");
 });
 
 test("shows each event thumbnail and asks for travel requirements below the budget", async () => {
