@@ -11,11 +11,13 @@ const Row = ({ l, r, num }: { l: string; r: ReactNode; num?: boolean }) => (
   </div>
 );
 
-const STEPS: { title: string; body: ReactNode; panel: ReactNode }[] = [
-  { title: "Event detected", body: <>Open the event page. <Smile /> Lens finds the name, venue and kickoff time.</>, panel: <EventThumb /> },
+const STEPS: { title: string; body: ReactNode; panel: ReactNode; image?: string; imageAlt?: string }[] = [
+  { title: "Event detected", body: <>Open the event page. <Smile /> Lens finds the name, venue and kickoff time.</>, panel: <EventThumb />, image: "/how/1-find.webp", imageAlt: "Event results with buttons to plan a trip" },
   {
     title: "Origin entered",
     body: "Start with a ZIP or a U.S. city and state. No account, no profile form.",
+    image: "/how/2-start.webp",
+    imageAlt: "Trip setup screen with the selected event and travel details",
     panel: (
       <>
         <div style={{ font: "700 42px/1 var(--font-heading)" }}>Davis, CA</div>
@@ -37,6 +39,8 @@ const STEPS: { title: string; body: ReactNode; panel: ReactNode }[] = [
   {
     title: "Routes compared",
     body: "Train, rideshare and bus, scored on fare, time and the chance you miss kickoff.",
+    image: "/how/3-compare.webp",
+    imageAlt: "Complete route choices compared on the trip results screen",
     panel: (
       <>
         <Row l="Train + BART" r="$24 · 12%" num />
@@ -58,6 +62,8 @@ const STEPS: { title: string; body: ReactNode; panel: ReactNode }[] = [
   {
     title: "Buddies matched",
     body: "Travelers on your route, matched without exposing profiles.",
+    image: "/how/4-group.webp",
+    imageAlt: "Private Messages handoff for contacting at smile about the trip",
     panel: (
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ display: "flex", paddingLeft: 8 }}>
@@ -82,6 +88,8 @@ const STEPS: { title: string; body: ReactNode; panel: ReactNode }[] = [
   {
     title: "Finance handoff",
     body: "The same trip, quote and policy record move to the organizer desk. Receipts, check-in and settlement are reconciled before reimbursement.",
+    image: "/how/8-paid.webp",
+    imageAlt: "Trip finance status showing the traveler budget and organizer policy",
     panel: (
       <>
         <Row l="Traveler-approved quote" r="$24.00" num />
@@ -111,18 +119,20 @@ export function HowItWorks() {
           <div className="how-steps" role="tablist" aria-label="Trip journey steps">
             {STEPS.map((st, i) => (
               <button key={st.title} role="tab" aria-selected={i === cur} className={`how-step${i === cur ? " active" : ""}`} onClick={() => setCur(i)}>
-                <span className={`how-thumb how-thumb-${i + 1}`} aria-hidden="true"><i>{String(i + 1).padStart(2, "0")}</i></span>
+                <span className={`how-thumb how-thumb-${i + 1}${st.image ? " has-image" : ""}`} style={st.image ? { backgroundImage: `url(${st.image})` } : undefined} aria-hidden="true"><i>{String(i + 1).padStart(2, "0")}</i></span>
                 <span><small>Step {String(i + 1).padStart(2, "0")}</small><b>{st.title}</b></span>
               </button>
             ))}
           </div>
           <div className="how-feature" role="tabpanel" aria-live="polite">
-            <div className={`how-picture how-picture-${cur + 1}`} aria-hidden="true">
-              <span className="how-photo-light" />
-              <span className="how-photo-route" />
-              <span className="how-photo-point p1" />
-              <span className="how-photo-point p2" />
-              <span className="how-photo-point p3" />
+            <div className={`how-picture how-picture-${cur + 1}${s.image ? " has-image" : ""}`}>
+              {s.image ? <img className="how-screen-capture" src={s.image} alt={s.imageAlt ?? ""} /> : <>
+                <span className="how-photo-light" />
+                <span className="how-photo-route" />
+                <span className="how-photo-point p1" />
+                <span className="how-photo-point p2" />
+                <span className="how-photo-point p3" />
+              </>}
               <div className="how-photo-caption"><small>Trip stage</small><b>{s.title}</b></div>
             </div>
             <div className="how-feature-copy">

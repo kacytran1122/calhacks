@@ -663,6 +663,13 @@ footer .wrap{justify-content:center;text-align:center}
 .how-picture-6{background:linear-gradient(145deg,#67658c,#d8d3ea 45%,#686279 46%,#342f48)}
 .how-picture-7{background:linear-gradient(145deg,#b77367,#f1d1c5 45%,#7f6766 46%,#483336)}
 .how-picture-8{background:linear-gradient(145deg,#967e54,#eadfc6 45%,#7b7361 46%,#403c35)}
+.how-picture.has-image::before{z-index:1;background:linear-gradient(0deg,rgba(28,20,37,.42),transparent 48%)}
+.how-picture.has-image::after{display:none}
+.how-screen-capture{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transition:transform .45s ease}
+.how-feature:hover .how-screen-capture{transform:scale(1.015)}
+.how-picture.has-image .how-photo-caption{z-index:2}
+.how-thumb.has-image{background-size:cover;background-position:center}
+.how-thumb.has-image::after{background:linear-gradient(135deg,rgba(43,27,61,.08),rgba(43,27,61,.48))}
 .how-photo-light{position:absolute;width:320px;height:320px;right:-110px;top:-90px;border-radius:50%;background:rgba(255,240,190,.7);filter:blur(45px)}
 .how-photo-route{position:absolute;left:12%;right:6%;bottom:24%;height:5px;border-radius:5px;background:var(--butter);transform:rotate(-8deg);box-shadow:0 0 0 5px rgba(255,216,77,.14)}
 .how-photo-point{position:absolute;width:18px;height:18px;border:4px solid #fff;border-radius:50%;background:var(--color-accent);box-shadow:0 5px 14px rgba(20,15,25,.3)}
