@@ -31,6 +31,8 @@ Only these product areas live at the repository root. Generated files, credentia
 | Area | Responsibility |
 |---|---|
 | `frontend/app` | Landing page, event search, traveler planning, chat, and organizer desk |
+| `frontend/app/tour` | Full-screen route for the James West Alumni Center interactive 3D tour |
+| `frontend/3d-tour` | Reproducible, person-free 3D model generator and tour documentation |
 | `frontend/extension` | Read-only Chrome extension for public event pages |
 | `backend/src/agents` | Scout, Evidence, Route, Discover, Heat, Pricing, and the @smile Concierge |
 | `backend/src/scheduler.ts` | Wakes the agents on a timer: backlog, price, weather, and event-date checks |
