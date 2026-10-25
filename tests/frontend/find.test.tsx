@@ -345,7 +345,7 @@ test("keeps detailed live transit visible while its fare is being verified", asy
   await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
   expect(await screen.findByText("Best live route")).toBeVisible();
   expect(screen.getByText("Take Metro from UCLA to Union Station.")).toBeVisible();
-  expect(screen.getByText(/waiting for a verifiable fare/i)).toBeVisible();
+  expect(screen.getByText(/no live source stated a complete trip total/i)).toBeVisible();
   expect(screen.queryByText(/Bright Data did not respond/i)).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "A stop on the way" })).not.toBeInTheDocument();
   expect(screen.queryByText(/No route fits organizer policy/i)).not.toBeInTheDocument();

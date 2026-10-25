@@ -126,7 +126,7 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
       <p className="dk-mut">Predicted ranges for prices that move with time and demand. These are estimates for planning — you still approve an exact live price before anything is booked.</p>
       {err.price && <p className="dk-note">Price outlook unavailable: {err.price}</p>}
       {!price && !err.price && <p className="dk-mut">Running the price models…</p>}
-      {price && rows.length === 0 && <p className="dk-note">No rideshare or flight estimate for this trip (rideshare over 150 road miles; flights under 150 miles or no nearby commercial airports).</p>}
+      {price && rows.length === 0 && <p className="dk-note">No demand-based estimate is available for this route. Live route evidence above is still used for planning.</p>}
       {rows.length > 0 && (
         <table className="dk-table tight ti-prices">
           <tbody>
@@ -198,7 +198,7 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
       <h3>Heat at the venue</h3>
       {err.heat && <p className="dk-note">Heat map unavailable: {err.heat}</p>}
       {!heat && !err.heat && <p className="dk-mut">Collecting temperatures around the venue…</p>}
-      {heat && heat.status !== "ok" && <p className="dk-note">{heat.summary}</p>}
+      {heat && heat.status !== "ok" && <p className="dk-note">Venue heat evidence is not available for this event hour yet. No heat estimate is shown.</p>}
       {heat && heat.status === "ok" && (
         <>
           <HeatMapView heat={heat} />

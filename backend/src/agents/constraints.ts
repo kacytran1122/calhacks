@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { llmAvailable, structured } from "../llm";
+import { haversineMiles } from "../integrations/geo";
+import { AIRFARE } from "../ml/price";
 
 export const TravelConstraintsSchema = z.object({
   status: z.enum(["ready", "needs_clarification"]),
@@ -13,6 +15,63 @@ export const TravelConstraintsSchema = z.object({
 export const TravelConstraintsPlanSchema = TravelConstraintsSchema.extend({ raw: z.string().min(1).max(5_000) });
 
 export type TravelConstraints = z.infer<typeof TravelConstraintsSchema>;
+
+type ReviewArgs = {
+  text: string;
+  origin?: string;
+  eventName?: string;
+  eventVenue?: string;
+  eventCity?: string;
+  eventStartsAt?: string;
+  eventLat?: number;
+  eventLon?: number;
+};
+
+const TIME_CODES = new Set(["AM", "PM", "PT", "ET", "CT", "MT", "UTC", "PST", "PDT", "CST", "CDT", "EST", "EDT", "MST", "MDT"]);
+
+function lastTravelerAnswer(text: string) {
+  return [...text.matchAll(/Traveler's answer:\s*([^\n]+)/gi)].at(-1)?.[1]?.trim() ?? "";
+}
+
+function destinationConflict(args: ReviewArgs) {
+  if (args.eventLat === undefined || args.eventLon === undefined) return null;
+  const answer = lastTravelerAnswer(args.text);
+  const selectedEventTerms = [args.eventName, args.eventVenue, args.eventCity]
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => [value.toLowerCase(), value.toLowerCase().split(/[,-]/)[0]!.trim()])
+    .filter((value) => value.length >= 3);
+  const answerChoosesEvent = /\b(selected event|event venue|event location)\b/i.test(answer)
+    || /\b(ignore|remove|mistake|typo|do not include|don't include)\b/i.test(answer)
+    || selectedEventTerms.some((term) => answer.toLowerCase().includes(term));
+  if (answerChoosesEvent) return null;
+
+  const codes = [...new Set(args.text.match(/\b[A-Z]{3}\b/g) ?? [])].filter((code) => !TIME_CODES.has(code));
+  for (const code of codes) {
+    const airport = AIRFARE.airports.find((candidate) => candidate.code === code);
+    if (!airport) continue;
+    const miles = Math.round(haversineMiles({ lat: args.eventLat, lon: args.eventLon }, airport));
+    if (miles <= 120) continue;
+    const eventPlace = args.eventCity || args.eventVenue || "the selected event location";
+    return {
+      summary: `The request names ${code}, but ${args.eventName || "the selected event"} is in ${eventPlace}.`,
+      question: `${args.eventName || "The selected event"} is in ${eventPlace}, but your requirement mentions ${code}, about ${miles.toLocaleString()} miles away. Should S’mile plan to the event in ${eventPlace}, or did you select the wrong event?`,
+    };
+  }
+  return null;
+}
+
+function enforceSelectedEvent(result: TravelConstraints, args: ReviewArgs, parsedBy: "rules" | "claude") {
+  const conflict = destinationConflict(args);
+  if (!conflict) return { ...result, parsedBy };
+  return {
+    ...result,
+    status: "needs_clarification" as const,
+    summary: conflict.summary,
+    destination: null,
+    followUpQuestion: conflict.question,
+    parsedBy,
+  };
+}
 
 export function fallbackTravelConstraints(text: string): TravelConstraints {
   const clean = text.trim().replace(/\s+/g, " ");
@@ -37,10 +96,10 @@ export function fallbackTravelConstraints(text: string): TravelConstraints {
   return { status: "ready", summary: clean, destination: null, arriveBy: null, departAfter: null, timezone: null, followUpQuestion: null };
 }
 
-export async function reviewTravelConstraints(args: { text: string; origin?: string; eventName?: string; eventCity?: string; eventStartsAt?: string }) {
+export async function reviewTravelConstraints(args: ReviewArgs) {
   const text = args.text.trim();
-  if (!text) return { ...fallbackTravelConstraints("No additional travel requirements."), parsedBy: "rules" as const };
-  if (!llmAvailable()) return { ...fallbackTravelConstraints(text), parsedBy: "rules" as const };
+  if (!text) return enforceSelectedEvent(fallbackTravelConstraints("No additional travel requirements."), args, "rules");
+  if (!llmAvailable()) return enforceSelectedEvent(fallbackTravelConstraints(text), args, "rules");
   try {
     const result = await structured(TravelConstraintsSchema, {
       model: "extract",
@@ -48,8 +107,8 @@ export async function reviewTravelConstraints(args: { text: string; origin?: str
       user: JSON.stringify(args),
       effort: "low",
     });
-    return { ...result, parsedBy: "claude" as const };
+    return enforceSelectedEvent(result, args, "claude");
   } catch {
-    return { ...fallbackTravelConstraints(text), parsedBy: "rules" as const };
+    return enforceSelectedEvent(fallbackTravelConstraints(text), args, "rules");
   }
 }

@@ -190,11 +190,11 @@ export interface AirfareEstimate {
 /** Ground travel to and from the airports is priced at the IRS mileage rate the travel policy already uses. */
 const GROUND_USD_PER_MILE = 0.7;
 
-/** The busiest commercial airports within `withinMiles` of a point, nearest first. */
-export function airportsNear(point: { lat: number; lon: number }, withinMiles = 80, limit = 3): (Airport & { miles: number })[] {
+/** Airports with reported U.S. passenger fares within `withinMiles` of a point, nearest first. */
+export function airportsNear(point: { lat: number; lon: number }, withinMiles = 120, limit = 4): (Airport & { miles: number })[] {
   return AIRFARE.airports
     .map((a) => ({ ...a, miles: haversineMiles(point, a) }))
-    .filter((a) => a.miles <= withinMiles && a.log_pax >= 8) // real scheduled service
+    .filter((a) => a.miles <= withinMiles)
     .sort((a, b) => a.miles - b.miles)
     .slice(0, limit);
 }

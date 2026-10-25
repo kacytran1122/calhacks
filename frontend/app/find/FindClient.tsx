@@ -497,8 +497,11 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
           text: rawConstraint,
           origin: zip,
           eventName: event.name,
+          eventVenue: event.venue,
           eventCity: event.city,
           eventStartsAt: event.startsAt,
+          eventLat: event.lat,
+          eventLon: event.lon,
         });
         setConstraintReview(reviewed);
         setReviewedConstraintText(rawConstraint);
@@ -652,7 +655,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
             <i aria-hidden="true">→</i>
             <div><span>Organizer policy</span><b>{fmt(plan.routes.cap)} cap · R1</b></div>
             <i aria-hidden="true">→</i>
-            <div><span>Finance desk</span><b>{plan.routes.pick ? `${fmt(plan.trip.reimbursementEligibleCents ?? 0)} eligible` : "waiting"}</b></div>
+            <div><span>Finance desk</span><b>{plan.routes.pick ? `${fmt(plan.trip.reimbursementEligibleCents ?? 0)} eligible` : "No approval yet"}</b></div>
           </div>
           {plan.routes.blockReason === "TRAVELER_BUDGET" && (
             <div className="dk-q">
@@ -664,13 +667,13 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
           {plan.routes.blockReason === "MAX_DISTANCE" && (
             <div className="dk-q"><b>This event is outside your distance limit.</b><p>Go back and increase the maximum distance only if you want to.</p></div>
           )}
-          {plan.routes.blockReason === "NO_VERIFIED_FARE" && <p className="dk-note">Live route instructions are ready, but S’mile is waiting for a verifiable fare before creating a payment approval.</p>}
+          {plan.routes.blockReason === "NO_VERIFIED_FARE" && <p className="dk-note">No payment approval was created because no live source stated a complete trip total. Review the route now, then refresh closer to departure or open the live source to confirm the fare.</p>}
           {plan.routes.blockReason === "ORGANIZER_CAP" && <p className="dk-note">No route fits organizer policy R1. The finance controller—not the traveler—receives the exception request.</p>}
           {fare?.status !== "ok" && plan.routes.blockReason !== "NO_VERIFIED_FARE" && <p className="dk-note">A verified live fare is not available for this route yet. S’mile will not estimate or invent a price.{includeSelfDrive ? " Driving cost uses the IRS mileage rate and the live route distance." : ""}</p>}
 
           {stops?.status === "ok" && stopItems.length > 0 && (
             <section className="fd-stop-options">
-              <h3>A stop on the way</h3>
+              <h3>Near the event</h3>
               <ul className="dk-ul">
               {stopItems.map((r) => (
                 <li key={r.link}>
@@ -682,7 +685,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
               </ul>
             </section>
           )}
-          {weather && <p className="dk-mut">Weather at kickoff: {weather.status === "ok" ? `${weather.data.summary}, ${weather.data.tempF}°F` : weather.note}</p>}
+          {weather && <p className="dk-mut">Weather at kickoff: {weather.status === "ok" ? `${weather.data.summary}, ${weather.data.tempF}°F` : weather.note || "The event hour is not in the published forecast window yet."}</p>}
 
           <TripInsights
             from={originCoordinates ?? (homeGeo?.status === "ok" && typeof homeGeo.data.lat === "number" && typeof homeGeo.data.lon === "number" ? { lat: homeGeo.data.lat, lon: homeGeo.data.lon } : undefined)}

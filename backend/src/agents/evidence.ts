@@ -14,6 +14,21 @@ import type { EventFacts } from "./scout";
 const agent = { kind: "agent" as const, id: "evidence" as const };
 const LIVE_SEARCH_TIMEOUT_MS = 10_000;
 
+export function usefulStopResults(results: SerpOrganic[]) {
+  return results.filter((result) => {
+    let url: URL;
+    try {
+      url = new URL(result.link);
+    } catch {
+      return false;
+    }
+    const genericPage = /\/(search|find|browse)(?:\/|$)/i.test(url.pathname)
+      || /(?:^|[?&])(find_desc|find_loc|q|query)=/i.test(url.search)
+      || /\b(?:top \d+ best|best .+ in|nearby .+|search results?)\b/i.test(result.title);
+    return !genericPage;
+  });
+}
+
 function push(state: State, e: Omit<Evidence, "id" | "fetchedAt" | "provenance"> & { provenance?: Evidence["provenance"] }): Evidence {
   const full: Evidence = { id: newId(`EV-${e.kind}`), fetchedAt: new Date().toISOString(), provenance: "live", ...e };
   state.evidence.push(full);
@@ -153,15 +168,16 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const fareQuery = `${fromCity} to ${destination} ${travelDate} official adult ${fareModes} ticket fare${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
   const directionsQuery = `${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
   const [stops, transit, genericFareSerp, genericDirectionsSerp] = await Promise.all([
-    venueQ ? serp(`breakfast coffee near ${venueQ}`, 1, LIVE_SEARCH_TIMEOUT_MS) : Promise.resolve(null),
+    venueQ ? serp(`coffee shop near ${venueQ} official location`, 1, LIVE_SEARCH_TIMEOUT_MS) : Promise.resolve(null),
     transitPromise,
     serp(fareQuery, 1, LIVE_SEARCH_TIMEOUT_MS),
     serp(directionsQuery, 1, LIVE_SEARCH_TIMEOUT_MS),
   ]);
 
   if (stops) {
-    const top = (stops.body ?? []).slice(0, 3).map((r) => ({ title: r.title, link: r.link }));
-    out.push(push(state, { tripId, kind: "stop", source: "Bright Data SERP API → Google", status: stops.status, data: { query: venueQ, results: top, attempts: stops.attempts, ms: stops.ms }, note: stops.error ?? (stops.errorCode ? `x-brd-error-code=${stops.errorCode}` : undefined) }));
+    const top = usefulStopResults(stops.body ?? []).slice(0, 3).map((r) => ({ title: r.title, link: r.link }));
+    const stopStatus = stops.status === "ok" && top.length === 0 ? "empty" : stops.status;
+    out.push(push(state, { tripId, kind: "stop", source: "Bright Data SERP API → Google", status: stopStatus, data: { query: venueQ, results: top, attempts: stops.attempts, ms: stops.ms }, note: stops.error ?? (stops.errorCode ? `x-brd-error-code=${stops.errorCode}` : top.length === 0 && stops.status === "ok" ? "Live search returned only general search pages, so S’mile did not present them as specific places." : undefined) }));
   }
 
   const targetedQuery = officialFareQuery(transit.options, event.startsAt);

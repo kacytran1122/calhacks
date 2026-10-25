@@ -49,6 +49,15 @@ test("flights: none for short hops, a real airport pair for long trips", () => {
   assert.ok(trip.groundMiles < 60);
 });
 
+test("flights: regional commercial airports keep smaller cities connected", () => {
+  const galesburg = { lat: 40.9478, lon: -90.3712 };
+  const durham = { lat: 35.994, lon: -78.899 };
+  assert.ok(airportsNear(galesburg).some((airport) => airport.code === "PIA"));
+  const trip = estimateAirfare({ from: galesburg, to: durham, when: "2026-10-30T17:00:00Z" });
+  assert.ok(trip, "expected an airfare estimate Galesburg -> Durham");
+  assert.ok(["RDU", "GSO", "FAY"].includes(trip.to.code));
+});
+
 test("every hour of the day belongs to exactly one named period", () => {
   assert.equal(PERIODS.length, 7);
   for (let h = 0; h < 24; h++) assert.ok(periodOf(h).index >= 0, `hour ${h}`);
