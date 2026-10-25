@@ -36,9 +36,42 @@ function isoDate(value: string) {
 }
 
 export function googleFlightsUrl(fromAirport: string, toAirport: string, departDate: string) {
-  const query = `One way flights from ${fromAirport.toUpperCase()} to ${toAirport.toUpperCase()} on ${departDate}`;
-  const params = new URLSearchParams({ q: query, curr: "USD", hl: "en-US", gl: "US" });
-  return `https://www.google.com/travel/flights?${params}`;
+  const varint = (value: number | bigint) => {
+    const bytes: number[] = [];
+    let remaining = BigInt.asUintN(64, BigInt(value));
+    while (remaining > 0x7fn) {
+      bytes.push(Number(remaining & 0x7fn) | 0x80);
+      remaining >>= 7n;
+    }
+    bytes.push(Number(remaining));
+    return bytes;
+  };
+  const tag = (field: number, wire: number) => varint((field << 3) | wire);
+  const scalar = (field: number, value: number | bigint) => [...tag(field, 0), ...varint(value)];
+  const text = (field: number, value: string) => {
+    const bytes = [...new TextEncoder().encode(value)];
+    return [...tag(field, 2), ...varint(bytes.length), ...bytes];
+  };
+  const message = (field: number, value: number[]) => [...tag(field, 2), ...varint(value.length), ...value];
+  const location = (airport: string) => [...scalar(1, 1), ...text(2, airport.toUpperCase())];
+  const flight = [
+    ...text(2, departDate),
+    ...message(13, location(fromAirport)),
+    ...message(14, location(toAirport)),
+  ];
+  const filter = [
+    ...scalar(1, 28),
+    ...scalar(2, 2),
+    ...message(3, flight),
+    ...scalar(8, 1),
+    ...scalar(9, 1),
+    ...scalar(14, 1),
+    ...message(16, scalar(1, -1n)),
+    ...scalar(19, 2),
+  ];
+  const tfs = Buffer.from(filter).toString("base64url");
+  const params = new URLSearchParams({ tfs, curr: "USD", hl: "en-US", gl: "US" });
+  return `https://www.google.com/travel/flights/search?${params}`;
 }
 
 export function dayBefore(iso: string) {
@@ -53,13 +86,6 @@ function googleFlightUrl(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function matchingSearchUrl(value: unknown, fromAirport: string, toAirport: string, departDate: string) {
-  const safe = googleFlightUrl(value);
-  if (!safe) return undefined;
-  const query = new URL(safe).searchParams.get("q")?.toUpperCase() ?? "";
-  return query.includes(fromAirport) && query.includes(toAirport) && query.includes(departDate) ? safe : undefined;
 }
 
 function amount(value: unknown): number | undefined {
@@ -122,7 +148,7 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
   const toAirport = args.toAirport.trim().toUpperCase();
   const departDate = args.departDate;
   const observedAt = new Date().toISOString();
-  const sourceUrl = matchingSearchUrl(args.sourceUrl, fromAirport, toAirport, departDate) ?? googleFlightsUrl(fromAirport, toAirport, departDate);
+  const sourceUrl = googleFlightsUrl(fromAirport, toAirport, departDate);
   const base = { currency: "USD" as const, fromAirport, toAirport, departDate, observedAt, sourceUrl };
   if (!/^[A-Z]{3}$/.test(fromAirport) || !/^[A-Z]{3}$/.test(toAirport) || !isoDate(departDate)) return { ...base, status: "error", via: "validation", ms: 0, note: "A valid airport pair and travel date are required." };
 

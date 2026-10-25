@@ -5,8 +5,12 @@ import { googleFlightsUrl, liveGoogleFlightQuote } from "../../backend/src/integ
 test("Google Flights URL fixes route, date, currency, and locale", () => {
   const url = new URL(googleFlightsUrl("sfo", "lax", "2027-01-16"));
   assert.equal(url.hostname, "www.google.com");
-  assert.equal(url.pathname, "/travel/flights");
-  assert.match(url.searchParams.get("q") ?? "", /SFO to LAX on 2027-01-16/);
+  assert.equal(url.pathname, "/travel/flights/search");
+  const encoded = url.searchParams.get("tfs") ?? "";
+  const decoded = Buffer.from(encoded, "base64url");
+  assert.ok(decoded.includes(Buffer.from("SFO")));
+  assert.ok(decoded.includes(Buffer.from("LAX")));
+  assert.ok(decoded.includes(Buffer.from("2027-01-16")));
   assert.equal(url.searchParams.get("curr"), "USD");
   assert.equal(url.searchParams.get("gl"), "US");
 });
@@ -60,7 +64,7 @@ test("non-Google source URLs are never fetched", async (t) => {
     return new Response(JSON.stringify([{ pricing: { price: "$144" } }]), { status: 200 });
   });
   const quote = await liveGoogleFlightQuote({ fromAirport: "SFO", toAirport: "LAX", departDate: "2027-01-16", sourceUrl: "https://example.com/private" });
-  assert.match(quote.sourceUrl, /^https:\/\/www\.google\.com\/travel\/flights\?/);
+  assert.match(quote.sourceUrl, /^https:\/\/www\.google\.com\/travel\/flights\/search\?/);
   assert.doesNotMatch(triggerBody, /example\.com/);
   assert.match(triggerBody, /google\.com\/travel\/flights/);
   assert.ok(Array.isArray(JSON.parse(triggerBody)));
@@ -76,8 +80,11 @@ test("opaque booking URLs cannot silently replace the route being checked", asyn
   });
   const quote = await liveGoogleFlightQuote({ fromAirport: "SFO", toAirport: "DEN", departDate: "2027-01-16", sourceUrl: "https://www.google.com/travel/flights/booking?tfs=opaque-other-trip" });
   const url = new URL(quote.sourceUrl);
-  assert.equal(url.pathname, "/travel/flights");
-  assert.match(url.searchParams.get("q") ?? "", /SFO to DEN on 2027-01-16/);
+  assert.equal(url.pathname, "/travel/flights/search");
+  const decoded = Buffer.from(url.searchParams.get("tfs") ?? "", "base64url");
+  assert.ok(decoded.includes(Buffer.from("SFO")));
+  assert.ok(decoded.includes(Buffer.from("DEN")));
+  assert.ok(decoded.includes(Buffer.from("2027-01-16")));
 });
 
 test("a pending live collection is resumed with the same snapshot", async (t) => {
