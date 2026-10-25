@@ -240,7 +240,7 @@ async function priceWatchJob(deps: SchedulerDeps, now: Date): Promise<Omit<JobRe
       const args = { from: t.from, to: t.to, startsAt: t.event.startsAt, fromState: t.from.state, toState: stateCodeFromLabel(t.event.city) };
       const estimate = await runAgent(pricingCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)(args));
       const flight = t.trip.mode === "flight"
-        ? await runAgent(flightPriceCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.flightPrices ?? checkFlightPrice)({ ...args, snapshotId: t.snapshotId, timeoutMs: 10_000 }))
+        ? await runAgent(flightPriceCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.flightPrices ?? checkFlightPrice)({ ...args, snapshotId: t.snapshotId, timeoutMs: 30_000 }))
         : undefined;
       results.push({ tripId: t.trip.id, estimate, flight });
     } catch {

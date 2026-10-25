@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ensureState, fail } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 45;
 
 type Point = { lat: number; lon: number };
 const isPoint = (p: unknown): p is Point =>
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
   if (b.snapshotId && !/^s(?:d)?_[A-Za-z0-9]+$/.test(b.snapshotId)) return NextResponse.json({ error: "snapshotId is invalid" }, { status: 400 });
   ensureState();
   try {
-    const args = { from: b.from, to: b.to, startsAt: b.startsAt, fromState: b.fromState, toState: b.toState, sourceUrl, snapshotId: b.snapshotId, timeoutMs: 4_500 };
+    const args = { from: b.from, to: b.to, startsAt: b.startsAt, fromState: b.fromState, toState: b.toState, sourceUrl, snapshotId: b.snapshotId, timeoutMs: b.snapshotId ? 30_000 : 4_500 };
     const result = await runAgent(flightPriceCall(`flight:${b.from.lat.toFixed(1)},${b.from.lon.toFixed(1)}→${b.to.lat.toFixed(1)},${b.to.lon.toFixed(1)}`), () => checkFlightPrice(args));
     return NextResponse.json(result);
   } catch (e) {
