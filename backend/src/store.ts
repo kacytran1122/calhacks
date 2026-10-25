@@ -25,6 +25,7 @@ export interface State {
   audit: AuditEvent[];
   inbox: InboxItem[];
   noShows: { travelerId: string; eventId: string; date: string; tripId: string }[];
+  scheduler?: { lastRun: Partial<Record<string, string>> }; // job id -> last run (scheduler.ts)
 }
 
 function backendRoot(): string {

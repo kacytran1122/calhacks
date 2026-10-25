@@ -19,6 +19,7 @@
     "discover": "tsx scripts/discover.ts",
     "setup:check": "tsx scripts/setup.ts",
     "photon": "tsx photon/index.ts",
+    "scheduler": "tsx scripts/scheduler.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:backend && npm run test:agents",
     "test:backend": "tsx --test ../tests/backend/*.test.ts",

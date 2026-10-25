@@ -9,7 +9,8 @@
  * the same calendar date in recent years (ERA5 archive) and says so. The numbers are relative
  * evidence for planning, not calibrated measurements, and no model or LLM owns the ranking math.
  */
-import type { FetchStatus } from "../types";
+import type { Actor, FetchStatus } from "../types";
+import type { AgentCall } from "./run";
 
 const FORECAST = "https://api.open-meteo.com/v1/forecast";
 const ARCHIVE = "https://archive-api.open-meteo.com/v1/archive";
@@ -208,4 +209,16 @@ export async function heatMapAround(args: { lat: number; lon: number; at: string
     `Feels like ${Math.round(coolest)}–${Math.round(hottest.feelsLikeF)}°F around the venue at kickoff (${when}); hottest band: ${band}. ` +
     (hotspots.length ? `${hotspots.length} spot${hotspots.length > 1 ? "s" : ""} run at least ${ANOMALY_THRESHOLD_F}°F hotter than the area.` : "No spot stands out as hotter than the rest of the area.");
   return { ...base, status: "ok", basis, cells, hotspots, regionMedianF, band, summary, sources };
+}
+
+/** The registered call: the heat agent reads public weather models and scores the venue area. */
+export function heatCall(subject: string, on?: { actor: Actor; cap: "heat.read" }): AgentCall<HeatMap> {
+  return {
+    agent: "heat",
+    needs: ["feeds.read"],
+    action: "heat.mapped",
+    subject,
+    on,
+    summarize: (m) => (m.status === "ok" ? `${m.basis}: hottest band ${m.band}, ${m.hotspots.length} hotspot(s)` : `${m.basis} ${m.status}: ${m.error ?? "no data"}`),
+  };
 }

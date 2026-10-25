@@ -4,11 +4,14 @@ import {
   AGENT_NEVER,
   brightDataKey,
   buildSeed,
+  dueJobs,
   hasState,
+  JOBS,
   llmAvailable,
   loadState,
   PermissionDenied,
   LedgerError,
+  organizerCarbon,
   POLICY,
   RULES,
   saveState,
@@ -63,8 +66,15 @@ export function snapshot(user: User) {
       .map((t) => ({ ...t, traveler: s.travelers.find((x) => x.id === t.travelerId), event: s.events.find((e) => e.id === t.eventId)?.name })),
     audit: staff ? s.audit.slice(-60).reverse() : [],
     agents: Object.entries(AGENT_CAPS).map(([id, caps]) => ({ id, caps, never: AGENT_NEVER[id as keyof typeof AGENT_NEVER] })),
+    carbon: staff ? organizerCarbon(s) : null,
+    scheduler: staff ? schedulerStatus(s) : null,
     rules: RULES,
   };
+}
+
+function schedulerStatus(s: State) {
+  const due = new Set(dueJobs(s, new Date()));
+  return Object.entries(JOBS).map(([id, j]) => ({ id, what: j.what, everyMinutes: j.everyMinutes, lastRun: s.scheduler?.lastRun[id] ?? null, due: due.has(id as keyof typeof JOBS) }));
 }
 
 export function fail(e: unknown) {

@@ -1,6 +1,8 @@
 import { eventStore, type EventListing } from "../eventStore";
 import { cityToPoint, haversineMiles, isLikelyUsLocation, zipToPoint } from "../integrations/geo";
 import { fetchDevpost, fetchLuma, fetchMlh, type SourceResult } from "../integrations/sources";
+import type { Actor } from "../types";
+import type { AgentCall } from "./run";
 
 export interface DiscoverOptions {
   zip: string;
@@ -205,4 +207,17 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
   }
 
   return { origin, radiusMiles, events, outsideRadius, unplaced, sources, store: store.kind, storeNote, classifiedBy };
+}
+
+/** The registered call: discovery reads public listings and writes snapshots to the event store. */
+export function discoverCall(subject: string, on?: { actor: Actor; cap: "events.search" }): AgentCall<DiscoverResult> {
+  return {
+    agent: "discover",
+    needs: ["feeds.read", "web.read", "events.snapshot"],
+    action: "discover.searched",
+    subject,
+    on,
+    summarize: (r) => `${r.events.length} event(s) within ${r.radiusMiles} mi of ${r.origin.zip}; ${r.sources.map((s) => `${s.source} ${s.status}`).join(", ")}; snapshots in ${r.store}`,
+    refs: (r) => r.events.slice(0, 10).map((e) => e.key),
+  };
 }

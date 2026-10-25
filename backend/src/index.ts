@@ -16,10 +16,10 @@ export { scoutEvent, eventFromJsonLd, jsonLdBlocks, type LensHints, type EventFa
 export { gatherEvidence } from "./agents/evidence";
 export { compareRoutes, missRate } from "./agents/route";
 export { reviewTravelConstraints, fallbackTravelConstraints, TravelConstraintsSchema, TravelConstraintsPlanSchema, type TravelConstraints } from "./agents/constraints";
-export { discoverEvents, type DiscoverResult, type DiscoverOptions, type EventGroup } from "./agents/discover";
+export { discoverEvents, discoverCall, type DiscoverResult, type DiscoverOptions, type EventGroup } from "./agents/discover";
 export { eventStore, type EventListing } from "./eventStore";
 export { chargeTrip } from "./agents/payments";
-export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, type PickedEvent } from "./orchestrator";
+export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, carpoolFor, notify, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";
 export { cityToPoint, coordinatesToPoint, globalPlaceToPoint, haversineMiles, placeToPoint, zipToPoint, type GeoResult } from "./integrations/geo";
@@ -28,4 +28,9 @@ export { planExtensionRoute, type ExtensionEvent, type ExtensionRoute, type Exte
 export { authorizeVisaAcceptance, signedVisaHeaders, visaAcceptanceConfigured, type VisaAcceptanceResult } from "./integrations/visaAcceptance";
 export { predictTrees, type CompactModel, type CompactTree } from "./ml/gbdt";
 export { estimateRideshare, estimateAirfare, airportsNear, modelCard, predictRange, RIDESHARE, AIRFARE, type PriceRange, type RideshareEstimate, type AirfareEstimate } from "./ml/price";
-export { heatMapAround, scoreCells, severityFor, confidenceFor, gridAround, ANOMALY_THRESHOLD_F, type HeatMap, type HeatCell } from "./agents/heat";
+export { heatMapAround, heatCall, scoreCells, severityFor, confidenceFor, gridAround, ANOMALY_THRESHOLD_F, type HeatMap, type HeatCell } from "./agents/heat";
+export { estimatePrices, pricingCall, type PriceEstimate } from "./agents/pricing";
+export { runAgent, runAgentIn, type AgentCall } from "./agents/run";
+export { converse, amountsGrounded, TOOLS as CONCIERGE_TOOLS, type ConciergeInput, type ConciergeOutput, type ConciergePlan, type ConciergeDeps } from "./agents/concierge";
+export { runDue, runJob, dueJobs, JOBS, type JobId, type JobResult, type SchedulerDeps } from "./scheduler";
+export { compareCarbon, estimateCarbon, organizerCarbon, tripCarbon, FACTORS as EMISSION_FACTORS, CARBON_SOURCES, CARBON_METHOD, type CarbonEstimate, type CarbonComparison, type OrganizerCarbon } from "./carbon";

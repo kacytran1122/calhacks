@@ -75,3 +75,20 @@
 .hc-key i.past{width:18px;height:0;border-top:2px dashed #2F7FB8;border-radius:0}
 .hc-focus{margin:6px 0;font-size:13px}
 .hc-periods{margin-top:6px;font-size:13px}
+.fd-tag{background:var(--plum)!important;color:#fff!important}
+.fd-why{margin:0 0 10px;font-size:12px;line-height:1.45;color:var(--color-neutral-700)}
+.fd-route-card.alternative summary small{font:600 11px var(--font-body,inherit);color:var(--mut)}
+.cc{margin-top:18px}
+.cc-lead{margin:4px 0 8px;font-size:13px;line-height:1.45}
+.cc-table td{vertical-align:top}
+.cc-table tr.sel td{background:#fff8d7}
+.cc-barcell{width:34%;min-width:110px}
+.cc-bar{height:10px;border-radius:99px;background:var(--color-neutral-200);margin:4px 0}
+.cc-bar i{display:block;height:100%;border-radius:99px;background:var(--plum)}
+.cc-tags{display:inline-flex;flex-wrap:wrap;gap:4px;margin-left:6px;vertical-align:middle}
+.cc-tag{padding:2px 7px;border-radius:99px;background:var(--color-neutral-200);font:700 10px var(--font-heading);color:var(--color-neutral-700)}
+.cc-tag.pick{background:var(--plum);color:#fff}
+.cc-tag.muted{background:transparent;border:1px solid var(--color-divider);color:var(--mut)}
+.cc-formula{display:block;margin-top:3px;font-size:11px;line-height:1.4;color:var(--mut)}
+.cc-pool{margin:10px 0;padding:11px 12px;border-radius:14px;border:1.5px solid var(--color-divider);background:#fff}
+.cc-pool p{margin:4px 0;font-size:13px}

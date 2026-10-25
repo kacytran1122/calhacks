@@ -21,7 +21,7 @@ Only these product areas live at the repository root. Generated files, credentia
 
 1. Enter a ZIP or a U.S. city and state.
 2. Choose the maximum trip distance and discover live public events.
-3. Set a personal budget and compare routes by price, time, and missed-kickoff risk.
+3. Set a personal budget and compare routes by price, time, emissions, and missed-kickoff risk.
 4. Approve one exact quote; a changed fare requires a new approval.
 5. Send the trip, evidence, and consent trail to the organizer desk.
 6. Reconcile receipts, settlements, check-ins, and policy into balanced books.
@@ -32,7 +32,9 @@ Only these product areas live at the repository root. Generated files, credentia
 |---|---|
 | `frontend/app` | Landing page, event search, traveler planning, chat, and organizer desk |
 | `frontend/extension` | Read-only Chrome extension for public event pages |
-| `backend/src/agents` | Scout, Evidence, Route, Policy, Payments, Reconciler, and Auditor |
+| `backend/src/agents` | Scout, Evidence, Route, Policy, Payments, Reconciler, Auditor, Discover, Heat, Pricing, and the @smile Concierge |
+| `backend/src/scheduler.ts` | Wakes the agents on a timer: backlog, price, weather, and event-date checks |
+| `backend/src/carbon.ts` | CO₂e per traveler for every way to get there, from published emission factors |
 | `backend/src/integrations` | Bright Data, public transit, official fares, weather, geocoding, and Visa sandbox adapters |
 | `backend/src` | Policy, permissions, orchestration, authentication, ledger, and audit trail |
 | `backend/photon` | Photon 2.0 iMessage transport |
@@ -52,6 +54,13 @@ npm run dev --prefix frontend
 ```
 
 Open `http://127.0.0.1:3000`.
+
+To let S’mile act on its own, run the scheduler next to the app (or have a cron call `GET /api/scheduler/run` with `Authorization: Bearer $CRON_SECRET`):
+
+```bash
+npm run scheduler --prefix backend            # wakes every SCHEDULER_INTERVAL_MINUTES (default 5)
+npm run scheduler --prefix backend -- --once  # one pass, then exit
+```
 
 All sponsor credentials are optional. Missing services report that they are unavailable; the application never fabricates live data. Keep every secret in `backend/.env`.
 
@@ -78,8 +87,8 @@ npm run test:system --prefix backend
 The test pyramid lives entirely under `tests/`:
 
 - `tests/frontend`: user interaction and location-entry behavior.
-- `tests/backend`: policy boundaries, deterministic seed data, geocoding validation, ledger balance, price-model parity, and heat scoring.
-- `tests/agents`: least privilege, Photon event filtering, 40-case evaluation, and adversarial controls.
+- `tests/backend`: policy boundaries, deterministic seed data, geocoding validation, ledger balance, price-model parity, heat scoring, and emission factors and the low-carbon rule.
+- `tests/agents`: least privilege, audited agent calls, scheduler jobs and notices, the @smile tool loop and its amount check, Photon event filtering, 40-case evaluation, and adversarial controls.
 - `tests/system`: sign-in, role isolation, trip-token scope, approval, booking, and repository-structure checks.
 
 ## CI/CD
@@ -92,14 +101,15 @@ No production deployment occurs without an explicitly configured hosting environ
 
 | Integration | Use |
 |---|---|
-| Anthropic | Public-page extraction, explanations, and audit defense; amounts remain deterministic |
+| Anthropic | Public-page extraction, explanations, audit defense, and the @smile concierge that chooses its tools; amounts remain deterministic |
 | Bright Data | Live logged-out event, route, fare, and stop pages |
 | Hyphenate | Organizer finance desk with evidence matching, exception routing, control totals, and close readiness |
 | Photon 2.0 | `@smile` group conversation and private trip-scoped approval links |
 | TigerData | Time-series snapshots for event date and venue changes |
 | Visa | Traveler-approved fare binding, category and expiry controls, replay protection, and signed sandbox authorization with capture disabled |
 | Open-Meteo | Live forecast and ERA5 history for the venue heat map (no key) |
-| OpenStreetMap | Map tiles for the heat map |
+| OpenStreetMap | Map tiles for the heat map; OSRM road distance and drive time |
+| U.S. EPA, CARB | Published emission factors for the CO₂e estimates (no key) |
 
 ## Price prediction and heat map
 
@@ -131,12 +141,50 @@ select region (grid around the venue)
 
 Evidence is live forecast temperature, or the same date over the last three years (ERA5) when the event is more than 15 days out. Values are relative planning evidence, not calibrated measurements. Forecast models are a few miles across, so small hotspots inside a neighborhood are usually not resolvable.
 
+## Agents, scheduler and @smile
+
+Every agent acts through `runAgent` (`backend/src/agents/run.ts`): the caller must hold the capability that lets it ask (for example `price.estimate`), the agent must hold every capability its work needs, and the call is written to the hash-chained audit trail whether it succeeds, fails, or is refused. Discovery, heat, and pricing are registered agents, so `/api/events`, `/api/heat`, and `/api/price-estimate` go through the same checks.
+
+| Agent | Can | Can’t |
+|---|---|---|
+| Discover | read public listings, save event snapshots | sign in, register, or RSVP |
+| Heat | read public weather models | change a plan or a price |
+| Pricing | read the road network, run the trained models | set an approvable amount |
+| Scheduler | wake agents, send notices | approve, charge, or change an amount |
+| Concierge (@smile) | find events, plan a trip, estimate prices, check heat | charge, approve, request a mandate, or post to the ledger |
+
+**Scheduler** (`backend/src/scheduler.ts`). Each job reads the books, does its network work without holding them, then writes evidence and notices in one short transaction.
+
+| Job | Every | What it does |
+|---|---|---|
+| `reconcile` | 15 min | Re-runs the reimbursement backlog |
+| `price_watch` | 6 h | Re-prices rideshare and flight trips in the next 7 days; a notice when the prediction moves 15% or more from the trip’s price |
+| `weather_watch` | 3 h | Heat at the venue for trips in the next 3 days; a notice at NWS Caution or worse |
+| `event_watch` | 12 h | Re-reads listings; when an event’s date or venue changed, updates it, records the change, and tells each traveler |
+
+Notices are inbox items with one “Got it” button. They are sent once per topic and approve nothing. Staff can run any job from the Desk.
+
+**@smile** (`backend/src/agents/concierge.ts`). When Claude is configured, each message that mentions @smile goes to a Claude tool-use loop that decides which of four strict tools to call: `find_events`, `plan_trip`, `estimate_prices`, `heat_at_venue`. Plans are only for the sender, with a ZIP and event link the sender gave. Approval links are issued by code and never pass through the model. Every dollar amount in the reply must appear in a tool result; otherwise the reply is replaced by one written in code. Without a key, the rule-based planner answers as before.
+
+## Emissions
+
+Environmental impact changes the recommendation, and every number shows how it was made.
+
+- **CO₂e for every way to get there**: train, bus, carpool, driving alone, rideshare, and flight, per traveler. Emissions = published factor × distance. Car, bus, rail, and air factors are the [U.S. EPA GHG Emission Factors Hub 2025](https://www.epa.gov/climateleadership/ghg-emission-factors-hub), Table 10 (CO₂, CH₄, and N₂O combined with AR5 warming potentials). Rideshare uses [CARB’s Clean Miles Standard](https://ww2.arb.ca.gov/our-work/programs/clean-miles-standard) measured fleet average of 301 g CO₂ per passenger-mile, which counts the 38.5% of miles driven empty. Distance is the live road route (OSRM) or, when unavailable, the straight line × 1.2. Flights use the nearest airports plus the rides to them; the factors leave out contrails, so flights are a lower bound.
+- **Best low-carbon route alongside the fastest**: each plan marks the recommended, lowest-carbon, and fastest options, and the trip pane lists every mode with its formula and source link.
+- **Trains and buses preferred when reasonable** (rule R13): a train or bus replaces the cheapest pick when it costs at most $10 or 25% more, takes at most 30 minutes or 25% longer, is about as reliable, and emits less. Both travel times must be known. A traveler’s arrival deadline outranks R13.
+- **Carpools**: nearby travelers to the same event are matched into one car (up to four), and the plan shows emissions per passenger against driving alone, including pickup detours.
+- **Organizer totals**: the Desk shows CO₂e emitted by the chosen routes and avoided compared with every attendee driving alone, per event.
+- Nothing is labeled low-carbon without its calculation and data source next to it.
+
 ## Safety boundaries
 
 - Public, logged-out web data only.
 - Human approval is required for the exact trip price.
 - AI output cannot directly post or pay an amount.
-- Agent capabilities are enforced in code, not prompts.
+- Agent capabilities are enforced in code, not prompts; every agent call is audited.
+- The @smile concierge holds no money capabilities, and every dollar amount it writes must come from a tool result.
+- Scheduler notices never change an amount or approve anything.
 - Ledger entries must balance and carry evidence or rule references.
 - Posted entries and hash-chained audit history are immutable.
 - Secrets, local databases, build output, and dependency folders are ignored.

@@ -9,6 +9,7 @@ import { weatherAt } from "../integrations/nws";
 import { llmAvailable, structured } from "../llm";
 import { planPublicTransit, type TransitOption } from "../integrations/transitous";
 import { currentOfficialFares } from "../integrations/official-fares";
+import { planDrivingRoutes, type DrivePlanResult } from "../integrations/osrm";
 import type { EventFacts } from "./scout";
 
 const agent = { kind: "agent" as const, id: "evidence" as const };
@@ -167,9 +168,12 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const fareModes = miles !== undefined && miles < 400 ? "train bus" : "train bus flight";
   const fareQuery = `${fromCity} to ${destination} ${travelDate} official adult ${fareModes} ticket fare${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
   const directionsQuery = `${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
-  const [stops, transit, genericFareSerp, genericDirectionsSerp] = await Promise.all([
+  const homePoint = home.status === "ok" && home.lat !== undefined && home.lon !== undefined ? { lat: home.lat, lon: home.lon } : undefined;
+  const venuePoint = event.lat !== undefined && event.lon !== undefined ? { lat: event.lat, lon: event.lon } : undefined;
+  const [stops, transit, road, genericFareSerp, genericDirectionsSerp] = await Promise.all([
     venueQ ? serp(`coffee shop near ${venueQ} official location`, 1, LIVE_SEARCH_TIMEOUT_MS) : Promise.resolve(null),
     transitPromise,
+    homePoint && venuePoint ? planDrivingRoutes({ from: homePoint, to: venuePoint }) : Promise.resolve<DrivePlanResult | null>(null),
     serp(fareQuery, 1, LIVE_SEARCH_TIMEOUT_MS),
     serp(directionsQuery, 1, LIVE_SEARCH_TIMEOUT_MS),
   ]);
@@ -227,5 +231,14 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     }),
   );
 
-  return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides };
+  // Door-to-door times for comparing routes: the fastest live itinerary per mode.
+  const minutes: Partial<Record<"train" | "bus" | "drive" | "rideshare", { minutes: number; source: string }>> = {};
+  for (const option of transit.options) if (!minutes[option.mode] || option.durationMinutes < minutes[option.mode]!.minutes) minutes[option.mode] = { minutes: option.durationMinutes, source: "Transitous live public-transit itinerary" };
+  const drive = road?.routes[0];
+  if (drive) {
+    minutes.drive = { minutes: drive.durationMinutes, source: "OSRM live road route" };
+    minutes.rideshare = { minutes: drive.durationMinutes, source: "OSRM live road route (pickup wait not included)" };
+  }
+
+  return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides, roadMiles: drive?.distanceMiles, minutes, homePoint, venuePoint };
 }
