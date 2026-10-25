@@ -80,8 +80,10 @@ jobs:
       - run: npm ci --prefix tests
       - run: npm run typecheck --prefix frontend
       - run: npm test --prefix frontend
-      - name: Photon bridge and persistent group chat
+      - name: Photon bridge and persistent direct chat
         run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/photon-bridge.test.ts
+      - name: Photon private iMessage assignment
+        run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/photon-join.test.ts
       - name: Venue photo upload integration
         run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/tour-contributions.test.ts
       - run: npm run extension:build --prefix frontend

@@ -206,7 +206,7 @@ test("an ambiguous time asks its follow-up and never creates a trip even if the 
   assert.equal(out.memory.clarificationQuestion, "Is 9 AM or PM, and on which date and time zone?");
 });
 
-test("another group member cannot change the sender's saved driving preference or budget", async () => {
+test("another conversation cannot change the sender's saved driving preference or budget", async () => {
   const request: ConciergeInput = { ...input("@smile plan my trip please"), memory: updateChatTravelMemory({}, "@smile 95616 no self-drive and my budget is $300"), transcript: [{ from: "AB", text: "@smile I can drive and my budget is $800" }] };
   request.listings.set(event.key, event);
   const recorder = planRecorder();

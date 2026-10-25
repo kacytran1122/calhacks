@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ChatBusy, ChatReplayConflict, ChatStorageUnavailable } from "@smile/core";
-import { handleMessage } from "@/lib/chat";
+import { handleMessage, parseMention } from "@/lib/chat";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -34,6 +34,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid Photon message identity" }, { status: 400 });
   if (projectId !== configuredProject)
     return NextResponse.json({ error: "Photon project does not match this bridge" }, { status: 403 });
+  if (!parseMention(text as string).mentioned)
+    return NextResponse.json({ replies: [] });
 
   const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
   const sender = `Traveler ${hash([projectId, senderId]).slice(0, 24).toUpperCase()}`;

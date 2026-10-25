@@ -127,12 +127,10 @@ export function HeroView({ onNavigate }: { onNavigate: (origin: TravelOrigin) =>
               <div className="ph-notch" />
               <div className="ph-head">
                 <div style={{ display: "flex", justifyContent: "center", paddingLeft: 8 }}>
-                  <span className="av">A</span>
-                  <span className="av">J</span>
-                  <span className="av">R</span>
+                  <span className="av">S</span>
                 </div>
-                <b>Davis → GG Hack</b>
-                <small>Group chat · via Photon</small>
+                <b>S’mile</b>
+                <small>Private iMessage · via Photon</small>
               </div>
               <PhoneChat />
               <div className="ph-in">

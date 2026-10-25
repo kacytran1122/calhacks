@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { cachedTripPlan, chatStore, converse, fmt, issueTripToken, llmAvailable, loadState, planTrip, prepareChatTravel, updateChatTravelMemory, withState, type ChatTravelMemory, type DurableChatStore, type EventListing, type PlanTripResult } from "@smile/core";
+import { buddiesFor, cachedTripPlan, chatStore, converse, fmt, issueTripToken, llmAvailable, loadState, planTrip, prepareChatTravel, updateChatTravelMemory, withState, type ChatTravelMemory, type DurableChatStore, type EventListing, type PlanTripResult } from "@smile/core";
 import { ensureState } from "@/lib/server";
 
 export type PlanCard = {
@@ -18,7 +18,7 @@ export type PlanCard = {
 
 export type ChatMsg = { id: string; from: string; initials: string; text: string; at: string; bot?: boolean; card?: PlanCard };
 
-type Plan = { initials: string; eventKey: string; eventName: string; mode: string };
+type Plan = { initials: string; eventKey: string; eventName: string; mode: string; tripId?: string };
 type Room = { messages: ChatMsg[]; plans: Map<string, Plan>; memory: Map<string, ChatTravelMemory>; listings: Map<string, EventListing> };
 type StoredRoom = { messages: ChatMsg[]; plans: [string, Plan][]; memory: [string, ChatTravelMemory][]; listings: [string, EventListing][] };
 export type ChatResult = { posted: ChatMsg[]; approvals: Record<string, string> };
@@ -65,7 +65,13 @@ export function parseMention(text: string): { mentioned: boolean; zip?: string; 
 function buddiesOf(r: Room, me: string): string[] {
   const mine = r.plans.get(me);
   if (!mine) return [];
-  return [...r.plans.entries()].filter(([who, p]) => who !== me && p.eventKey === mine.eventKey && p.mode === mine.mode).map(([, p]) => p.initials);
+  const local = [...r.plans.entries()].filter(([who, p]) => who !== me && p.eventKey === mine.eventKey && p.mode === mine.mode).map(([, p]) => p.initials);
+  let global: string[] = [];
+  if (mine.tripId) {
+    try { global = buddiesFor(loadState(), mine.tripId).filter((buddy) => buddy.sameMode).map((buddy) => buddy.initials); }
+    catch {}
+  }
+  return [...new Set([...local, ...global])];
 }
 
 const ride = (mode: string) => (mode === "drive" ? "driving" : `taking the ${mode}`);
@@ -88,7 +94,7 @@ function tripReply(r: Room, name: string, me: string, p: PlanTripResult, approva
           : `no option to ${p.event.name} fits the ${fmt(p.routes.cap)} organizer cap, so I’ve asked the organizer about an exception.`;
     return [bot(r, `@${me} ${reason}`)];
   }
-  r.plans.set(name, { initials: me, eventKey: p.event.url ?? p.event.name, eventName: p.event.name, mode: pick.mode });
+  r.plans.set(name, { initials: me, eventKey: p.event.url ?? p.event.name, eventName: p.event.name, mode: pick.mode, tripId: p.trip.id });
   const buddies = buddiesOf(r, name);
   const card: PlanCard = {
     eventName: p.event.name,
@@ -121,7 +127,7 @@ async function respondWithConcierge(chatId: string, r: Room, name: string, me: s
     const plan = c.plans.at(-1);
     let card: PlanCard | undefined;
     if (plan) {
-      r.plans.set(name, { initials: me, eventKey: plan.eventKey, eventName: plan.eventName, mode: plan.mode });
+      r.plans.set(name, { initials: me, eventKey: plan.eventKey, eventName: plan.eventName, mode: plan.mode, tripId: plan.tripId });
       const buddies = [...new Set([...buddiesOf(r, name), ...plan.buddies])];
       card = { eventName: plan.eventName, mode: plan.mode, priceCents: plan.priceCents, capCents: plan.capCents, pMiss: plan.pMiss, historyTrips: plan.historyTrips, tripId: plan.tripId, buddies, co2eKg: plan.co2eKg, by: c.by };
     }

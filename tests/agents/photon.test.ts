@@ -15,13 +15,14 @@ test("extracts Photon 2.0 plain text and group text", () => {
   assert.equal(textOf({ type: "attachment" }), undefined);
 });
 
-test("accepts only received human-to-agent iMessages", () => {
+test("accepts only received human-to-agent direct iMessages", () => {
   const base = {
     id: "evt_1", type: "message.received", source: "imessage.photon",
-    data: { object: { id: "msg_1", platform: "imessage", status: "received", content: { type: "text", format: "plain", text: "@smile" }, sentBy: { id: "human", kind: "human", platform: "imessage" }, receivedBy: { id: "agent", kind: "agent", platform: "imessage" }, space: { id: "space", kind: "group", platform: "imessage" } } },
+    data: { object: { id: "msg_1", platform: "imessage", status: "received", content: { type: "text", format: "plain", text: "@smile" }, sentBy: { id: "human", kind: "human", platform: "imessage" }, receivedBy: { id: "agent", kind: "agent", platform: "imessage" }, space: { id: "space", kind: "direct", platform: "imessage" } } },
   };
   assert.equal(messageFrom(base)?.id, "msg_1");
   assert.equal(messageFrom({ ...base, type: "message.delivered" }), undefined);
+  assert.equal(messageFrom({ ...base, data: { object: { ...base.data.object, space: { ...base.data.object.space, kind: "group" } } } }), undefined);
 });
 
 test("recognizes explicit mentions with punctuation and case without waking on names or email", () => {
@@ -30,9 +31,9 @@ test("recognizes explicit mentions with punctuation and case without waking on n
 });
 
 test("rejects malformed envelopes and never mistakes agent traffic for an incoming message", () => {
-  const message = { id: "msg_1", platform: "imessage", status: "received", content: { type: "text", format: "plain", text: "@smile" }, sentBy: { id: "human", kind: "human", platform: "imessage" }, receivedBy: { id: "agent", kind: "agent", platform: "imessage" }, space: { id: "space", kind: "group", platform: "imessage" } };
+  const message = { id: "msg_1", platform: "imessage", status: "received", content: { type: "text", format: "plain", text: "@smile" }, sentBy: { id: "human", kind: "human", platform: "imessage" }, receivedBy: { id: "agent", kind: "agent", platform: "imessage" }, space: { id: "space", kind: "direct", platform: "imessage" } };
   const envelope = (object: unknown, projectId = "pho_prj_test") => ({ type: "message.received", source: "imessage.photon", data: { projectId, object } });
-  for (const invalid of [null, [], {}, { data: null }, envelope(null), envelope({}), envelope({ ...message, sentBy: null }), envelope({ ...message, receivedBy: null }), envelope({ ...message, space: null }), envelope({ ...message, id: "" }), envelope({ ...message, sentBy: { ...message.sentBy, kind: "agent" } }), envelope({ ...message, space: { ...message.space, platform: "sms" } }), envelope({ ...message, content: { type: "text", format: "plain", text: "x".repeat(4_001) } })]) {
+  for (const invalid of [null, [], {}, { data: null }, envelope(null), envelope({}), envelope({ ...message, sentBy: null }), envelope({ ...message, receivedBy: null }), envelope({ ...message, space: null }), envelope({ ...message, id: "" }), envelope({ ...message, sentBy: { ...message.sentBy, kind: "agent" } }), envelope({ ...message, space: { ...message.space, kind: "group" } }), envelope({ ...message, space: { ...message.space, platform: "sms" } }), envelope({ ...message, content: { type: "text", format: "plain", text: "x".repeat(4_001) } })]) {
     assert.doesNotThrow(() => messageFrom(invalid, "pho_prj_test"));
     assert.equal(messageFrom(invalid, "pho_prj_test"), undefined);
   }

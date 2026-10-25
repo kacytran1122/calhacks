@@ -15,6 +15,7 @@
     "@smile/core": "file:../backend",
     "leaflet": "^1.9.4",
     "next": "^16.4.3",
+    "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "server-only": "^0.0.1",

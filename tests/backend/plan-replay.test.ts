@@ -69,7 +69,7 @@ test("a committed plan can be recovered without asking a model to reconstruct it
   assert.notEqual(cachedTripPlan(state, "group-a:message-1")!.result.trip.id, "changed-in-memory");
 });
 
-test("a new message or another group can intentionally request a new trip", async (t) => {
+test("a new message or another direct conversation can intentionally request a new trip", async (t) => {
   t.mock.method(globalThis, "fetch", async () => new Response("unavailable", { status: 503 }));
   const before = core.loadState().trips.length;
   const next = await core.withState((s) => core.planTrip(s, { ...args, requestKey: "group-a:message-3" }));

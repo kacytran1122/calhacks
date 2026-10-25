@@ -89,7 +89,7 @@ export function messageFrom(event: unknown, projectId?: string): PhotonMessage |
   const { sentBy, receivedBy, space } = message;
   if (!record(sentBy) || !identifier(sentBy.id) || sentBy.kind !== "human" || sentBy.platform !== "imessage") return undefined;
   if (!record(receivedBy) || !identifier(receivedBy.id) || receivedBy.kind !== "agent" || receivedBy.platform !== "imessage") return undefined;
-  if (!record(space) || !identifier(space.id) || space.platform !== "imessage" || !["direct", "group"].includes(String(space.kind))) return undefined;
+  if (!record(space) || !identifier(space.id) || space.platform !== "imessage" || space.kind !== "direct") return undefined;
   if (projectId && [message, sentBy, receivedBy, space].some((item) => item.projectId !== undefined && item.projectId !== projectId)) return undefined;
   const text = textOf(message.content);
   if (!text || text.length > 4_000) return undefined;
@@ -138,7 +138,7 @@ const idempotency = (messageId: string, channel: "room" | "dm", index: number) =
 
 export async function processMessage(photon: PhotonClient, config: Config, message: PhotonMessage) {
   const text = textOf(message.content);
-  if (!text || !mentionsSmile(text)) return;
+  if (message.space.kind !== "direct" || !text || !mentionsSmile(text)) return;
   const agent = message.receivedBy!;
   const replies = await callBrain(config, message, text);
 
@@ -157,19 +157,11 @@ export async function processMessage(photon: PhotonClient, config: Config, messa
 
     if (!reply.approvalPath) continue;
     const approvalUrl = new URL(reply.approvalPath, config.webUrl).toString();
-    const direct = message.space.kind === "direct"
-      ? message.space
-      : await photon.projects.createOrGetSpace({
-          path: { id: config.projectId },
-          headers: { "idempotency-key": `smile:${message.id}:dm-space` },
-          body: { platform: "imessage", participantIds: [agent.id, message.sentBy.id] },
-        });
-    if (!identifier(direct.id)) throw new Error("Photon did not return a direct-space ID.");
     const privateDelivery = await photon.projects.sendMessage({
       path: { id: config.projectId },
       headers: { "idempotency-key": idempotency(message.id, "dm", index) },
       body: {
-        spaceId: direct.id,
+        spaceId: message.space.id,
         senderId: agent.id,
         content: { type: "text", format: "plain", text: `Private approval for your S’mile trip: ${approvalUrl}\n\nThis link is scoped to one trip and expires in 24 hours. Don’t forward it.` },
       },

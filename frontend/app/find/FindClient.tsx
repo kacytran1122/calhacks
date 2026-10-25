@@ -298,7 +298,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, 
         <span className="dk-desk">Find events</span>
         <div className="dk-co" />
         <a className="dk-btn ghost" href="/chat">
-          @smile group chat
+          Message @smile
         </a>
         <a className="dk-btn ghost" href="/desk">
           Organizer finance desk
@@ -727,7 +727,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
           )}
           {plan.carpool && <CarpoolCard carpool={plan.carpool} />}
           <p className="dk-mut">
-            Going with friends? <a href="/chat">Plan it together in the @smile group chat →</a>
+            Want travel buddies? <a href={`/chat#trip=${encodeURIComponent(plan.trip.id)}&token=${encodeURIComponent(plan.approvalToken)}`}>Message @smile privately in iMessage →</a>
           </p>
 
           {stage === "planned" && plan.inbox && (

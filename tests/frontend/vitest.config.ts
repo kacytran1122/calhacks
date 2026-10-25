@@ -21,5 +21,6 @@ export default {
     setupFiles: [path.resolve(here, "setup.ts")],
     include: [path.resolve(here, "*.test.tsx")],
     restoreMocks: true,
+    server: { deps: { inline: ["qrcode.react"] } },
   },
 };

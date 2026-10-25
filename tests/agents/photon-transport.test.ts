@@ -14,10 +14,10 @@ import { processMessage, start, type Config, type PhotonMessage } from "../../ba
 type Sent = { path: { id: string }; headers: { "idempotency-key": string }; body: { spaceId: string; senderId: string; parentMessageId?: string; content: { text: string } } };
 type BrainBody = { projectId: string; messageId: string; spaceId: string; senderId: string; text: string };
 type Reply = { id: string; text: string; approvalPath?: string };
-const incoming = (id = "msg_1", spaceId = "group_1", text = "@smile help us travel"): PhotonMessage => ({
+const incoming = (id = "msg_1", spaceId = "direct_1", text = "@smile help me travel"): PhotonMessage => ({
   id, platform: "imessage", status: "received", content: { type: "text", format: "plain", text },
   sentBy: { id: "human_1", kind: "human", platform: "imessage" }, receivedBy: { id: "agent_1", kind: "agent", platform: "imessage" },
-  space: { id: spaceId, kind: "group", platform: "imessage" },
+  space: { id: spaceId, kind: "direct", platform: "imessage" },
 });
 const eventFor = (message: PhotonMessage, projectId = "pho_prj_test") => ({ id: `evt_${message.id}`, type: "message.received", source: "imessage.photon", data: { projectId, object: message } });
 
@@ -49,12 +49,12 @@ async function fixture(t: TestContext, replies: Reply[] = [{ id: "reply_1", text
   const sent: Sent[] = [];
   const effects = new Map<string, Sent>();
   const spaces: unknown[] = [];
-  const fail = { count: 0, target: "", error: undefined as Error | undefined, status: "accepted" };
+  const fail = { count: 0, target: "", idempotencyKey: "", error: undefined as Error | undefined, status: "accepted" };
   const photon = { projects: {
     get: async ({ path }: { path: { projectId: string } }) => { assert.equal(path.projectId, config.projectId); return {}; },
     sendMessage: async (value: Sent) => {
       sent.push(value);
-      if (fail.count > 0 && (!fail.target || value.body.spaceId === fail.target)) { fail.count--; throw fail.error ?? new Error("temporary Photon delivery failure"); }
+      if (fail.count > 0 && (!fail.target || value.body.spaceId === fail.target) && (!fail.idempotencyKey || value.headers["idempotency-key"] === fail.idempotencyKey)) { fail.count--; throw fail.error ?? new Error("temporary Photon delivery failure"); }
       effects.set(value.headers["idempotency-key"], value);
       return { id: `out_${effects.size}`, status: fail.status };
     },
@@ -84,44 +84,40 @@ const cursorOf = async (config: Config) => JSON.parse(await readFile(config.curs
 
 test("does not contact the brain or Photon until someone explicitly mentions smile", async (t) => {
   const f = await fixture(t);
-  for (const text of ["Can someone plan this?", "smile", "@smiley", "email@smile.com"]) await processMessage(f.photon, f.config, incoming("ordinary", "group_1", text));
+  for (const text of ["Can someone plan this?", "smile", "@smiley", "email@smile.com"]) await processMessage(f.photon, f.config, incoming("ordinary", "direct_1", text));
   assert.equal(f.calls.length, 0);
   assert.equal(f.sent.length, 0);
   assert.equal(f.spaces.length, 0);
 });
 
-test("forwards stable source identity and keeps replies in their original iMessage groups", async (t) => {
+test("forwards stable source identity and keeps replies in their original direct iMessage chats", async (t) => {
   const f = await fixture(t);
-  await processMessage(f.photon, f.config, incoming("msg_a", "group_a", "(@SMILE), route please"));
-  await processMessage(f.photon, f.config, incoming("msg_b", "group_b", "Thanks, @smile!"));
+  await processMessage(f.photon, f.config, incoming("msg_a", "direct_a", "(@SMILE), route please"));
+  await processMessage(f.photon, f.config, incoming("msg_b", "direct_b", "Thanks, @smile!"));
   assert.deepEqual(f.calls.map(({ projectId, messageId, spaceId, senderId }) => ({ projectId, messageId, spaceId, senderId })), [
-    { projectId: "pho_prj_test", messageId: "msg_a", spaceId: "group_a", senderId: "human_1" },
-    { projectId: "pho_prj_test", messageId: "msg_b", spaceId: "group_b", senderId: "human_1" },
+    { projectId: "pho_prj_test", messageId: "msg_a", spaceId: "direct_a", senderId: "human_1" },
+    { projectId: "pho_prj_test", messageId: "msg_b", spaceId: "direct_b", senderId: "human_1" },
   ]);
-  assert.deepEqual(f.sent.map((message) => [message.body.spaceId, message.body.parentMessageId, message.body.senderId]), [["group_a", "msg_a", "agent_1"], ["group_b", "msg_b", "agent_1"]]);
+  assert.deepEqual(f.sent.map((message) => [message.body.spaceId, message.body.parentMessageId, message.body.senderId]), [["direct_a", "msg_a", "agent_1"], ["direct_b", "msg_b", "agent_1"]]);
   assert.ok(f.sent.every((message) => message.path.id === "pho_prj_test"));
 });
 
-test("sends group replies publicly but approval links only to the requesting traveler", async (t) => {
-  const f = await fixture(t, [{ id: "reply_1", text: "Your trip is ready. I sent your approval privately.", approvalPath: "/desk#approve=private-token&trip=trip_1" }]);
+test("sends replies and approval links into the same direct chat without creating another space", async (t) => {
+  const f = await fixture(t, [{ id: "reply_1", text: "Your trip is ready. Your approval follows.", approvalPath: "/desk#approve=private-token&trip=trip_1" }]);
   await processMessage(f.photon, f.config, incoming());
   assert.equal(f.sent.length, 2);
-  assert.equal(f.sent[0]!.body.spaceId, "group_1");
+  assert.equal(f.sent[0]!.body.spaceId, "direct_1");
   assert.doesNotMatch(f.sent[0]!.body.content.text, /private-token|https?:/);
-  assert.equal(f.sent[1]!.body.spaceId, "private_1");
+  assert.equal(f.sent[1]!.body.spaceId, "direct_1");
   assert.match(f.sent[1]!.body.content.text, new RegExp(`${f.config.webUrl}/desk#approve=private-token`));
-  assert.deepEqual(f.spaces, [{ path: { id: "pho_prj_test" }, headers: { "idempotency-key": "smile:msg_1:dm-space" }, body: { platform: "imessage", participantIds: ["agent_1", "human_1"] } }]);
-  const direct = incoming("msg_direct", "existing_private");
-  direct.space.kind = "direct";
-  await processMessage(f.photon, f.config, direct);
-  assert.equal(f.spaces.length, 1);
-  assert.equal(f.sent.at(-1)!.body.spaceId, "existing_private");
+  assert.deepEqual(f.sent.map((message) => message.headers["idempotency-key"]), ["smile:msg_1:room:0", "smile:msg_1:dm:0"]);
+  assert.equal(f.spaces.length, 0);
 });
 
-test("retries partial room and private deliveries using exactly the same Photon idempotency keys", async (t) => {
+test("retries partial reply and approval deliveries using exactly the same Photon idempotency keys", async (t) => {
   const f = await fixture(t, [{ id: "reply_1", text: "Your plan is ready.", approvalPath: "/desk#approve=token" }]);
   f.fail.count = 1;
-  f.fail.target = "private_1";
+  f.fail.idempotencyKey = "smile:msg_1:dm:0";
   await assert.rejects(processMessage(f.photon, f.config, incoming()), /temporary Photon delivery/);
   await processMessage(f.photon, f.config, incoming());
   assert.deepEqual(f.sent.map((value) => value.headers["idempotency-key"]), ["smile:msg_1:room:0", "smile:msg_1:dm:0", "smile:msg_1:room:0", "smile:msg_1:dm:0"]);
@@ -151,7 +147,7 @@ test("persists the cursor only after all deliveries succeed and replays failed m
   socket.deliver(incoming("first"), 1);
   await until(async () => { try { return (await cursorOf(f.config)).seq === 1; } catch { return false; } }, "initial cursor");
   f.fail.count = 1;
-  f.fail.target = "private_1";
+  f.fail.idempotencyKey = "smile:second:dm:0";
   socket.deliver(incoming("second"), 2);
   socket.deliver(incoming("not_processed_yet"), 3);
   await until(() => !socket.connected, "delivery failure disconnect");
@@ -180,7 +176,7 @@ test("persists the cursor only after all deliveries succeed and replays failed m
   assert.equal(f.calls.at(-1)!.messageId, "third");
 });
 
-test("skips unrelated projects, bot loops, and malformed events without breaking later group messages", async (t) => {
+test("skips unrelated projects, bot loops, group spaces, and malformed events without breaking later direct messages", async (t) => {
   const f = await fixture(t);
   const socket = new FakeSocket();
   t.after(() => socket.disconnect());
@@ -190,11 +186,13 @@ test("skips unrelated projects, bot loops, and malformed events without breaking
   loop.sentBy.kind = "agent";
   socket.deliver(loop, 2);
   socket.emit("delivery", { type: "message.received", source: "imessage.photon", data: { projectId: "pho_prj_test", object: { sentBy: null } } }, { seq: 3 });
-  socket.deliver(incoming("ordinary", "group_1", "hello everyone"), 4);
-  socket.deliver(incoming("real", "group_2"), 5);
-  await until(async () => { try { return (await cursorOf(f.config)).seq === 5; } catch { return false; } }, "later group delivery");
+  const group = incoming("group_ignored", "group_1");
+  group.space.kind = "group";
+  socket.deliver(group, 4);
+  socket.deliver(incoming("real", "direct_2"), 5);
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 5; } catch { return false; } }, "later direct delivery");
   assert.deepEqual(f.calls.map((body) => body.messageId), ["real"]);
-  assert.equal(f.sent[0]!.body.spaceId, "group_2");
+  assert.equal(f.sent[0]!.body.spaceId, "direct_2");
 });
 
 test("invalid sequence metadata cannot advance the durable cursor", async (t) => {
@@ -244,7 +242,7 @@ test("failure logs never expose SDK payloads, user messages, or private approval
   const logs: unknown[][] = [];
   t.mock.method(console, "error", (...args: unknown[]) => { logs.push(args); });
   f.fail.count = 1;
-  f.fail.target = "private_1";
+  f.fail.idempotencyKey = "smile:private_error:dm:0";
   f.fail.error = Object.assign(new Error("SDK request /desk#approve=hidden-approval-token, sensitive user message and api-secret"), { status: 503 });
   const socket = new FakeSocket();
   t.after(() => socket.disconnect());

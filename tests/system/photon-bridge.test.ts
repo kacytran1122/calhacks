@@ -16,7 +16,7 @@ const core = await import("../../backend/src/index");
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-const body = (overrides: Record<string, unknown> = {}) => ({ projectId: "pho_prj_test", messageId: "message-1", spaceId: "group-1", senderId: "human-1", text: "@smile hello", ...overrides });
+const body = (overrides: Record<string, unknown> = {}) => ({ projectId: "pho_prj_test", messageId: "message-1", spaceId: "direct-1", senderId: "human-1", text: "@smile hello", ...overrides });
 const request = (value: unknown, secret = "test-bridge-secret") => new Request("http://localhost/api/chat/photon", { method: "POST", headers: { "content-type": "application/json", "x-smile-photon-secret": secret }, body: JSON.stringify(value) });
 const configure = () => { process.env.PHOTON_BRIDGE_SECRET = "test-bridge-secret"; process.env.PHOTON_PROJECT_ID = "pho_prj_test"; };
 
@@ -43,14 +43,19 @@ test("requires valid message identity and validates configured project and input
 
 test("only @smile mentions trigger a response including punctuation and case variants", async () => {
   configure();
+  const silentSpace = "direct-without-mention";
   for (const text of ["hello everyone", "@smiley hello", "foo@smile.com", "@smile_travel"]) {
     assert.equal(parseMention(text).mentioned, false);
-    const response = await POST(request(body({ messageId: hash(text), text })));
+    const response = await POST(request(body({ spaceId: silentSpace, messageId: hash(text), text })));
     assert.deepEqual(await response.json(), { replies: [] });
   }
+  const silentRoomId = `photon:${hash(["pho_prj_test", silentSpace])}`;
+  assert.equal(view(silentRoomId).messages.length, 0);
+  const restarted = new DurableChatStore({ file: path.join(dir, "chat.db") });
+  assert.equal(restarted.read(silentRoomId).state, undefined);
   for (const text of ["@smile", "Hi,@SMILE!", "(@smile) hello", "hello @smile."]) {
     assert.equal(parseMention(text).mentioned, true);
-    const response = await POST(request(body({ messageId: hash(text), text })));
+    const response = await POST(request(body({ spaceId: "direct-with-mention", messageId: hash(text), text })));
     const result = await response.json();
     assert.equal(result.replies.length, 1);
     assert.match(result.replies[0].text, /home ZIP/);
@@ -72,7 +77,7 @@ test("replays identical concurrent deliveries without duplicate transcript and r
   assert.equal(view(roomId).messages.length, 2);
 });
 
-test("persists sender-only preferences and answers across store restart and keeps groups isolated", async () => {
+test("persists sender-only preferences and answers across store restart and keeps private direct chats isolated", async () => {
   configure();
   const first = body({ spaceId: "memory", messageId: "first-answer", text: "@smile my ZIP is 61401, my budget is $220 and I cannot drive" });
   const response = await POST(request(first));
@@ -92,8 +97,8 @@ test("persists sender-only preferences and answers across store restart and keep
   const otherSender = `Traveler ${hash([first.projectId, "another-person"]).slice(0, 24).toUpperCase()}`;
   assert.equal(new Map(data.memory).get(otherSender)?.zip, undefined);
   assert.notEqual(initialsOf(sender), initialsOf(otherSender));
-  const differentGroup = await POST(request({ ...first, spaceId: "different-group", messageId: "different-group", text: "@smile help" }));
-  assert.match((await differentGroup.json()).replies[0].text, /home ZIP/);
+  const differentDirect = await POST(request({ ...first, spaceId: "different-direct", messageId: "different-direct", text: "@smile help" }));
+  assert.match((await differentDirect.json()).replies[0].text, /home ZIP/);
 });
 
 test("bounds history while preserving room listings, plans and sender memory", async () => {
@@ -180,7 +185,7 @@ test("never renews a private approval for expired or invalid planning receipts",
   }
 });
 
-test("fails closed on a serverless filesystem instead of silently losing group memory", () => {
+test("fails closed on a serverless filesystem instead of silently losing direct chat memory", () => {
   process.env.VERCEL = "1";
   try { assert.throws(() => chatStore(), /persistent chat service/); }
   finally { delete process.env.VERCEL; }
