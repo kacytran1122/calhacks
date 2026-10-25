@@ -25,6 +25,9 @@ const FareCandidates = z.object({
       amountUsd: z.number(),
       link: z.string().describe("the result link the fare came from, copied exactly"),
       quote: z.string().describe("the exact snippet text that states the fare"),
+      provider: z.string().min(1).max(80),
+      priceScope: z.enum(["route_total", "published_ticket", "day_pass"]),
+      fees: z.enum(["included", "not_applicable", "not_stated"]),
     }),
   ),
 });
@@ -45,12 +48,12 @@ const RouteGuideCandidates = z.object({
 export type RouteGuide = z.infer<typeof RouteGuideCandidates>["options"][number];
 
 function faresByRules(results: SerpOrganic[]) {
-  const out: { mode: "train" | "bus"; amountUsd: number; link: string; quote: string }[] = [];
+  const out: { mode: "train" | "bus"; amountUsd: number; link: string; quote: string; provider: string; priceScope: "published_ticket"; fees: "not_applicable" }[] = [];
   for (const r of results) {
     const text = `${r.title} ${r.description ?? ""}`;
     if (!/fare|ticket|one[- ]way/i.test(text)) continue;
     const m = text.match(/\$(\d{1,3}(?:\.\d{2})?)/);
-    if (m) out.push({ mode: /bus|greyhound|flixbus/i.test(text) ? "bus" : "train", amountUsd: Number(m[1]), link: r.link, quote: m[0] });
+    if (m) out.push({ mode: /bus|greyhound|flixbus/i.test(text) ? "bus" : "train", amountUsd: Number(m[1]), link: r.link, quote: m[0], provider: new URL(r.link).hostname.replace(/^www\./, ""), priceScope: "published_ticket", fees: "not_applicable" });
   }
   return out;
 }
@@ -68,12 +71,12 @@ async function extractFares(results: SerpOrganic[], from: string, to: string, ro
   try {
     const candidates = await structured(FareCandidates, {
       model: "extract",
-      system: "From these live search results, list current adult fares that cover the supplied live itinerary. Copy the link and the exact snippet text. Never estimate or invent a price. A current Metrolink SoCal Day Pass can be the trip total when the itinerary uses Metrolink and the evidence says it includes the local connections. A single-agency local route can use that agency's published regular fare when its transfer rule covers the itinerary. Otherwise, accept only an explicitly stated total for the exact origin and destination. Prefer the newest official agency page and skip superseded prices.",
+      system: "From these live public search results, return only current adult prices supported by an exact quoted amount. Copy the link and exact contiguous snippet. Never estimate, infer, or invent a price. For flights or rideshare, accept only the total for the exact origin, destination, and travel date when the snippet explicitly says taxes and mandatory fees are included. For train or bus, an official published ticket price or day pass is acceptable only when it covers the itinerary and its required transfers. A current Metrolink SoCal Day Pass can be the trip total when the evidence says it includes the local connections. Prefer the operator's official page, identify the provider, and skip old or superseded prices.",
       user: JSON.stringify({ from, to, routeContext, results }),
       effort: "low",
     });
     return {
-      fares: candidates.fares.filter((fare) => links.has(fare.link) && corpus.includes(fare.quote.toLowerCase()) && quoteStatesAmount(fare.quote, fare.amountUsd) && fare.amountUsd > 0 && fare.amountUsd < 1000),
+      fares: candidates.fares.filter((fare) => links.has(fare.link) && corpus.includes(fare.quote.toLowerCase()) && quoteStatesAmount(fare.quote, fare.amountUsd) && fare.amountUsd > 0 && fare.amountUsd < 1000 && (!["flight", "rideshare"].includes(fare.mode) || (fare.priceScope === "route_total" && fare.fees === "included"))),
       extractedBy: "claude (quotes verified against live snippets)",
     };
   } catch {
@@ -157,7 +160,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const officialFares = await currentOfficialFares(transit.options, event.startsAt);
   const needSearchFallback = officialFares.length === 0 && transit.options.every((option) => option.amountUsd === undefined);
   const [fareSerp, directionsSerp, targetedFareSerp] = await Promise.all([
-    needSearchFallback ? serp(`${fromCity} to ${destination} train bus rideshare flight total fare cost${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1, 6_000) : Promise.resolve({ status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined }),
+    needSearchFallback ? serp(`${fromCity} to ${destination} ${event.startsAt ?? ""} exact total fare ticket price taxes mandatory fees official train bus flight${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1, 6_000) : Promise.resolve({ status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined }),
     transit.options.length ? Promise.resolve({ status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined }) : serp(`${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1, 6_000),
     needSearchFallback && targetedQuery ? serp(targetedQuery, 1, 6_000) : Promise.resolve(null),
   ]);
@@ -173,7 +176,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     fareResults.length ? extractFares(fareResults, fromCity, destination, routeContext) : Promise.resolve({ fares: [] as { mode: string; amountUsd: number; link: string; quote: string }[], extractedBy: "none" }),
     directionResults.length ? extractRouteGuides(directionResults, fromCity, destination, args.travelConstraintSummary) : Promise.resolve({ guides: [] as RouteGuide[], extractedBy: "none" }),
   ]);
-  const transitFares = transit.options.flatMap((option) => option.amountUsd && option.fareQuote ? [{ mode: option.mode, amountUsd: option.amountUsd, link: option.sourceUrl, quote: option.fareQuote, routeTitle: option.title }] : []);
+  const transitFares = transit.options.flatMap((option) => option.amountUsd && option.fareQuote ? [{ mode: option.mode, amountUsd: option.amountUsd, link: option.sourceUrl, quote: option.fareQuote, routeTitle: option.title, provider: option.agencies.join(" + ") || "public transit operator", priceScope: "route_total" as const, fees: "not_applicable" as const }] : []);
   const fares = [...officialFares, ...transitFares, ...fareExtraction.fares].filter((fare, index, all) => all.findIndex((candidate) => candidate.mode === fare.mode && candidate.amountUsd === fare.amountUsd) === index);
   const fareStatus = fares.length ? "ok" : targetedFareSerp?.status === "error" ? targetedFareSerp.status : fareSerp.status === "ok" ? "empty" : fareSerp.status;
   out.push(

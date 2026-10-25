@@ -9,6 +9,9 @@ test("official Metrolink page yields the weekend trip total", () => {
   assert.equal(fare?.amountUsd, 12);
   assert.equal(fare?.mode, "train");
   assert.equal(fare?.routeTitle, "Metro + Metrolink to Irvine");
+  assert.equal(fare?.priceScope, "day_pass");
+  assert.equal(fare?.fees, "not_applicable");
+  assert.equal(fare?.provider, "Metrolink");
   assert.match(fare?.quote ?? "", /free transfers/i);
 });
 

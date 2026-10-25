@@ -9,6 +9,9 @@ export interface OfficialFare {
   link: string;
   quote: string;
   routeTitle?: string;
+  provider: string;
+  priceScope: "published_ticket" | "day_pass" | "route_total";
+  fees: "included" | "not_applicable" | "not_stated";
 }
 
 function pageText(html: string) {
@@ -29,6 +32,9 @@ export function metrolinkFareFromPage(html: string, startsAt?: string, routeTitl
     link: METROLINK_FARES,
     quote: `Metrolink SoCal Day Pass: $${amountUsd.toFixed(2)} on ${weekend ? "weekends and holidays" : "weekdays"}; the official page includes free transfers to most connecting local transit.`,
     routeTitle,
+    provider: "Metrolink",
+    priceScope: "day_pass",
+    fees: "not_applicable",
   };
 }
 

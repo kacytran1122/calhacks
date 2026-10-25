@@ -56,7 +56,7 @@ type ConstraintReview = {
 };
 type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean };
 type RouteGuide = { mode: string; title: string; durationText: string | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
-type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string };
+type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string; provider?: string; priceScope?: "route_total" | "published_ticket" | "day_pass"; fees?: "included" | "not_applicable" | "not_stated" };
 
 const fmt = (c: number) => (c < 0 ? "-$" : "$") + (Math.abs(c) / 100).toFixed(2);
 const SOURCE = { luma: "Luma", devpost: "Devpost", mlh: "MLH" } as const;
@@ -122,14 +122,14 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false }:
       <div className="fd-route-facts">
         {guide?.durationText && <span>{guide.durationText}</span>}
         <span>{option.history.trips ? `${Math.round(option.pMiss * 100)}% historical late risk` : "new route · no history yet"}</span>
-        <span>{option.mode === "drive" ? "IRS mileage estimate" : fare ? "live public-web fare" : "current route estimate"}</span>
+        <span>{option.mode === "drive" ? "IRS mileage estimate" : fare ? "exact published fare" : "fare not verified"}</span>
       </div>
       <ol className="fd-route-steps">
         {steps.map((step, index) => <li key={`${option.mode}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
       </ol>
       <div className="fd-cost-box">
-        <div><span>Estimated total</span><b>{fmt(option.costCents)}</b></div>
-        <p>{option.mode === "drive" ? "Mileage estimate based on the current IRS rate and route distance." : fare ? `Live fare evidence: “${fare.quote}”` : "No explicit live fare was published, so verify the amount before approval."}</p>
+        <div><span>{option.mode === "drive" ? "Estimated driving cost" : "Exact fare found"}</span><b>{fmt(option.costCents)}</b></div>
+        <p>{option.mode === "drive" ? "Mileage estimate based on the current IRS rate and route distance." : fare ? `${fare.provider ? `${fare.provider}: ` : ""}“${fare.quote}”${fare.fees === "included" ? " Taxes and mandatory fees are included in the quoted total." : fare.fees === "not_applicable" ? " This is the published operator fare for the covered ticket or pass." : " The source does not separately state fees."}` : "No explicit live fare was published, so S’mile will not approve an amount."}</p>
       </div>
       <div className="dk-row fd-route-links">
         <a className="dk-btn primary" href={directionsUrl} target="_blank" rel="noreferrer">Open live directions ↗</a>
