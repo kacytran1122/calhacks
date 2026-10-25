@@ -280,6 +280,23 @@ test("non-ticket charges and nested non-USD currencies never become the live far
   assert.equal(quote.amountUsd, 219.5);
 });
 
+test("the lowest complete offer wins across provider formats while base fares and extras are excluded", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  t.mock.method(globalThis, "fetch", async (input) => {
+    const url = String(input);
+    if (url.includes("/trigger?")) return new Response(JSON.stringify({ snapshot_id: "s_lowestoffer" }), { status: 200 });
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    return new Response(JSON.stringify([
+      { provider: "Higher-priced airline", pricing: { total_price: "$319", base_fare: "$59", price: "$79" } },
+      { provider: "Lowest-priced airline", price: "$109", extras: { price: "$9" }, seatSelection: { price: "$12" }, providerData: { statistics: { total: { value: 5 } } } },
+    ]), { status: 200 });
+  });
+  const quote = await liveGoogleFlightQuote({ fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16" });
+  assert.equal(quote.status, "ok");
+  assert.equal(quote.amountUsd, 109);
+  assert.equal(quote.provider, "Lowest-priced airline");
+});
+
 test("a resumed snapshot requires matching airport and date metadata", async (t) => {
   process.env.BRIGHTDATA_API_TOKEN = "test-token";
   process.env.BRIGHTDATA_UNLOCKER_ZONE = "test-unlocker";

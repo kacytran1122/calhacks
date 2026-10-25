@@ -208,14 +208,18 @@ function candidatesFromDataset(value: unknown, query: FlightQuery, requireIdenti
     const matched = context.fromAirport === query.fromAirport && context.toAirport === query.toAirport && context.departDate === query.departDate;
     const currency = stringAt(record, /(?:^|:)(?:currency|currency_code)$/i)?.toUpperCase() ?? parentCurrency;
     if (currency && currency !== "USD") return;
+    const totalFields = /^(total|total_price|price_total|total_amount)$/;
+    const hasTotal = Object.entries(record).some(([key, value]) => totalFields.test(canonicalKey(key)) && (amount(value) !== undefined || (value && typeof value === "object" && amount((value as Record<string, unknown>).value) !== undefined)));
     for (const [key, child] of Object.entries(record)) {
       const next = [...path, key];
       const lower = next.map(canonicalKey).join(":");
       const leaf = canonicalKey(key).split(":").at(-1) ?? "";
-      if (/(?:^|:|_)(?:tax(?:es)?|fee(?:s)?|bag(?:gage)?|change|carbon|points|miles|historical|typical|predicted|estimate(?:d)?|price_range)(?:$|:|_)/.test(lower)) continue;
+      if (/(?:^|:|_)(?:tax(?:es)?|fee(?:s)?|bag(?:gage)?|change|carbon|points|miles|history|historical|typical|predicted|estimate(?:d)?|price_range|base|seat(?:s)?|upgrade(?:s)?|insurance|meal(?:s)?|wifi|ancillary|extras|statistics|counts)(?:$|:|_)/.test(lower)) continue;
+      if (hasTotal && /^(price|fare|amount|price_usd|amount_usd|fare_amount|price_value|display_price)$/.test(leaf)) continue;
       const n = amount(child);
-      const isPrice = /^(price|amount|total|total_price|price_total|price_usd|amount_usd|total_amount|fare|fare_amount|price_value|display_price)$/.test(leaf);
-      const contextualValue = /^(value|units)$/.test(leaf) && /pricing|price|fare|total|cost/.test(lower);
+      const isPrice = /^(price|total_price|price_total|price_usd|amount_usd|total_amount|fare|fare_amount|price_value|display_price)$/.test(leaf)
+        || /^(amount|total)$/.test(leaf) && /pricing|price|fare|booking|itinerary|offer|provider/.test(lower);
+      const contextualValue = /^(value|units)$/.test(leaf) && /pricing|price|fare|booking|itinerary|offer|provider/.test(lower);
       if (n !== undefined && n > 0 && n <= 10_000 && (isPrice || contextualValue) && (!requireIdentity || matched)) {
         let score = 0;
         if (/pricing|provider|booking/.test(lower)) score += 3;
@@ -232,7 +236,7 @@ function candidatesFromDataset(value: unknown, query: FlightQuery, requireIdenti
     }
   };
   visit(value, []);
-  return out.sort((a, b) => b.score - a.score || a.amountUsd - b.amountUsd);
+  return out.sort((a, b) => a.amountUsd - b.amountUsd || b.score - a.score);
 }
 
 function pageText(markdown: string) {
