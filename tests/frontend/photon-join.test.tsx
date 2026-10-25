@@ -28,6 +28,8 @@ test("creates a visitor-specific Messages QR instead of a simulated group chat",
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<ChatClient />);
+  expect(window.location.pathname).toBe("/chat");
+  expect(window.location.hash).toBe("");
   await user.type(await screen.findByLabelText("iMessage phone or Apple Account email"), "(415) 555-0123");
   await user.click(screen.getByRole("checkbox"));
   await user.click(screen.getByRole("button", { name: "Create my private Messages link" }));

@@ -1,4 +1,4 @@
-const SERVER = "https://calhacks-beta.vercel.app";
+const SERVER = "https://smilefromhereto.work";
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !tab.url?.startsWith("http")) return;

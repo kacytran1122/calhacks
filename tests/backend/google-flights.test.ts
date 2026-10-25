@@ -350,6 +350,18 @@ test("price checking retains the domestic interstate policy", async (t) => {
   assert.equal(await checkFlightPrice({ from, to, startsAt: "2027-01-17T17:00:00Z" }), null);
 });
 
+test("a past event never starts a live fare collection or claims a current price", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Past dates must not reach a live provider"); });
+  const from = AIRFARE.airports.find((airport) => airport.code === "ORD")!;
+  const to = AIRFARE.airports.find((airport) => airport.code === "SFO")!;
+  const check = await checkFlightPrice({ from, to, startsAt: "2026-10-23T17:00:00Z", fromState: "IL", toState: "CA" });
+  assert.equal(check?.live.status, "empty");
+  assert.equal(check?.live.via, "date validation");
+  assert.match(check?.live.note ?? "", /departure date has passed/i);
+  assert.equal(check?.live.amountUsd, undefined);
+  assert.equal(check?.signal, "unavailable");
+});
+
 test("pending collections try the live page early once and throttle repeated polls after failure", async (t) => {
   const anthropic = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = "test-api-key";

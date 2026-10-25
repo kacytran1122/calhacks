@@ -4,12 +4,14 @@ import type { State } from "../store";
 import { newId } from "../store";
 import type { Evidence } from "../types";
 import { serp, type SerpOrganic } from "../integrations/brightdata";
-import { haversineMiles, placeToPoint, zipToPoint } from "../integrations/geo";
+import { haversineMiles, placeToPoint, stateCodeFromLabel, zipToPoint } from "../integrations/geo";
+import { dayBefore, googleFlightsUrl } from "../integrations/googleFlights";
 import { weatherAt } from "../integrations/nws";
 import { llmAvailable, structured } from "../llm";
 import { planPublicTransit, type TransitOption } from "../integrations/transitous";
 import { currentOfficialFares } from "../integrations/official-fares";
 import { planDrivingRoutes, type DrivePlanResult } from "../integrations/osrm";
+import { estimateAirfare } from "../ml/price";
 import type { EventFacts } from "./scout";
 
 const agent = { kind: "agent" as const, id: "evidence" as const };
@@ -52,9 +54,10 @@ const FareCandidates = z.object({
 const RouteGuideCandidates = z.object({
   options: z.array(
     z.object({
-      mode: z.enum(["train", "bus", "rideshare", "flight"]),
+      mode: z.enum(["train", "bus", "rideshare", "flight", "drive"]),
       title: z.string().min(1).max(120),
       durationText: z.string().max(80).nullable(),
+      durationMinutes: z.number().positive().nullable().optional(),
       sourceUrl: z.string(),
       sourceQuote: z.string().min(1).max(300),
       steps: z.array(z.object({ instruction: z.string().min(1).max(220), detail: z.string().max(300).nullable() })).min(1).max(8),
@@ -125,7 +128,7 @@ async function extractRouteGuides(results: SerpOrganic[], from: string, to: stri
   try {
     const candidates = await structured(RouteGuideCandidates, {
       model: "extract",
-      system: "Build concise door-to-door travel instructions using only the supplied live search-result titles and descriptions. Produce the best supported train, bus, rideshare, or flight options. Preserve an exact transit line, stop, transfer, duration, or schedule only when it appears in the evidence. Never invent route details. When the evidence omits a detail, tell the traveler to confirm that part in the linked live directions. sourceQuote must be one exact contiguous quote from the supplied result for sourceUrl.",
+      system: "Build concise door-to-door travel instructions using only the supplied live search-result titles and descriptions. Produce the best supported train, bus, rideshare, or flight options. Preserve an exact transit line, stop, transfer, duration, or schedule only when it appears in the evidence. Set durationMinutes only when the evidence states an exact duration; otherwise omit it. Never invent route details. When the evidence omits a detail, tell the traveler to confirm that part in the linked live directions. sourceQuote must be one exact contiguous quote from the supplied result for sourceUrl.",
       user: JSON.stringify({ from, to, requirement, results }),
       effort: "low",
     });
@@ -136,7 +139,7 @@ async function extractRouteGuides(results: SerpOrganic[], from: string, to: stri
   }
 }
 
-export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; originText?: string; originCoordinates?: { lat: number; lon: number }; event: EventFacts & { city?: string }; travelConstraintSummary?: string }) {
+export async function gatherEvidence(state: State, args: { tripId: string; homeZip: string; originText?: string; originCoordinates?: { lat: number; lon: number }; event: EventFacts & { city?: string }; travelConstraintSummary?: string; includeSelfDrive?: boolean }) {
   const { tripId, homeZip, event } = args;
   const out: Evidence[] = [];
 
@@ -161,15 +164,19 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const enteredOrigin = args.originText?.trim();
   const fromCity = enteredOrigin && enteredOrigin !== homeZip ? enteredOrigin : home.label || homeZip;
   const destination = [...new Set([event.address, event.venue, event.city].filter((value): value is string => Boolean(value)))].join(", ") || event.name || "event venue";
+  const homePoint = home.status === "ok" && home.lat !== undefined && home.lon !== undefined ? { lat: home.lat, lon: home.lon } : undefined;
+  const venuePoint = event.lat !== undefined && event.lon !== undefined ? { lat: event.lat, lon: event.lon } : undefined;
+  const fromState = stateCodeFromLabel(home.label) ?? stateCodeFromLabel(fromCity) ?? stateCodeFromLabel(zipPoint.label);
+  const toState = stateCodeFromLabel(event.city) ?? stateCodeFromLabel(event.address);
+  const domesticInterstate = Boolean(fromState && toState && fromState !== toState);
+  const airfare = domesticInterstate && homePoint && venuePoint && event.startsAt ? estimateAirfare({ from: homePoint, to: venuePoint, when: event.startsAt }) : null;
   const transitPromise = home.status === "ok" && home.lat !== undefined && home.lon !== undefined && event.lat !== undefined && event.lon !== undefined
     ? planPublicTransit({ from: { lat: home.lat, lon: home.lon }, to: { lat: event.lat, lon: event.lon }, startsAt: event.startsAt })
     : Promise.resolve({ status: "empty" as const, url: "https://transitous.org/sources/", options: [] as TransitOption[], ms: 0, error: "Coordinates were unavailable for live transit routing." });
   const travelDate = event.startsAt?.slice(0, 10) ?? "";
-  const fareModes = miles !== undefined && miles < 400 ? "train bus" : "train bus flight";
+  const fareModes = domesticInterstate || (miles !== undefined && miles >= 150) ? "train bus flight" : "train bus";
   const fareQuery = `${fromCity} to ${destination} ${travelDate} official adult ${fareModes} ticket fare${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
   const directionsQuery = `${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
-  const homePoint = home.status === "ok" && home.lat !== undefined && home.lon !== undefined ? { lat: home.lat, lon: home.lon } : undefined;
-  const venuePoint = event.lat !== undefined && event.lon !== undefined ? { lat: event.lat, lon: event.lon } : undefined;
   const [stops, transit, road, genericFareSerp, genericDirectionsSerp] = await Promise.all([
     venueQ ? serp(`coffee shop near ${venueQ} official location`, 1, LIVE_SEARCH_TIMEOUT_MS) : Promise.resolve(null),
     transitPromise,
@@ -216,29 +223,58 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     }),
   );
 
-  const routeGuides: RouteGuide[] = transit.options.length
-    ? transit.options.map((option) => ({ mode: option.mode, title: option.title, durationText: option.durationText, sourceUrl: option.sourceUrl, sourceQuote: option.sourceQuote, steps: option.steps }))
-    : guideExtraction.guides;
+  const transitGuides: RouteGuide[] = transit.options.map((option) => ({ mode: option.mode, title: option.title, durationText: option.durationText, durationMinutes: option.durationMinutes, sourceUrl: option.sourceUrl, sourceQuote: option.sourceQuote, steps: option.steps }));
+  const roadGuides: RouteGuide[] = args.includeSelfDrive === false
+    ? []
+    : (road?.routes ?? []).map((route) => ({ mode: "drive", title: route.title, durationText: route.durationText, durationMinutes: route.durationMinutes, sourceUrl: route.sourceUrl, sourceQuote: route.sourceQuote, steps: route.steps }));
+  const flightMinutes = airfare ? 150 + Math.max(45, Math.round((airfare.miles / 500) * 60)) : undefined;
+  const flightDepartDate = event.startsAt ? dayBefore(event.startsAt) : undefined;
+  const flightDatePassed = Boolean(flightDepartDate && flightDepartDate < new Date().toISOString().slice(0, 10));
+  const flightGuide: RouteGuide[] = airfare && flightMinutes && event.startsAt
+    ? [{
+        mode: "flight",
+        title: `Fly ${airfare.from.code} → ${airfare.to.code}`,
+        durationText: `About ${Math.floor(flightMinutes / 60)} hr ${flightMinutes % 60} min door to door`,
+        durationMinutes: flightMinutes,
+        sourceUrl: flightDatePassed || !flightDepartDate ? "https://www.google.com/travel/flights/" : googleFlightsUrl(airfare.from.code, airfare.to.code, flightDepartDate),
+        sourceQuote: flightDatePassed
+          ? "Estimated door-to-door time includes airport buffers. The event's departure date has passed, so no current fare is claimed; choose a new date in Google Flights."
+          : "Estimated door-to-door time includes a 90-minute airport arrival buffer and 60 minutes of combined airport transfers; verify the current itinerary in Google Flights.",
+        steps: [
+          { instruction: `Travel from ${fromCity} to ${airfare.from.code}.`, detail: "Allow enough time for the airport transfer and security." },
+          { instruction: `Fly ${airfare.from.code} to ${airfare.to.code}.`, detail: flightDatePassed ? "The event date has passed. Choose a new departure date before checking a live fare." : "Open Google Flights for the current schedule and verified live fare." },
+          { instruction: `Continue from ${airfare.to.code} to ${destination}.`, detail: "Check live road or transit conditions for the final transfer." },
+        ],
+      }]
+    : [];
+  const routeGuides = [...transitGuides, ...flightGuide, ...roadGuides, ...guideExtraction.guides]
+    .filter((guide, index, all) => all.findIndex((candidate) => candidate.mode === guide.mode && candidate.title === guide.title) === index)
+    .slice(0, 10);
   out.push(
     push(state, {
       tripId,
       kind: "route_guide",
-      source: transit.options.length ? "Transitous MOTIS → public GTFS and GTFS-Realtime" : "Bright Data SERP API → Google → Claude",
-      url: transit.options.length ? "https://transitous.org/sources/" : undefined,
-      status: transit.options.length ? "ok" : directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "empty" : directionsSerp.status,
-      data: { from: fromCity, to: destination, options: routeGuides, extractedBy: transit.options.length ? "MOTIS live public-transit routing" : guideExtraction.extractedBy, attempts: directionsSerp.attempts, ms: transit.options.length ? transit.ms : directionsSerp.ms },
-      note: transit.options.length ? "Uses public GTFS schedules and GTFS-Realtime where agencies publish it; verify the linked live directions before departure." : transit.error ?? directionsSerp.error ?? (directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "Live results did not contain enough grounded detail for step-by-step instructions." : undefined),
+      source: "Transitous + OSRM + Google Flights + grounded public search",
+      url: transit.options.length ? "https://transitous.org/sources/" : road?.routes[0]?.sourceUrl,
+      status: routeGuides.length ? "ok" : directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "empty" : directionsSerp.status,
+      data: { from: fromCity, to: destination, options: routeGuides, extractedBy: "live routing services plus grounded public sources", attempts: directionsSerp.attempts, ms: transit.ms + (road?.ms ?? 0) + directionsSerp.ms },
+      note: routeGuides.length
+        ? flightDatePassed
+          ? "Transit and road routes use live routing services. Flight duration is a clearly labeled estimate; the event date has passed, so no current flight fare is claimed."
+          : "Transit and road routes use live routing services. Flight duration is a clearly labeled door-to-door estimate; Google Flights supplies the current schedule and fare."
+        : transit.error ?? road?.error ?? directionsSerp.error ?? (directionsSerp.status === "ok" && guideExtraction.guides.length === 0 ? "Live results did not contain enough grounded detail for step-by-step instructions." : undefined),
     }),
   );
 
   // Door-to-door times for comparing routes: the fastest live itinerary per mode.
-  const minutes: Partial<Record<"train" | "bus" | "drive" | "rideshare", { minutes: number; source: string }>> = {};
+  const minutes: Partial<Record<"train" | "bus" | "drive" | "rideshare" | "flight", { minutes: number; source: string }>> = {};
   for (const option of transit.options) if (!minutes[option.mode] || option.durationMinutes < minutes[option.mode]!.minutes) minutes[option.mode] = { minutes: option.durationMinutes, source: "Transitous live public-transit itinerary" };
   const drive = road?.routes[0];
   if (drive) {
-    minutes.drive = { minutes: drive.durationMinutes, source: "OSRM live road route" };
+    if (args.includeSelfDrive !== false) minutes.drive = { minutes: drive.durationMinutes, source: "OSRM live road route" };
     minutes.rideshare = { minutes: drive.durationMinutes, source: "OSRM live road route (pickup wait not included)" };
   }
+  if (flightMinutes) minutes.flight = { minutes: flightMinutes, source: "Estimated door-to-door flight time using airport buffers and route distance" };
 
   return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides, roadMiles: drive?.distanceMiles, minutes, homePoint, venuePoint };
 }

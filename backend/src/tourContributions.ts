@@ -100,7 +100,7 @@ export function tourContributionOriginAllowed(request: Request): boolean {
     const localBind = destination.hostname === "0.0.0.0" && /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host) && new URL(`${destination.protocol}//${host}`).port === source.port;
     if (local.has(source.hostname) && (local.has(destination.hostname) || localBind) && source.protocol === destination.protocol && source.port === destination.port) allowed.add(source.origin);
   } catch {}
-  for (const value of [process.env.SMILE_PUBLIC_ORIGIN, process.env.SMILE_PUBLIC_URL, process.env.SMILE_WEB_URL, process.env.NEXT_PUBLIC_APP_URL, "https://smilefromhereto.work", "https://www.smilefromhereto.work", "https://calhacks-beta.vercel.app"]) {
+  for (const value of [process.env.SMILE_PUBLIC_ORIGIN, process.env.SMILE_PUBLIC_URL, process.env.SMILE_WEB_URL, process.env.NEXT_PUBLIC_APP_URL, "https://smilefromhereto.work", "https://www.smilefromhereto.work"]) {
     if (!value) continue;
     try { allowed.add(new URL(value).origin); } catch {}
   }

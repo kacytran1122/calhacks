@@ -302,7 +302,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
     event: { name: event.name, startsAt: event.startsAt },
     evidence: [
       { id: "fare", kind: "fare", source: "Bright Data", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { fares: [{ mode: "bus", amountUsd: 10.75, link: "https://example.com/fare", quote: "$10.75 total fare" }] } },
-      { id: "guide", kind: "route_guide", source: "Bright Data → Claude", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", sourceUrl: "https://example.com/route", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }] } },
+      { id: "guide", kind: "route_guide", source: "Live routing", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", durationMinutes: 55, sourceUrl: "https://example.com/route", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }, { mode: "flight", title: "Fly LAX → SFO", durationText: "About 4 hr door to door", durationMinutes: 240, sourceUrl: "https://www.google.com/travel/flights/", sourceQuote: "Estimated door-to-door flight time; verify the live itinerary.", steps: [{ instruction: "Travel to LAX.", detail: "Allow time for security." }, { instruction: "Fly to SFO.", detail: "Check Google Flights." }] }] } },
     ],
     routes: {
       options: [
@@ -310,6 +310,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
         { mode: "rideshare", costCents: 3400, costSource: "fare", pMiss: 0.2, history: { trips: 5, late: 1 }, withinCap: true, withinBudget: true },
       ],
       pick: { mode: "bus" },
+      fastest: "bus",
       cap: 5000,
       travelerBudgetCents: 10000,
     },
@@ -334,8 +335,17 @@ test("shows the best route first with detailed steps, total cost, and alternativ
   expect(await screen.findByText("Best route")).toBeVisible();
   expect(screen.getByText("Walk to the UCLA transit stop.")).toBeVisible();
   expect(screen.getByText("$10.75 total fare", { exact: false })).toBeVisible();
+  expect(screen.getByText("Fastest available itinerary")).toBeVisible();
+  expect(screen.getByText("Fastest route")).toBeVisible();
   expect(screen.getByText("Other ways to get there")).toBeVisible();
   expect(screen.getAllByText("Rideshare").length).toBeGreaterThan(0);
+  const beforeHref = window.location.href;
+  const photonButton = screen.getByRole("button", { name: /Message @smile privately in iMessage/ });
+  expect(screen.queryByRole("link", { name: /Message @smile privately in iMessage/ })).not.toBeInTheDocument();
+  await user.click(photonButton);
+  expect(screen.getByRole("dialog", { name: "Open your S’mile chat" })).toBeVisible();
+  expect(window.location.href).toBe(beforeHref);
+  expect(document.body.innerHTML).not.toContain("token");
 });
 
 test("keeps detailed live transit visible while its fare is being verified", async () => {

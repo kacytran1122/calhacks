@@ -6,6 +6,7 @@ import { stateCodeFrom } from "@/lib/usState";
 import { CarbonCompare, CarpoolCard, type CarbonComparison, type Carpool } from "./CarbonCompare";
 import { TripInsights } from "./TripInsights";
 import { VenueTourAction } from "./VenueTourAction";
+import { PhotonJoinDialog } from "./PhotonJoinDialog";
 import type { TravelOrigin } from "@/lib/travelSession";
 
 type Listing = {
@@ -62,7 +63,7 @@ type ConstraintReview = {
 };
 type ConstraintAnswer = { question: string; answer: string };
 type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string; minutes?: number; minutesSource?: string };
-type RouteGuide = { mode: string; title: string; durationText: string | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
+type RouteGuide = { mode: string; title: string; durationText: string | null; durationMinutes?: number | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
 type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string; provider?: string; priceScope?: "route_total" | "published_ticket" | "day_pass"; fees?: "included" | "not_applicable" | "not_stated" };
 
 const fmt = (c: number) => (c < 0 ? "-$" : "$") + (Math.abs(c) / 100).toFixed(2);
@@ -121,6 +122,16 @@ function liveDirectionsUrl(origin: string, event: Listing, mode: string) {
   return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${travelmode}`;
 }
 
+function routeDurationMinutes(guide: RouteGuide) {
+  if (typeof guide.durationMinutes === "number" && Number.isFinite(guide.durationMinutes)) return guide.durationMinutes;
+  const text = guide.durationText?.toLowerCase();
+  if (!text) return undefined;
+  const hours = Number(text.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/)?.[1] ?? 0);
+  const minutes = Number(text.match(/(\d+)\s*(?:minutes?|mins?|m)\b/)?.[1] ?? 0);
+  const total = Math.round(hours * 60 + minutes);
+  return total > 0 ? total : undefined;
+}
+
 function RouteInstructions({ option, guide, fare, origin, event, best = false, tags = [], why }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; best?: boolean; tags?: string[]; why?: string }) {
   const destination = event.venue || event.city || event.name;
   const directionsUrl = liveDirectionsUrl(origin, event, option.mode);
@@ -164,11 +175,15 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false, t
   return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}{option.co2eKg !== undefined && <small> · {option.co2eKg} kg CO₂e</small>}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
 }
 
-function UnpricedRouteGuide({ guide, origin, event, best = false }: { guide: RouteGuide; origin: string; event: Listing; best?: boolean }) {
+function UnpricedRouteGuide({ guide, origin, event, best = false, tags = [] }: { guide: RouteGuide; origin: string; event: Listing; best?: boolean; tags?: string[] }) {
   const content = (
       <div className="fd-route-detail">
         <div className="fd-route-head"><div><span>{best ? "Best live route" : "Live alternative"}</span><h3>{guide.title}</h3></div><div className="fd-route-price"><small>fare verification needed</small></div></div>
-        {guide.durationText && <div className="fd-route-facts"><span>{guide.durationText}</span><span>public GTFS / GTFS-Realtime</span></div>}
+        <div className="fd-route-facts">
+          {guide.durationText && <span>{guide.durationText}</span>}
+          <span>{guide.mode === "flight" ? "Google Flights schedule · fare checked separately" : guide.mode === "drive" ? "OpenStreetMap + OSRM road route" : "public GTFS / GTFS-Realtime"}</span>
+          {tags.map((tag) => <span key={tag} className="fd-tag">{tag}</span>)}
+        </div>
         <ol className="fd-route-steps">
           {guide.steps.map((step, index) => <li key={`${guide.title}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
         </ol>
@@ -177,11 +192,11 @@ function UnpricedRouteGuide({ guide, origin, event, best = false }: { guide: Rou
           <a className="dk-link" href={guide.sourceUrl} target="_blank" rel="noreferrer">Route data sources ↗</a>
         </div>
         <p className="fd-route-source">Route source: {guide.sourceQuote}</p>
-        <p className="dk-note">This route is shown for comparison, but S’mile will not display or approve a total until a public source states the fare.</p>
+        <p className="dk-note">This route remains visible for comparison, but S’mile will not approve a total until a public source states the current fare. Flight duration is a labeled door-to-door estimate; the price section checks Google Flights separately.</p>
       </div>
   );
   if (best) return <section className="fd-route-card best">{content}</section>;
-  return <details className="fd-route-card alternative"><summary><span>{guide.title}</span><b>check fare</b></summary>{content}</details>;
+  return <details className="fd-route-card alternative"><summary><span>{guide.title}{tags.map((tag) => <small key={tag}> · {tag}</small>)}</span><b>check fare</b></summary>{content}</details>;
 }
 
 export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, initialEnteredOrigin, initialNotice, onHome, onOriginChange }: { initialZip: string; initialOrigin?: string; initialLat?: number; initialLon?: number; initialEnteredOrigin?: { zip: string; label: string }; initialNotice?: string; onHome?: () => void; onOriginChange?: (origin: TravelOrigin) => void }) {
@@ -565,20 +580,31 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
   const pickedRoute = plan?.routes?.options.find((option) => option.mode === plan.routes?.pick?.mode);
   const alternativeRoutes = plan?.routes?.options.filter((option) => option.mode !== plan.routes?.pick?.mode) ?? [];
   const fareFor = (option: RouteOption) => fareItems.find((item) => item.mode === option.mode);
-  const tagsFor = (option: RouteOption) => [...(option.mode === plan?.routes?.lowestCarbon ? ["Lowest carbon of these"] : []), ...(option.mode === plan?.routes?.fastest ? ["Fastest"] : [])];
   const guideFor = (option: RouteOption) => {
     const matchedFare = fareFor(option);
     return matchedFare?.routeTitle
       ? routeGuides.find((guide) => guide.title === matchedFare.routeTitle)
       : routeGuides.find((guide) => guide.mode === option.mode);
   };
+  const timedGuides = routeGuides
+    .map((guide) => ({ guide, minutes: routeDurationMinutes(guide) }))
+    .filter((entry): entry is { guide: RouteGuide; minutes: number } => entry.minutes !== undefined)
+    .sort((a, b) => a.minutes - b.minutes);
+  const fastestGuide = timedGuides[0]?.guide ?? routeGuides.find((guide) => guide.mode === plan?.routes?.fastest);
+  const tagsFor = (option: RouteOption) => [
+    ...(option.mode === plan?.routes?.lowestCarbon ? ["Lowest carbon of these"] : []),
+    ...(guideFor(option) === fastestGuide || (!fastestGuide && option.mode === plan?.routes?.fastest) ? ["Fastest route"] : []),
+  ];
+  const tagsForGuide = (guide: RouteGuide) => guide === fastestGuide ? ["Fastest route"] : [];
   const representedGuideIndexes = new Set<number>();
   for (const option of plan?.routes?.options ?? []) {
     const selectedGuide = guideFor(option);
     const index = routeGuides.findIndex((guide, guideIndex) => guide === selectedGuide && !representedGuideIndexes.has(guideIndex));
     if (index >= 0) representedGuideIndexes.add(index);
   }
-  const additionalRouteGuides = routeGuides.filter((_, index) => !representedGuideIndexes.has(index));
+  const additionalRouteGuides = routeGuides
+    .filter((_, index) => !representedGuideIndexes.has(index))
+    .sort((a, b) => (a === fastestGuide ? -1 : b === fastestGuide ? 1 : (routeDurationMinutes(a) ?? Number.POSITIVE_INFINITY) - (routeDurationMinutes(b) ?? Number.POSITIVE_INFINITY)));
   const unpricedPrimary = !pickedRoute ? additionalRouteGuides[0] : undefined;
   const unpricedAlternatives = !pickedRoute ? additionalRouteGuides.slice(1) : additionalRouteGuides;
 
@@ -590,13 +616,15 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
           Close
         </button>
       </div>
-      <p>
-        <b>{event.name}</b>
-        <br />
-        <span className="dk-mut">
-          {event.city} · {event.distanceMiles} mi from {zip}
-        </span>
-      </p>
+      <div className="fd-trip-hero">
+        <span className="fd-eyebrow">Door-to-door plan</span>
+        <h3>{event.name}</h3>
+        <div>
+          {event.city && <span>{event.city}</span>}
+          <span>{event.distanceMiles} mi from {originText || zip}</span>
+          {event.startsAt && <span>{new Date(event.startsAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>}
+        </div>
+      </div>
       {msg && <div className={`dk-toast ${msg.kind}`}>{msg.text}</div>}
 
       {!plan && (
@@ -661,9 +689,16 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
       {plan?.routes && (
         <>
           {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
+          {fastestGuide && (
+            <section className="fd-fastest" aria-label="Fastest available itinerary">
+              <span>Fastest available itinerary</span>
+              <div><b>{fastestGuide.title}</b>{fastestGuide.durationText && <strong>{fastestGuide.durationText}</strong>}</div>
+              <small>Ranked by current transit and road times plus a clearly labeled door-to-door flight estimate. Fare verification is separate.</small>
+            </section>
+          )}
           {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} best tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
-          {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best />}
-          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
+          {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best tags={tagsForGuide(unpricedPrimary)} />}
+          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} tags={tagsForGuide(guide)} />)}</section>}
           {plan.routes.carbon && <CarbonCompare carbon={plan.routes.carbon} pick={plan.routes.pick?.mode} fastest={plan.routes.fastest} priced={plan.routes.options.map((o) => o.mode)} carpool={plan.carpool ?? null} />}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
@@ -700,7 +735,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
               </ul>
             </section>
           )}
-          {weather && <p className="dk-mut">Weather at kickoff: {weather.status === "ok" ? `${weather.data.summary}, ${weather.data.tempF}°F` : weather.note || "The event hour is not in the published forecast window yet."}</p>}
+          {weather && <p className="dk-mut">Weather at kickoff: {weather.status === "ok" ? `${weather.data.summary}, ${Math.round((Number(weather.data.tempF) - 32) * (5 / 9))}°C` : weather.note || "The event hour is not in the published forecast window yet."}</p>}
 
           <TripInsights
             from={originCoordinates ?? (homeGeo?.status === "ok" && typeof homeGeo.data.lat === "number" && typeof homeGeo.data.lon === "number" ? { lat: homeGeo.data.lat, lon: homeGeo.data.lon } : undefined)}
@@ -726,9 +761,10 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
             <p className="dk-mut">No one else nearby has planned this event yet. You’ll be matched as others plan it.</p>
           )}
           {plan.carpool && <CarpoolCard carpool={plan.carpool} />}
-          <p className="dk-mut">
-            Want travel buddies? <a href={`/chat#trip=${encodeURIComponent(plan.trip.id)}&token=${encodeURIComponent(plan.approvalToken)}`}>Message @smile privately in iMessage →</a>
-          </p>
+          <div className="fd-photon-invite">
+            <div><b>Want travel buddies?</b><span>Ask @smile privately from iMessage. Your trip stays open behind the popup.</span></div>
+            <PhotonJoinDialog tripId={plan.trip.id} tripToken={plan.approvalToken} eventName={event.name} />
+          </div>
 
           {stage === "planned" && plan.inbox && (
             <div className="dk-q">

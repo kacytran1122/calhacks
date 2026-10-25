@@ -27,7 +27,14 @@ export function ChatClient() {
   const [result, setResult] = useState<JoinResult | null>(null);
   const [copied, setCopied] = useState<"number" | "message" | null>(null);
 
-  useEffect(() => setCredentials(credentialsFromHash()), []);
+  useEffect(() => {
+    const credentials = credentialsFromHash();
+    setCredentials(credentials);
+    const values = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    if (values.has("trip") || values.has("token")) {
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
+    }
+  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();

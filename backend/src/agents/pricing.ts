@@ -67,6 +67,25 @@ export async function checkFlightPrice(args: { from: Point; to: Point; startsAt:
   if (!/^\d{4}-\d{2}-\d{2}$/.test(departDate) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== departDate) throw new Error("A valid calendar departure date is required.");
   const prediction = estimateAirfare({ from: args.from, to: args.to, when: parsed.toISOString(), fromAirport, toAirport });
   if (!prediction) return null;
+  if (departDate < new Date().toISOString().slice(0, 10)) {
+    return {
+      live: {
+        status: "empty",
+        currency: "USD",
+        fromAirport: prediction.from.code,
+        toAirport: prediction.to.code,
+        departDate,
+        observedAt: new Date().toISOString(),
+        sourceUrl: "https://www.google.com/travel/flights/",
+        via: "date validation",
+        ms: 0,
+        note: "The event's departure date has passed, so S’mile did not request or claim a current fare. Choose a new date in Google Flights.",
+      },
+      prediction,
+      signal: "unavailable",
+      differencePct: null,
+    };
+  }
   const live = await liveGoogleFlightQuote({
     fromAirport: prediction.from.code,
     toAirport: prediction.to.code,

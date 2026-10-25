@@ -25,6 +25,7 @@ type Cell = { lat: number; lon: number; feelsLikeF: number; airTempF: number; an
 type Heat = {
   status: string;
   basis: "forecast" | "climatology";
+  at: string;
   center: Point;
   radiusMiles: number;
   cells: Cell[];
@@ -55,6 +56,21 @@ function heatColor(f: number) {
   if (f >= 60) return "#86efac";
   if (f >= 45) return "#38bdf8";
   return "#6366f1";
+}
+
+const celsiusDelta = (fahrenheitDelta: number) => fahrenheitDelta * (5 / 9);
+const celsius = (fahrenheit: number) => (fahrenheit - 32) * (5 / 9);
+const signedCelsius = (fahrenheitDelta: number) => `${fahrenheitDelta >= 0 ? "+" : ""}${celsiusDelta(fahrenheitDelta).toFixed(1)}°C`;
+
+function heatSummaryCelsius(heat: Heat) {
+  if (!heat.cells.length) return heat.summary;
+  const coolest = Math.min(...heat.cells.map((cell) => cell.feelsLikeF));
+  const hottest = Math.max(...heat.cells.map((cell) => cell.feelsLikeF));
+  const when = heat.basis === "forecast" ? (new Date(heat.at).getTime() < Date.now() ? "recent model history" : "forecast") : "typical for this date (last 3 years)";
+  const spots = heat.hotspots.length
+    ? `${heat.hotspots.length} spot${heat.hotspots.length === 1 ? "" : "s"} stand${heat.hotspots.length === 1 ? "s" : ""} out as warmer than the area.`
+    : "No spot stands out as warmer than the rest of the area.";
+  return `Feels like ${Math.round(celsius(coolest))}–${Math.round(celsius(hottest))}°C around the venue at kickoff (${when}); hottest band: ${heat.band}. ${spots}`;
 }
 
 function RangeBar({ r, max }: { r: Range; max: number }) {
@@ -88,11 +104,11 @@ function HeatMapView({ heat }: { heat: Heat }) {
           ],
           { stroke: false, fillColor: heatColor(c.feelsLikeF), fillOpacity: 0.42 },
         )
-          .bindTooltip(`Feels like ${c.feelsLikeF.toFixed(1)}°F · ${c.anomalyF >= 0 ? "+" : ""}${c.anomalyF.toFixed(1)}°F vs area`)
+          .bindTooltip(`Feels like ${celsius(c.feelsLikeF).toFixed(1)}°C · ${signedCelsius(c.anomalyF)} vs area`)
           .addTo(map);
       heat.hotspots.forEach((h, i) =>
         L.circleMarker([h.lat, h.lon], { radius: 9, color: "#2b1b3d", weight: 2, fillColor: "#fff", fillOpacity: 1 })
-          .bindTooltip(`#${i + 1} hotspot · feels ${h.feelsLikeF.toFixed(1)}°F · +${h.anomalyF.toFixed(1)}°F · rank ${h.rank.toFixed(2)}`, { permanent: i === 0 })
+          .bindTooltip(`#${i + 1} hotspot · feels ${celsius(h.feelsLikeF).toFixed(1)}°C · ${signedCelsius(h.anomalyF)} · rank ${h.rank.toFixed(2)}`, { permanent: i === 0 })
           .addTo(map!),
       );
       L.circleMarker([heat.center.lat, heat.center.lon], { radius: 6, color: "#2b1b3d", weight: 2, fillColor: "#ffd84d", fillOpacity: 1 }).bindTooltip("Venue").addTo(map);
@@ -102,7 +118,7 @@ function HeatMapView({ heat }: { heat: Heat }) {
       map?.remove();
     };
   }, [heat]);
-  return <div ref={el} className="ti-map" role="img" aria-label={heat.summary} />;
+  return <div ref={el} className="ti-map" role="img" aria-label={heatSummaryCelsius(heat)} />;
 }
 
 export function TripInsights({ from, to, startsAt, timeZone, fromState, toState }: { from?: Point; to?: Point; startsAt?: string; timeZone?: string; fromState?: string; toState?: string }) {
@@ -201,6 +217,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
               {flight.live.amountUsd !== undefined ? `${flight.live.scope ?? "Lowest visible fare"}. ` : ""}
               {flight.live.via} · checked {new Date(flight.live.observedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
             </span>
+            {flight.live.note && <span className="dk-mut ti-small">{flight.live.note}</span>}
           </div>
           <a href={flight.live.bookingUrl ?? flight.live.sourceUrl} target="_blank" rel="noreferrer">Open Google Flights ↗</a>
         </div>
@@ -253,18 +270,18 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
       <h3>Heat at the venue</h3>
       {err.heat && <p className="dk-note">Heat map unavailable: {err.heat}</p>}
       {!heat && !err.heat && <p className="dk-mut">Collecting temperatures around the venue…</p>}
-      {heat && heat.status !== "ok" && <p className="dk-note">Venue heat evidence is not available for this event hour yet. No heat estimate is shown.</p>}
+      {heat && heat.status !== "ok" && <p className="dk-note">Heat evidence could not be retrieved from Open-Meteo: {heat.error || heat.summary || "no forecast or historical sample was returned"}. No temperature is invented; try again shortly.</p>}
       {heat && heat.status === "ok" && (
         <>
           <HeatMapView heat={heat} />
           <div className="ti-legend">
             {[
-              ["< 60°F", "#38bdf8"],
-              ["60s", "#86efac"],
-              ["70s", "#facc15"],
-              ["80–89 caution", "#f97316"],
-              ["90–102 extreme caution", "#dc2626"],
-              ["103+ danger", "#7f1d1d"],
+              ["< 16°C", "#38bdf8"],
+              ["16–20°C", "#86efac"],
+              ["21–26°C", "#facc15"],
+              ["27–31°C caution", "#f97316"],
+              ["32–39°C extreme caution", "#dc2626"],
+              ["39°C+ danger", "#7f1d1d"],
             ].map(([label, color]) => (
               <span key={label}>
                 <i style={{ background: color }} />
@@ -272,12 +289,12 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
               </span>
             ))}
           </div>
-          <p>{heat.summary}</p>
+          <p>{heatSummaryCelsius(heat)}</p>
           {heat.hotspots.length > 0 && (
             <ol className="dk-ul">
               {heat.hotspots.map((h, i) => (
                 <li key={i}>
-                  Feels {h.feelsLikeF.toFixed(1)}°F (+{h.anomalyF.toFixed(1)}°F vs area) · severity {h.severity.toFixed(2)} × confidence {h.confidence.toFixed(2)} = <b>{h.rank.toFixed(2)}</b>
+                  Feels {celsius(h.feelsLikeF).toFixed(1)}°C ({signedCelsius(h.anomalyF)} vs area) · severity {h.severity.toFixed(2)} × confidence {h.confidence.toFixed(2)} = <b>{h.rank.toFixed(2)}</b>
                 </li>
               ))}
             </ol>

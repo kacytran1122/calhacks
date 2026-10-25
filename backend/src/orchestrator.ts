@@ -286,7 +286,7 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
   }
   if (scoutEvidenceId) state.evidence.find((e) => e.id === scoutEvidenceId)!.tripId = trip.id;
 
-  const g = await gatherEvidence(state, { tripId: trip.id, homeZip: args.zip, originText: args.originText, originCoordinates: args.originCoordinates, event: { ...(facts ?? { extractedBy: picked ? "json-ld" : "lens-hints", verified: Boolean(picked) }), name: event.name, venue: event.venue, city: event.city, startsAt: event.startsAt, lat: event.lat, lon: event.lon }, travelConstraintSummary: args.travelConstraints?.summary });
+  const g = await gatherEvidence(state, { tripId: trip.id, homeZip: args.zip, originText: args.originText, originCoordinates: args.originCoordinates, event: { ...(facts ?? { extractedBy: picked ? "json-ld" : "lens-hints", verified: Boolean(picked) }), name: event.name, venue: event.venue, city: event.city, startsAt: event.startsAt, lat: event.lat, lon: event.lon }, travelConstraintSummary: args.travelConstraints?.summary, includeSelfDrive: args.includeSelfDrive });
   if (g.miles === undefined) {
     appendAudit(state, { actor: orch, action: "plan.blocked", subject: trip.id, reason: "Couldn't compute distance (ZIP or venue location unavailable)", refs: g.evidence.map((e) => e.id) });
     return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes: null, carpool: null, inbox: null };

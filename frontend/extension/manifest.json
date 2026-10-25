@@ -3,7 +3,7 @@
   "name": "S’mile Trip Planner",
   "version": "1.6.2",
   "description": "Plan the fastest route and clear alternatives to the collegiate hackathon page you are viewing.",
-  "homepage_url": "https://calhacks-beta.vercel.app",
+  "homepage_url": "https://smilefromhereto.work/",
   "icons": {
     "16": "images/icon-16.png",
     "32": "images/icon-32.png",
@@ -19,7 +19,7 @@
   },
   "background": { "service_worker": "dist/background.js" },
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://calhacks-beta.vercel.app/*"],
+  "host_permissions": ["https://smilefromhereto.work/*"],
   "content_scripts": [
     {
       "matches": ["https://www.mlh.com/seasons/*/events*", "https://mlh.io/seasons/*/events*"],

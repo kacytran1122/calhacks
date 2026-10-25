@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ANOMALY_THRESHOLD_F, confidenceFor, gridAround, scoreCells, severityFor } from "../../backend/src/agents/heat";
+import { ANOMALY_THRESHOLD_F, confidenceFor, gridAround, heatMapAround, nearestHourIndex, scoreCells, severityFor } from "../../backend/src/agents/heat";
 
 test("severity follows the NWS heat-index bands", () => {
   assert.equal(severityFor(65).band, "Comfortable");
@@ -41,4 +41,35 @@ test("grid covers the requested radius around the venue", () => {
   assert.equal(pts.length, 49);
   const lats = pts.map((p) => p.lat);
   assert.ok(Math.abs(Math.max(...lats) - Math.min(...lats) - 6 / 69) < 0.001);
+});
+
+test("weather evidence uses the nearest published hour when the exact hour is absent", () => {
+  const hours = ["2026-10-25T09:00", "2026-10-25T11:00", "2026-10-25T12:00"];
+  assert.equal(nearestHourIndex(hours, "2026-10-25T10:00"), 0);
+  assert.equal(nearestHourIndex(hours, "2026-10-25T18:00"), -1);
+});
+
+test("a recently finished event loads Open-Meteo model history instead of returning empty", { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = "";
+  globalThis.fetch = async (input) => {
+    requested = String(input);
+    const hourly = {
+      time: ["2026-10-23T10:00"],
+      temperature_2m_gfs_seamless: [59],
+      temperature_2m_ecmwf_ifs025: [58.7],
+      apparent_temperature_gfs_seamless: [60.2],
+      apparent_temperature_ecmwf_ifs025: [58.2],
+    };
+    return new Response(JSON.stringify(Array.from({ length: 49 }, () => ({ utc_offset_seconds: -25_200, hourly }))), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const map = await heatMapAround({ lat: 37.802, lon: -122.448, at: "2026-10-23T17:00:00Z", now: new Date("2026-10-25T10:54:00Z") });
+    assert.match(requested, /past_days=3/);
+    assert.equal(map.status, "ok");
+    assert.equal(map.cells.length, 49);
+    assert.match(map.summary, /recent model history/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

@@ -21,7 +21,7 @@ export default function PrivacyPage() {
 
         <section style={sectionStyle}>
           <h2 style={headingStyle}>How the data is used</h2>
-          <p>The extension sends the starting point, selected public event details, and self-drive choice over HTTPS to S’mile’s routing endpoint at calhacks-beta.vercel.app. The endpoint uses OpenStreetMap Nominatim for place lookup, Transitous for public-transit routes, and OSRM with OpenStreetMap data for driving routes. These services receive the coordinates or place names needed to answer the route request.</p>
+          <p>The extension sends the starting point, selected public event details, and self-drive choice over HTTPS to S’mile’s routing endpoint at smilefromhereto.work. The endpoint uses OpenStreetMap Nominatim for place lookup, Transitous for public-transit routes, and OSRM with OpenStreetMap data for driving routes. These services receive the coordinates or place names needed to answer the route request.</p>
         </section>
 
         <section style={sectionStyle}>

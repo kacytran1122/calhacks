@@ -601,7 +601,7 @@ test("allows the real production origin through the backend proxy and rejects fo
   const backend = "https://calhacks-production-5fe6.up.railway.app/api/tours/contributions";
   assert.equal(tourContributionOriginAllowed(new Request(backend, { headers: { origin: "https://smilefromhereto.work", "sec-fetch-site": "same-origin" } })), true);
   assert.equal(tourContributionOriginAllowed(new Request(backend, { headers: { origin: "https://www.smilefromhereto.work" } })), true);
-  assert.equal(tourContributionOriginAllowed(new Request(backend, { headers: { origin: "https://calhacks-beta.vercel.app" } })), true);
+  assert.equal(tourContributionOriginAllowed(new Request(backend, { headers: { origin: "https://calhacks-beta.vercel.app" } })), false);
   assert.equal(tourContributionOriginAllowed(new Request("http://127.0.0.1:3000/api/tours/contributions", { headers: { origin: "http://127.0.0.1:3000" } })), true);
   assert.equal(tourContributionOriginAllowed(new Request(backend, { headers: { origin: "https://evil.example", "x-forwarded-host": "evil.example" } })), false);
   assert.equal(tourContributionOriginAllowed(new Request(backend)), false);

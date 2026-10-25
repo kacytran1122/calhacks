@@ -28,7 +28,7 @@ declare global {
 }
 
 const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
-const WEBSITE = "https://calhacks-beta.vercel.app";
+const WEBSITE = "https://smilefromhereto.work";
 const websiteLink = () => `<div class="website">Want to learn more about S’mile? <a href="${WEBSITE}" target="_blank" rel="noreferrer">Visit the website ↗</a></div>`;
 
 function isMlhSchedule() {
