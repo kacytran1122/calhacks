@@ -30,7 +30,7 @@ Only these product areas live at the repository root. Generated files, credentia
 
 | Area | Responsibility |
 |---|---|
-| `frontend/app` | Landing page, event search, traveler planning, chat, and organizer desk |
+| `frontend/app` | Landing page, event search, traveler planning, chat, organizer desk, and the walk-through of the venue |
 | `frontend/extension` | Read-only Chrome extension for public event pages |
 | `backend/src/agents` | Scout, Evidence, Route, Policy, Payments, Reconciler, and Auditor |
 | `backend/src/integrations` | Bright Data, public transit, official fares, weather, geocoding, and Visa sandbox adapters |
@@ -77,7 +77,7 @@ npm run test:system --prefix backend
 
 The test pyramid lives entirely under `tests/`:
 
-- `tests/frontend`: user interaction and location-entry behavior.
+- `tests/frontend`: user interaction, location-entry behavior, and the venue's floor-plan data, search and walking routes.
 - `tests/backend`: policy boundaries, deterministic seed data, geocoding validation, ledger balance, price-model parity, and heat scoring.
 - `tests/agents`: least privilege, Photon event filtering, 40-case evaluation, and adversarial controls.
 - `tests/system`: sign-in, role isolation, trip-token scope, approval, booking, and repository-structure checks.
@@ -130,6 +130,15 @@ select region (grid around the venue)
 ```
 
 Evidence is live forecast temperature, or the same date over the last three years (ERA5) when the event is more than 15 days out. Values are relative planning evidence, not calibrated measurements. Forecast models are a few miles across, so small hotspots inside a neighborhood are usually not resolvable.
+
+## 3D venue: Cal Hacks 13.0 at the Palace of Fine Arts
+
+`/venue` puts you inside the main floor at eye level, starting at the business entrance where attendees arrive. It's linked from the trip pane for Cal Hacks events. Drag to look around; walk with W A S D, the arrow keys or the on-screen pad; tap the floor or the little map to walk there. Search for a sponsor (by name or booth number), a place or a spot, and S'mile lights a beacon over it, says how far it is, and on "Walk me there" walks you along the aisles to stand in front of it.
+
+- **Built from the event's floor plan, in code.** `frontend/app/venue/palace.ts` holds the data in plan pixels, so the plan can be corrected in place. The 263 main-floor hacker tables, 43 sponsor booths and 16 places were found by color on the plan image, so they sit exactly where the plan puts them. The curved walls are circles fitted to the plan (the hall is a band about 290–370 ft from its center of curvature), and rooms, blocked areas, the stage, the bleachers and the theater are traced. Scale is 4.3 px per foot, from Breakout #7's 54 ft side and the 6 ft table spacing.
+- **three.js, no model files.** `scene.ts` extrudes the floor, walls and rooms, places tables and chairs as instanced meshes oriented across the hall, prints each sponsor's name on its banner, and keeps signs (HTML over the canvas) for areas and places you can actually see from where you stand. The ceiling height, roof trusses, skylights and windows are there for a sense of the space; they aren't measured.
+- **Walking.** `walk.ts` cuts the floor into ~0.6 m cells: open where you could stand clear of walls, closed areas, rooms, the stage and the stairs, and costlier under tables and booths. Routes are A* over that grid, pulled tight into a few straight legs, so they keep to the aisles. Booths are seen square on from the front, rooms from outside their door, and anything else from the side with the most floor around it.
+- **Not yet:** the mezzanine (Mezzanine #2–#4, rooms M5–M8 and the other 41 hacker tables), hacker table numbers (the plan has positions but not numbers), and 11 sponsor names that couldn't be matched to a booth. Those booths show as "Sponsor table" rather than a guess.
 
 ## Safety boundaries
 

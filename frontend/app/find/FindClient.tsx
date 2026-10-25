@@ -644,6 +644,11 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
           <p className="dk-mut">
             Going with friends? <a href="/chat">Plan it together in the @smile group chat →</a>
           </p>
+          {/cal\s*hacks/i.test(event.name) && (
+            <p className="dk-mut">
+              Arriving at the Palace of Fine Arts? <a href="/venue">Walk the venue floor →</a>
+            </p>
+          )}
 
           {stage === "planned" && plan.inbox && (
             <div className="dk-q">
