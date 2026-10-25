@@ -4,7 +4,6 @@ import { Header } from "@/components/landing/Header";
 import { Hero } from "@/components/landing/Hero";
 import { HowItWorks } from "@/components/landing/HowItWorks";
 import { LensDemo } from "@/components/landing/LensDemo";
-import { JourneyPreview } from "@/components/landing/JourneyPreview";
 import { RevealObserver } from "@/components/landing/Reveal";
 import { Why } from "@/components/landing/Why";
 import { TravelHome, type TravelView } from "@/components/travel/TravelHome";
@@ -14,7 +13,6 @@ export function TravelExperience({ initialView }: { initialView: TravelView }) {
     <TravelHome initialView={initialView}>
       <Header />
       <Hero />
-      <JourneyPreview />
       <Why />
       <HowItWorks />
       <LensDemo />
