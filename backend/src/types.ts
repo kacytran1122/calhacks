@@ -38,8 +38,7 @@ export type EvidenceKind =
   | "bank_line"
   | "receipt"
   | "checkin"
-  | "refund"
-  | "x402_purchase";
+  | "refund";
 
 export interface Evidence {
   id: string;

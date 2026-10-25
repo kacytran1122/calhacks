@@ -6,8 +6,6 @@ import type { Evidence } from "../types";
 import { serp, type SerpOrganic } from "../integrations/brightdata";
 import { haversineMiles, placeToPoint, zipToPoint } from "../integrations/geo";
 import { weatherAt } from "../integrations/nws";
-import { payAndFetch } from "../integrations/x402";
-import { postEntry } from "../ledger";
 import { llmAvailable, structured } from "../llm";
 import { planPublicTransit, type TransitOption } from "../integrations/transitous";
 import { currentOfficialFares } from "../integrations/official-fares";
@@ -20,7 +18,6 @@ function push(state: State, e: Omit<Evidence, "id" | "fetchedAt" | "provenance">
   state.evidence.push(full);
   return full;
 }
-
 const FareCandidates = z.object({
   fares: z.array(
     z.object({
@@ -206,33 +203,4 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   );
 
   return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides };
-}
-
-export async function buyWithX402(state: State, tripId: string, url: string, priceCents = 1): Promise<Evidence> {
-  authorize(state, agent, "x402.pay", tripId);
-  const r = await payAndFetch(url);
-  const e = push(state, {
-    tripId,
-    kind: "x402_purchase",
-    source: `x402 → ${url}`,
-    url,
-    status: r.ok ? "ok" : r.reason === "spend_control" ? "blocked" : "error",
-    provenance: "testnet",
-    data: r.ok ? { payer: r.payer, httpStatus: r.status, body: r.body } : { reason: r.reason },
-    note: r.ok ? "Paid on Base Sepolia (testnet USDC)." : r.detail,
-  });
-  if (r.ok) {
-    postEntry(state, {
-      date: new Date().toISOString().slice(0, 10),
-      period: state.company.openPeriod,
-      memo: `x402 data purchase for ${tripId} (testnet)`,
-      lines: [
-        { account: "5200", debit: priceCents, credit: 0 },
-        { account: "1050", debit: 0, credit: priceCents },
-      ],
-      refs: [e.id, tripId],
-      postedBy: { kind: "agent", id: "reconciler" },
-    });
-  }
-  return e;
 }

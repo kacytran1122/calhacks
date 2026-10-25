@@ -108,7 +108,6 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
         <div className="dk-chips">
           <span className={`dk-chip ${i.claude ? "on" : ""}`}>Claude {i.claude ? "on" : "off"}</span>
           <span className={`dk-chip ${i.brightData ? "on" : ""}`}>Bright Data {i.brightData ? "on" : "off"}</span>
-          <span className={`dk-chip ${i.x402 ? "on" : ""}`}>x402 {i.x402 ? "testnet" : "off"}</span>
           <span className={`dk-chip ${i.photon ? "on" : ""}`}>Photon 2.0 {i.photon ? "ready" : "off"}</span>
           <span className="dk-chip sim">Visa · simulated</span>
         </div>

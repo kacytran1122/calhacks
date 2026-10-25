@@ -13,7 +13,6 @@ const config: NextConfig = {
   outputFileTracingRoot: path.resolve(process.cwd(), ".."),
   turbopack: { root: path.resolve(process.cwd(), "..") },
   transpilePackages: ["@smile/core"],
-  serverExternalPackages: ["@coinbase/cdp-sdk", "@x402/fetch", "@x402/core", "@x402/evm"],
   async rewrites() {
     const beforeFiles = backendOrigin
       ? [

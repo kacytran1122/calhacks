@@ -10,13 +10,12 @@ export type Capability =
   | "ledger.post"
   | "mandate.request"
   | "mandate.charge"
-  | "x402.pay"
   | "inbox.ask"
   | "approve";
 
 export const AGENT_CAPS: Record<AgentId, readonly Capability[]> = {
   scout: ["web.read", "feeds.read"],
-  evidence: ["web.read", "feeds.read", "x402.pay"],
+  evidence: ["web.read", "feeds.read"],
   route: ["policy.read"],
   policy: ["policy.read", "ledger.read", "mandate.request", "inbox.ask"],
   payments: ["mandate.charge"],
@@ -27,7 +26,7 @@ export const AGENT_CAPS: Record<AgentId, readonly Capability[]> = {
 
 export const AGENT_NEVER: Record<AgentId, string> = {
   scout: "Never logs in, reads cookies, or touches form/payment fields.",
-  evidence: "Never writes to the ledger. x402 spend is capped per call and per day.",
+  evidence: "Never writes to the ledger. It only gathers public, source-linked evidence.",
   route: "Never picks a policy exception — it scores, the Policy agent decides.",
   policy: "Never approves its own requests (R8).",
   payments: "Never raises a mandate cap or charges an unapproved mandate.",

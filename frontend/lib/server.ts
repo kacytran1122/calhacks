@@ -14,7 +14,6 @@ import {
   saveState,
   trialBalance,
   verifyChain,
-  x402Configured,
   type State,
   type User,
 } from "@smile/core";
@@ -28,7 +27,6 @@ export function integrations() {
   return {
     claude: llmAvailable(),
     brightData: Boolean(brightDataKey()),
-    x402: x402Configured(),
     photon: Boolean(process.env.PHOTON_PROJECT_ID && process.env.PHOTON_BRIDGE_SECRET),
     visa: "simulated" as const,
   };

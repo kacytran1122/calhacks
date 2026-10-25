@@ -33,7 +33,7 @@ Only these product areas live at the repository root. Generated files, credentia
 | `frontend/app` | Landing page, event search, traveler planning, chat, and organizer desk |
 | `frontend/extension` | Read-only Chrome extension for public event pages |
 | `backend/src/agents` | Scout, Evidence, Route, Policy, Payments, Reconciler, and Auditor |
-| `backend/src/integrations` | Bright Data, Coinbase x402, weather, geocoding, and simulated Visa mandates |
+| `backend/src/integrations` | Bright Data, public transit, official fares, weather, geocoding, and Visa sandbox adapters |
 | `backend/src` | Policy, permissions, orchestration, authentication, ledger, and audit trail |
 | `backend/photon` | Photon 2.0 iMessage transport |
 | `backend/.data` | Local SQLite books, auth, and event snapshots; never committed |
@@ -94,11 +94,10 @@ No production deployment occurs without an explicitly configured hosting environ
 |---|---|
 | Anthropic | Public-page extraction, explanations, and audit defense; amounts remain deterministic |
 | Bright Data | Live logged-out event, route, fare, and stop pages |
-| Coinbase CDP/x402 | Testnet agent payments with per-call and daily limits |
 | Hyphenate | Organizer finance desk, reconciliation, controls, and accountable handoffs |
 | Photon 2.0 | `@smile` group conversation and private trip-scoped approval links |
 | TigerData | Time-series snapshots for event date and venue changes |
-| Visa | Clearly labeled simulation of exact-amount, merchant-locked mandates |
+| Visa | Reviewed, exact-amount travel basket and sandbox authorization boundary |
 
 ## Safety boundaries
 
