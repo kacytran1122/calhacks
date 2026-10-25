@@ -4,6 +4,7 @@ import { heatCall, heatMapAround, type HeatMap } from "./agents/heat";
 import { estimatePrices, pricingCall, type PriceEstimate } from "./agents/pricing";
 import { runAgent } from "./agents/run";
 import type { EventListing } from "./eventStore";
+import { stateCodeFromLabel } from "./integrations/geo";
 import { fmt } from "./money";
 import { notify, tick } from "./orchestrator";
 import { authorize } from "./permissions";
@@ -37,7 +38,7 @@ const DAY = 86_400_000;
 
 export interface SchedulerDeps {
   now?: Date;
-  prices?: (args: { from: Point; to: Point; startsAt: string }) => Promise<PriceEstimate>;
+  prices?: (args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string }) => Promise<PriceEstimate>;
   heat?: (args: { lat: number; lon: number; at: string }) => Promise<HeatMap>;
   discover?: (opts: DiscoverOptions) => Promise<DiscoverResult>;
 }
@@ -62,9 +63,9 @@ function upcoming(state: State, now: Date, days: number) {
   });
 }
 
-const homeOf = (state: State, tripId: string): Point | undefined => {
-  const g = state.evidence.find((e) => e.tripId === tripId && e.kind === "geocode" && e.status === "ok")?.data as { lat?: number; lon?: number } | undefined;
-  return g?.lat !== undefined && g.lon !== undefined ? { lat: g.lat, lon: g.lon } : undefined;
+const homeOf = (state: State, tripId: string): (Point & { state?: string }) | undefined => {
+  const g = state.evidence.find((e) => e.tripId === tripId && e.kind === "geocode" && e.status === "ok")?.data as { lat?: number; lon?: number; label?: string } | undefined;
+  return g?.lat !== undefined && g.lon !== undefined ? { lat: g.lat, lon: g.lon, state: stateCodeFromLabel(g.label) } : undefined;
 };
 const venueOf = (e: HackEvent): Point | undefined => (e.lat !== undefined && e.lon !== undefined ? { lat: e.lat, lon: e.lon } : undefined);
 
@@ -205,7 +206,7 @@ async function priceWatchJob(deps: SchedulerDeps, now: Date): Promise<Omit<JobRe
   const results: { tripId: string; estimate: PriceEstimate }[] = [];
   for (const t of targets) {
     try {
-      const estimate = await runAgent(pricingCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)({ from: t.from, to: t.to, startsAt: t.event.startsAt }));
+      const estimate = await runAgent(pricingCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)({ from: t.from, to: t.to, startsAt: t.event.startsAt, fromState: t.from.state, toState: stateCodeFromLabel(t.event.city) }));
       results.push({ tripId: t.trip.id, estimate });
     } catch {
       // recorded as pricing.estimated.failed; the next pass tries again

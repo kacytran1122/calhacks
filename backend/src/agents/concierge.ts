@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { appendAudit } from "../audit";
 import type { EventListing } from "../eventStore";
-import { zipToPoint } from "../integrations/geo";
+import { stateCodeFromLabel, zipToPoint } from "../integrations/geo";
 import { MODELS } from "../llm";
 import { fmt } from "../money";
 import { buddiesFor, planTrip } from "../orchestrator";
@@ -60,7 +60,7 @@ type CreateParams = Anthropic.Beta.Messages.MessageCreateParamsNonStreaming;
 export interface ConciergeDeps {
   create?: (params: CreateParams) => Promise<Anthropic.Beta.Messages.BetaMessage>;
   discover?: (opts: DiscoverOptions) => Promise<DiscoverResult>;
-  prices?: (args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; startsAt: string }) => Promise<PriceEstimate>;
+  prices?: (args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; startsAt: string; fromState?: string; toState?: string }) => Promise<PriceEstimate>;
   heat?: (args: { lat: number; lon: number; at: string }) => Promise<HeatMap>;
 }
 
@@ -100,7 +100,7 @@ export const TOOLS: Anthropic.Beta.Messages.BetaTool[] = [
   },
   {
     name: "estimate_prices",
-    description: "Predicted price ranges for a rideshare (by departure hour) and a flight from a ZIP to an event, from trained models. Estimates for comparison only, not fares that can be approved.",
+    description: "Predicted price ranges for a domestic trip between different U.S. states, from trained models. Estimates are for comparison only, not fares that can be approved.",
     strict: true,
     input_schema: {
       type: "object",
@@ -178,7 +178,7 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
   const zipPoint = async (zip: string) => {
     const g = await zipToPoint(zip);
     if (g.status !== "ok" || g.lat === undefined || g.lon === undefined) throw new ToolError(`couldn't find ZIP ${zip}`);
-    return { lat: g.lat, lon: g.lon };
+    return { lat: g.lat, lon: g.lon, state: stateCodeFromLabel(g.label) };
   };
 
   const run: Record<keyof typeof Inputs, (raw: unknown) => Promise<unknown>> = {
@@ -251,7 +251,7 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
       if (!ZIP.test(a.zip)) throw new ToolError("zip must be 5 digits");
       const ev = listing(a.event_key);
       const from = await zipPoint(a.zip);
-      const p = await runAgent(pricingCall(`event:${ev.key}`, { actor: concierge, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)({ from, to: ev, startsAt: ev.startsAt }));
+      const p = await runAgent(pricingCall(`event:${ev.key}`, { actor: concierge, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)({ from, to: ev, startsAt: ev.startsAt, fromState: from.state, toState: stateCodeFromLabel(ev.city) }));
       const ride = p.rideshare && (p.rideshare.uber.p50 <= p.rideshare.lyft.p50 ? { by: "Uber", r: p.rideshare.uber } : { by: "Lyft", r: p.rideshare.lyft });
       const cheap = p.rideshare?.cheapestOnTime;
       return {
@@ -261,7 +261,7 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
           ? { cheaper_app: ride.by, typical: usd(ride.r.p50), likely_range: `${usd(ride.r.p10)}–${usd(ride.r.p90)}`, leaving_at: hourLabel(p.rideshare.departHour), cheapest_hour_that_arrives_on_time: cheap ? `${hourLabel(cheap.hour)} at about ${usd(Math.min(cheap.uber.p50, cheap.lyft.p50))}` : null }
           : null,
         flight: p.airfare ? { route: `${p.airfare.from.code}→${p.airfare.to.code}`, typical: usd(p.airfare.range.p50), likely_range: `${usd(p.airfare.range.p10)}–${usd(p.airfare.range.p90)}`, cheapest_departure_hour: p.airfare.cheapestHour ? `${hourLabel(p.airfare.cheapestHour.hour)} at about ${usd(p.airfare.cheapestHour.range.p50)}` : null } : null,
-        note: "Model estimates for comparison, not fares. The approvable price comes from plan_trip.",
+        note: p.scope.eligible ? "Model estimates for domestic interstate comparison, not fares. The approvable price comes from plan_trip." : p.scope.reason,
       };
     },
 

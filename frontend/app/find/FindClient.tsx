@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { SmileWord } from "@/components/landing/Smile";
+import { stateCodeFrom } from "@/lib/usState";
 import { CarbonCompare, CarpoolCard, type CarbonComparison, type Carpool } from "./CarbonCompare";
 import { TripInsights } from "./TripInsights";
 
@@ -451,13 +452,13 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
             </p>
           )}
         </div>
-        {picked && <PlanPane key={picked.key} zip={zip} originText={locationInput} originCoordinates={originCoordinates} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
+        {picked && <PlanPane key={picked.key} zip={zip} originText={locationInput} originState={stateCodeFrom(res?.origin.label ?? locationInput)} originCoordinates={originCoordinates} maxDistanceMiles={radius} event={picked} onClose={() => setPicked(null)} />}
       </div>
     </div>
   );
 }
 
-function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event, onClose }: { zip: string; originText: string; originCoordinates?: { lat: number; lon: number }; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
+function PlanPane({ zip, originText, originState, originCoordinates, maxDistanceMiles, event, onClose }: { zip: string; originText: string; originState?: string; originCoordinates?: { lat: number; lon: number }; maxDistanceMiles: number; event: Listing; onClose: () => void }) {
   const [initials, setInitials] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
   const [constraintText, setConstraintText] = useState("");
@@ -698,6 +699,8 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
             from={originCoordinates ?? (homeGeo?.status === "ok" && typeof homeGeo.data.lat === "number" && typeof homeGeo.data.lon === "number" ? { lat: homeGeo.data.lat, lon: homeGeo.data.lon } : undefined)}
             to={event.lat !== undefined && event.lon !== undefined ? { lat: event.lat, lon: event.lon } : undefined}
             startsAt={event.startsAt}
+            fromState={originState ?? stateCodeFrom(typeof homeGeo?.data.label === "string" ? homeGeo.data.label : undefined)}
+            toState={stateCodeFrom(event.city)}
           />
 
           <h3>Buddies on your route</h3>

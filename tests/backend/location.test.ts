@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cityToPoint, isLikelyUsLocation, placeToPoint, zipToPoint } from "../../backend/src/integrations/geo";
+import { cityToPoint, isLikelyUsLocation, placeToPoint, stateCodeFromLabel, zipToPoint } from "../../backend/src/integrations/geo";
 
 test("location inputs fail closed before making a network request", async () => {
   const city = await cityToPoint("x");
@@ -16,6 +16,12 @@ test("MLH location filtering keeps U.S. events and skips international ones", ()
   assert.equal(isLikelyUsLocation("San Francisco, California"), true);
   assert.equal(isLikelyUsLocation("Oxford, England"), false);
   assert.equal(isLikelyUsLocation("Toronto, Ontario"), false);
+});
+
+test("state labels resolve from abbreviations and full names", () => {
+  assert.equal(stateCodeFromLabel("Galesburg, IL"), "IL");
+  assert.equal(stateCodeFromLabel("San Francisco, California, US"), "CA");
+  assert.equal(stateCodeFromLabel("Oxford, England, GB"), undefined);
 });
 
 test("place lookup keeps an exact landmark coordinate", async (t) => {

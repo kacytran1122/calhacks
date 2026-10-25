@@ -22,7 +22,7 @@ export { chargeTrip } from "./agents/payments";
 export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, carpoolFor, notify, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";
-export { cityToPoint, coordinatesToPoint, globalPlaceToPoint, haversineMiles, placeToPoint, zipToPoint, type GeoResult } from "./integrations/geo";
+export { cityToPoint, coordinatesToPoint, globalPlaceToPoint, haversineMiles, isLikelyUsLocation, placeToPoint, stateCodeFromLabel, zipToPoint, type GeoResult } from "./integrations/geo";
 export { driveRoutesFrom, planDrivingRoutes, type DriveRoute, type OsrmPayload } from "./integrations/osrm";
 export { planExtensionRoute, type ExtensionEvent, type ExtensionRoute, type ExtensionRoutePlan } from "./extension-route";
 export { authorizeVisaAcceptance, signedVisaHeaders, visaAcceptanceConfigured, type VisaAcceptanceResult } from "./integrations/visaAcceptance";

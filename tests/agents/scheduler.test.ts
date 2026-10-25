@@ -13,7 +13,7 @@ const core = await import("../../backend/src/index");
 
 const NOW = new Date("2026-11-12T17:00:00Z"); // two days before Golden Gate Hack 2026 (E-main)
 const range = (p50: number) => ({ p10: p50 * 0.8, p50, p90: p50 * 1.3 });
-const prices = (p50: number) => async () => ({ rideshare: { uber: range(p50), lyft: range(p50 + 2) }, airfare: null, drive: { status: "ok", source: "test", miles: 12, minutes: 25 }, models: {} }) as unknown as PriceEstimate;
+const prices = (p50: number) => async () => ({ scope: { eligible: true, fromState: "IL", toState: "CA", reason: "Domestic interstate trip from IL to CA." }, rideshare: { uber: range(p50), lyft: range(p50 + 2) }, airfare: null, drive: { status: "ok", source: "test", miles: 12, minutes: 25 }, models: {} }) as unknown as PriceEstimate;
 const heat = (band: string, feelsLikeF: number) => async () => ({ status: "ok", basis: "forecast", band, summary: `feels like ${feelsLikeF}°F`, cells: [{ feelsLikeF }], hotspots: [] }) as unknown as HeatMap;
 
 async function seedWithLiveTrip() {

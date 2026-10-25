@@ -9,6 +9,7 @@ type Range = { p10: number; p50: number; p90: number };
 type HourPrice = { hour: number; period: string; uber: Range; lyft: Range };
 type FlightHour = { hour: number; period: string; factor: number; range: Range; past: number | null };
 type PriceOut = {
+  scope: { eligible: boolean; fromState: string | null; toState: string | null; reason: string };
   rideshare: { uber: Range; lyft: Range; miles: number; minutes: number; departAt: string; departHour: number; period: string; byHour: HourPrice[]; pastByHour: (number | null)[]; cheapestOnTime: HourPrice | null; caveat: string } | null;
   airfare: { from: { code: string; city: string }; to: { code: string; city: string }; miles: number; range: Range; byHour: FlightHour[]; cheapestHour: FlightHour | null; caveat: string } | null;
   drive: { status: string; source: string; miles: number; minutes: number };
@@ -98,7 +99,7 @@ function HeatMapView({ heat }: { heat: Heat }) {
   return <div ref={el} className="ti-map" role="img" aria-label={heat.summary} />;
 }
 
-export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; to?: Point; startsAt?: string; timeZone?: string }) {
+export function TripInsights({ from, to, startsAt, timeZone, fromState, toState }: { from?: Point; to?: Point; startsAt?: string; timeZone?: string; fromState?: string; toState?: string }) {
   const [price, setPrice] = useState<PriceOut | null>(null);
   const [heat, setHeat] = useState<Heat | null>(null);
   const [err, setErr] = useState<{ price?: string; heat?: string }>({});
@@ -106,9 +107,12 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
 
   useEffect(() => {
     if (!from || !to || !startsAt) return;
-    call<PriceOut>("/api/price-estimate", { from, to, startsAt, timeZone }).then(setPrice, (e) => setErr((x) => ({ ...x, price: (e as Error).message })));
+    setPrice(null);
+    setHeat(null);
+    setErr({});
+    call<PriceOut>("/api/price-estimate", { from, to, startsAt, timeZone, fromState, toState }).then(setPrice, (e) => setErr((x) => ({ ...x, price: (e as Error).message })));
     call<Heat>(`/api/heat?lat=${to.lat}&lon=${to.lon}&at=${encodeURIComponent(startsAt)}`).then(setHeat, (e) => setErr((x) => ({ ...x, heat: (e as Error).message })));
-  }, [from?.lat, from?.lon, to?.lat, to?.lon, startsAt, timeZone]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [from?.lat, from?.lon, to?.lat, to?.lon, startsAt, timeZone, fromState, toState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!from || !to || !startsAt) return null;
   const rows = price
@@ -123,10 +127,11 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
   return (
     <div className="ti">
       <h3>Price outlook</h3>
-      <p className="dk-mut">Predicted ranges for prices that move with time and demand. These are estimates for planning — you still approve an exact live price before anything is booked.</p>
+      <p className="dk-mut">Predicted ranges are available only for domestic trips between different U.S. states. These estimates help with planning; an exact live price still requires your approval.</p>
       {err.price && <p className="dk-note">Price outlook unavailable: {err.price}</p>}
       {!price && !err.price && <p className="dk-mut">Running the price models…</p>}
-      {price && rows.length === 0 && <p className="dk-note">No demand-based estimate is available for this route. Live route evidence above is still used for planning.</p>}
+      {price && !price.scope.eligible && <p className="dk-note">{price.scope.reason} Live route evidence above is still used for planning.</p>}
+      {price && price.scope.eligible && rows.length === 0 && <p className="dk-note">No demand-based estimate is available for this interstate route. Live route evidence above is still used for planning.</p>}
       {rows.length > 0 && (
         <table className="dk-table tight ti-prices">
           <tbody>

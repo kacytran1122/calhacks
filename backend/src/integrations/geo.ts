@@ -124,6 +124,20 @@ export function isLikelyUsLocation(location: string): boolean {
   return Boolean(STATES[region] || (region.length === 2 && STATE_ANCHORS[region.toUpperCase()]));
 }
 
+export function stateCodeFromLabel(location?: string): string | undefined {
+  if (!location) return undefined;
+  const parts = location.split(",").map((part) => part.trim()).filter(Boolean);
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const part = parts[index]!.replace(/\bUS(?:A)?\b/gi, "").trim();
+    const code = part.match(/\b([A-Z]{2})\b/i)?.[1]?.toUpperCase();
+    if (code && STATE_ANCHORS[code]) return code;
+    const named = STATES[part.toLowerCase()];
+    if (named) return named;
+  }
+  const lower = location.toLowerCase();
+  return Object.entries(STATES).find(([name]) => new RegExp(`\\b${name.replace(" ", "\\s+")}\\b`, "i").test(lower))?.[1];
+}
+
 const cityCache = new Map<string, GeoResult>();
 const placeCache = new Map<string, GeoResult>();
 const globalPlaceCache = new Map<string, GeoResult>();

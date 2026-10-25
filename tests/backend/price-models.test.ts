@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { estimatePrices } from "../../backend/src/agents/pricing";
 import { predictTrees } from "../../backend/src/ml/gbdt";
 import { AIRFARE, FLIGHT_TIME, HISTORY, PERIODS, RIDESHARE, airportsNear, estimateAirfare, estimateRideshare, flightFactor, pastFarePerMile, periodOf, predictRange, type PriceModelFile } from "../../backend/src/ml/price";
 
@@ -25,6 +26,18 @@ test("ranges stay ordered and non-negative", () => {
     const r = predictRange(RIDESHARE, row);
     assert.ok(r.p10 >= 0 && r.p10 <= r.p50 && r.p50 <= r.p90);
   }
+});
+
+test("price outlook runs only for domestic trips between different states", async () => {
+  const sameState = await estimatePrices({ from: { lat: 34.07, lon: -118.44 }, to: { lat: 33.68, lon: -117.82 }, startsAt: "2026-11-14T17:00:00Z", fromState: "CA", toState: "CA" });
+  assert.equal(sameState.scope.eligible, false);
+  assert.equal(sameState.rideshare, null);
+  assert.equal(sameState.airfare, null);
+  assert.match(sameState.scope.reason, /stays within CA/);
+
+  const unknownState = await estimatePrices({ from: { lat: 34.07, lon: -118.44 }, to: { lat: 30.27, lon: -97.74 }, startsAt: "2026-11-14T17:00:00Z" });
+  assert.equal(unknownState.scope.eligible, false);
+  assert.match(unknownState.scope.reason, /could not be verified/);
 });
 
 test("a longer rideshare costs more than a short one", () => {

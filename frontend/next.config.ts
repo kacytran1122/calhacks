@@ -14,12 +14,12 @@ const config: NextConfig = {
   turbopack: { root: path.resolve(process.cwd(), "..") },
   transpilePackages: ["@smile/core"],
   async rewrites() {
-    const fallback = backendOrigin
+    const apiProxy = backendOrigin
       ? [
           { source: "/api/:path*", destination: `${backendOrigin}/api/:path*` },
         ]
       : [];
-    return { beforeFiles: [], afterFiles: [], fallback };
+    return { beforeFiles: apiProxy, afterFiles: [], fallback: [] };
   },
 };
 
