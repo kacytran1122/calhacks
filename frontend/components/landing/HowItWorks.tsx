@@ -12,12 +12,6 @@ const STEPS: { title: string; body: ReactNode }[] = [
   { title: "Finance handoff", body: "The approved trip, policy record and receipts move to the organizer desk for reimbursement." },
 ];
 
-const PICTURES = [
-  { src: "/how/1-find.webp", step: "01", title: "Find the event", alt: "Event results with buttons to plan a trip" },
-  { src: "/how/3-compare.webp", step: "04", title: "Compare the route", alt: "Complete route choices on the trip results screen" },
-  { src: "/how/8-paid.webp", step: "08", title: "Complete the handoff", alt: "Trip finance status showing the traveler budget and organizer policy" },
-];
-
 export function HowItWorks() {
   return (
     <section id="how">
@@ -29,14 +23,6 @@ export function HowItWorks() {
             <br />
             We’ll help you <em>get there.</em>
           </h2>
-        </div>
-        <div className="how-images reveal" aria-label="S’mile journey screenshots">
-          {PICTURES.map((picture) => (
-            <figure key={picture.src}>
-              <img src={picture.src} alt={picture.alt} />
-              <figcaption><small>Step {picture.step}</small><b>{picture.title}</b></figcaption>
-            </figure>
-          ))}
         </div>
         <ol className="how-word-steps reveal">
           {STEPS.map((step, index) => (
