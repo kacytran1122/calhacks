@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildSeed } from "../../backend/src/seed/trips";
-import { createRideDemoOwner, createRidePayment, listRidePayments, requireRideDemoStorage, RidePaymentError, RIDE_DEMO_LIMITS, RIDE_DEMO_SESSION_SECONDS } from "../../backend/visa/ridePayments";
+import { createRideDemoOwner, createRidePayment, createTripDemoReceipt, listRidePayments, listTripDemoReceipts, requireRideDemoStorage, RidePaymentError, RIDE_DEMO_LIMITS, RIDE_DEMO_SESSION_SECONDS } from "../../backend/visa/ridePayments";
 
 const input = { legId: "route-one:bus:0", mode: "bus", service: "Public express", from: "Origin stop", to: "Venue stop", amountCents: 250, completed: true, consent: true };
 
@@ -89,4 +89,89 @@ test("bounded receipt storage keeps exact retries available after the owner limi
   assert.throws(() => createRidePayment(state, owner.token, { ...input, legId: "one-too-many" }), (error) => error instanceof RidePaymentError && error.status === 429);
   assert.equal(createRidePayment(state, owner.token, { ...input, legId: "leg-0" }).replayed, true);
   assert.equal(state.ridePayments!.receipts.length, RIDE_DEMO_LIMITS.receiptsPerOwner);
+});
+
+const legDetails = (receipt: { legId: string; mode: "bus" | "train" | "taxi"; service: string; from: string; to: string }) => ({ legId: receipt.legId, mode: receipt.mode, service: receipt.service, from: receipt.from, to: receipt.to });
+
+test("final journey receipts sum only matching owned demo records and identify unpaid legs without another charge", (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("No network call belongs in a final demo receipt"); });
+  const state = buildSeed().state;
+  const owner = createRideDemoOwner(state);
+  const finances = JSON.stringify([state.trips, state.evidence, state.mandates, state.journal]);
+  const bus = createRidePayment(state, owner.token, { ...input, journeyId: "complete-trip" }).receipt;
+  const train = createRidePayment(state, owner.token, { ...input, journeyId: "complete-trip", legId: "rail:0", mode: "train", amountCents: 575 }).receipt;
+  createRidePayment(state, owner.token, { ...input, journeyId: "other-trip", legId: "other-trip:0", amountCents: 900 });
+  createRidePayment(state, owner.token, { ...input, legId: "legacy:0", amountCents: 300 });
+  const payload = { journeyId: "complete-trip", from: "Trip start", to: "Trip end", completed: true, legs: [{ ...legDetails(bus), expectedReceiptId: bus.id }, { ...legDetails(train), expectedReceiptId: train.id }, { ...legDetails(bus), legId: "taxi:0", mode: "taxi" }] };
+  const result = createTripDemoReceipt(state, owner.token, payload);
+  assert.equal(result.replayed, false);
+  assert.equal(result.receipt.totalRecordedCents, 825);
+  assert.deepEqual(result.receipt.legs.map((leg) => [leg.status, leg.amountCents, leg.receiptId]), [["demo_receipt_recorded", 250, bus.id], ["demo_receipt_recorded", 575, train.id], ["no_payment_recorded", null, undefined]]);
+  assert.equal("expectedReceiptId" in result.receipt.legs[0]!, false);
+  assert.equal(result.receipt.captured, false);
+  assert.equal(result.receipt.amountSource, "owned_demo_receipts");
+  assert.equal(result.receipt.provider, "visa_simulation");
+  assert.equal(state.ridePayments!.receipts.length, 4);
+  assert.equal(JSON.stringify([state.trips, state.evidence, state.mandates, state.journal]), finances);
+  assert.equal(JSON.stringify(result).includes(state.ridePayments!.owners[0]!.ownerHash), false);
+  assert.equal(state.audit.at(-1)!.reason.includes(payload.from), false);
+  assert.deepEqual(createTripDemoReceipt(state, owner.token, payload).receipt, result.receipt);
+  assert.equal(createTripDemoReceipt(state, owner.token, payload).replayed, true);
+  assert.equal(state.ridePayments!.tripReceipts!.length, 1);
+  assert.equal(createRidePayment(state, owner.token, { ...input, journeyId: "complete-trip" }).replayed, true);
+  assert.throws(() => createRidePayment(state, owner.token, { ...input, journeyId: "complete-trip", legId: "new-ride" }), (error) => error instanceof RidePaymentError && error.code === "ride_demo_journey_closed");
+  assert.throws(() => createTripDemoReceipt(state, owner.token, { ...payload, to: "Different destination" }), (error) => error instanceof RidePaymentError && error.status === 409);
+  result.receipt.legs[0]!.amountCents = 1;
+  assert.equal(listTripDemoReceipts(state, owner.token)[0]!.legs[0]!.amountCents, 250);
+});
+
+test("a known receipt cannot be downgraded or borrowed from another journey or owner", () => {
+  const state = buildSeed().state;
+  const owner = createRideDemoOwner(state);
+  const other = createRideDemoOwner(state);
+  const receipt = createRidePayment(state, owner.token, { ...input, journeyId: "owned-trip" }).receipt;
+  const payload = { journeyId: "owned-trip", from: "A", to: "B", completed: true, legs: [{ ...legDetails(receipt), expectedReceiptId: receipt.id }] };
+  const fails = (token: string, value: unknown) => assert.throws(() => createTripDemoReceipt(state, token, value), (error) => error instanceof RidePaymentError && error.code === "ride_demo_trip_unverifiable");
+  fails(other.token, payload);
+  fails(owner.token, { ...payload, journeyId: "unrelated-trip" });
+  fails(owner.token, { ...payload, legs: [] });
+  fails(owner.token, { ...payload, legs: [{ ...payload.legs[0], service: "Different service" }] });
+  fails(owner.token, { ...payload, legs: [{ ...payload.legs[0], expectedReceiptId: "not-the-original" }] });
+  assert.equal(state.ridePayments!.tripReceipts, undefined);
+  assert.deepEqual(listTripDemoReceipts(state, other.token), []);
+  assert.equal(state.ridePayments!.receipts.length, 1);
+});
+
+test("walking-only final summaries record no payments without inventing a fare and expire with their session", () => {
+  const state = buildSeed().state;
+  const now = new Date("2030-01-01T00:00:00Z");
+  const owner = createRideDemoOwner(state, now);
+  const result = createTripDemoReceipt(state, owner.token, { journeyId: "walk-only", from: "A", to: "B", completed: true, legs: [] }, now);
+  assert.equal(result.receipt.totalRecordedCents, 0);
+  assert.deepEqual(result.receipt.legs, []);
+  assert.equal(state.ridePayments!.receipts.length, 0);
+  const expired = new Date(now.getTime() + RIDE_DEMO_SESSION_SECONDS * 1000 + 1);
+  assert.throws(() => listTripDemoReceipts(state, owner.token, expired), (error) => error instanceof RidePaymentError && error.status === 401);
+  assert.deepEqual(state.ridePayments!.tripReceipts, []);
+});
+
+test("final receipt input rejects client totals, duplicate legs, card fields, and invalid journey details before writes", () => {
+  const state = buildSeed().state;
+  const owner = createRideDemoOwner(state);
+  const base = { journeyId: "trip", from: "A", to: "B", completed: true, legs: [legDetails({ ...input, mode: "bus" })] };
+  const before = JSON.stringify(state);
+  for (const payload of [{ ...base, totalRecordedCents: 1 }, { ...base, completed: false }, { ...base, card: "4111111111111111" }, { ...base, journeyId: "x".repeat(201) }, { ...base, to: "B\u0000" }, { ...base, legs: [...base.legs, ...base.legs] }, { ...base, legs: [{ ...base.legs[0], amountCents: 250 }] }, { ...base, legs: [{ ...base.legs[0], expectedReceiptId: "x".repeat(201) }] }, { ...base, legs: Array.from({ length: RIDE_DEMO_LIMITS.tripLegs + 1 }, (_, i) => ({ ...base.legs[0], legId: String(i) })) }]) {
+    assert.throws(() => createTripDemoReceipt(state, owner.token, payload), (error) => error instanceof RidePaymentError && error.status === 400);
+    assert.equal(JSON.stringify(state), before);
+  }
+});
+
+test("bounded final summary storage preserves immutable exact retries", () => {
+  const state = buildSeed().state;
+  const owner = createRideDemoOwner(state);
+  const payload = { journeyId: "journey-0", from: "A", to: "B", completed: true, legs: [] };
+  for (let index = 0; index < RIDE_DEMO_LIMITS.tripReceiptsPerOwner; index += 1) createTripDemoReceipt(state, owner.token, { ...payload, journeyId: `journey-${index}` });
+  assert.equal(createTripDemoReceipt(state, owner.token, payload).replayed, true);
+  assert.throws(() => createTripDemoReceipt(state, owner.token, { ...payload, journeyId: "one-too-many" }), (error) => error instanceof RidePaymentError && error.status === 429);
+  assert.equal(listTripDemoReceipts(state, owner.token).length, RIDE_DEMO_LIMITS.tripReceiptsPerOwner);
 });

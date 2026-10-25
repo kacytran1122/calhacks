@@ -16,7 +16,7 @@ function amountCents(value) {
 function receiptFor(value, leg, expectedAmount) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const valid = typeof value.id === "string" && value.id.length > 0 && value.id.length < 200
-    && value.legId === leg.legId && value.mode === leg.mode && value.service === leg.service
+    && value.legId === leg.legId && (leg.journeyId === undefined || value.journeyId === leg.journeyId) && value.mode === leg.mode && value.service === leg.service
     && value.from === leg.from && value.to === leg.to
     && Number.isSafeInteger(value.amountCents) && value.amountCents > 0 && value.amountCents <= 100000
     && (expectedAmount === undefined || value.amountCents === expectedAmount)
@@ -24,7 +24,7 @@ function receiptFor(value, leg, expectedAmount) {
     && value.provenance === "simulated" && value.captured === false
     && value.provider === "visa_simulation" && value.amountSource === "traveler_entered_demo";
   if (!valid) return null;
-  return Object.freeze({ id: value.id, legId: value.legId, mode: value.mode, service: value.service, from: value.from, to: value.to, amountCents: value.amountCents, currency: "USD", paidAt: value.paidAt, provenance: "simulated", captured: false, provider: "visa_simulation", amountSource: "traveler_entered_demo" });
+  return Object.freeze({ id: value.id, legId: value.legId, ...(typeof value.journeyId === "string" ? { journeyId: value.journeyId } : {}), mode: value.mode, service: value.service, from: value.from, to: value.to, amountCents: value.amountCents, currency: "USD", paidAt: value.paidAt, provenance: "simulated", captured: false, provider: "visa_simulation", amountSource: "traveler_entered_demo" });
 }
 
 export function mountRideCheckout() {
@@ -46,6 +46,7 @@ export function mountRideCheckout() {
   const state = { leg: null, receipt: null, phase: "idle", lookupReady: false, attemptedAmount: null, request: null, previousFocus: null, revision: 0 };
   const attemptedLegAmounts = new Map();
   const blockedLegIds = new Set();
+  const lostJourneySessions = new Set();
   const isBlocked = () => Boolean(state.leg && blockedLegIds.has(state.leg.legId));
 
   const message = (text, error = false) => {
@@ -77,9 +78,10 @@ export function mountRideCheckout() {
   const lockCurrentLeg = () => {
     if (!state.leg) return;
     blockedLegIds.add(state.leg.legId);
+    if (state.leg.journeyId) lostJourneySessions.add(state.leg.journeyId);
     state.phase = "blocked";
     state.lookupReady = false;
-    message("The receipt session changed while this ride’s demo record was being created. Its result cannot be confirmed, so another payment attempt for this ride is locked to avoid a duplicate. No real funds moved. Confirm your exit to continue, or return to the route.", true);
+    message("The receipt session changed during this journey. Earlier demo records and their amounts cannot be confirmed, so another payment attempt is locked to avoid a duplicate. No real funds moved. Confirm your exit to continue, or return to the route.", true);
     update();
   };
 
@@ -89,7 +91,7 @@ export function mountRideCheckout() {
     state.request = controller;
     const timer = window.setTimeout(() => controller.abort(), 10000);
     try {
-      const endpoint = init.method === "POST" || state.attemptedAmount === null ? ENDPOINT : `${ENDPOINT}?recover=1`;
+      const endpoint = init.method === "POST" || (state.attemptedAmount === null && !state.leg?.hasPaymentAttempt) ? ENDPOINT : `${ENDPOINT}?recover=1`;
       const response = await fetch(endpoint, { credentials: "same-origin", cache: "no-store", ...init, signal: controller.signal });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
@@ -147,7 +149,7 @@ export function mountRideCheckout() {
       message(afterError || "Confirm you have left the vehicle, then choose a demo amount or skip payment.", Boolean(afterError));
     } catch (error) {
       if (revision !== state.revision || !state.leg) return;
-      if (error.status === 401 && state.attemptedAmount !== null) { lockCurrentLeg(); return; }
+      if (error.status === 401 && (state.attemptedAmount !== null || state.leg.hasPaymentAttempt)) { lockCurrentLeg(); return; }
       state.phase = "error";
       message(error.name === "AbortError" ? "The receipt check timed out. Try again, or skip payment after confirming you have left the vehicle." : `${error.message} Check saved receipts again before retrying payment.`, true);
     }
@@ -158,6 +160,7 @@ export function mountRideCheckout() {
     if (!state.leg || state.phase === "paying" || state.phase === "checking") return;
     if (!state.receipt && !ui.completed.checked) return;
     const onContinue = state.leg.onContinue;
+    const outcome = { receipt: state.receipt, ...(state.receipt ? {} : { skipped: true }), attempted: state.attemptedAmount !== null, sessionLost: isBlocked() };
     state.revision += 1;
     state.request?.abort();
     state.leg = null;
@@ -165,12 +168,13 @@ export function mountRideCheckout() {
     if (typeof dialog.close === "function") dialog.close();
     else dialog.removeAttribute("open");
     if (state.previousFocus instanceof HTMLElement && state.previousFocus.isConnected) state.previousFocus.focus();
-    onContinue();
+    onContinue(outcome);
   };
 
   const dismiss = () => {
     if (!state.leg || state.receipt || state.phase === "paying") return;
     const onDismiss = state.leg.onDismiss;
+    const outcome = { attempted: state.attemptedAmount !== null, sessionLost: isBlocked() };
     state.revision += 1;
     state.request?.abort();
     state.leg = null;
@@ -178,7 +182,7 @@ export function mountRideCheckout() {
     if (typeof dialog.close === "function") dialog.close();
     else dialog.removeAttribute("open");
     if (state.previousFocus instanceof HTMLElement && state.previousFocus.isConnected) state.previousFocus.focus();
-    if (typeof onDismiss === "function") onDismiss();
+    if (typeof onDismiss === "function") onDismiss(outcome);
   };
 
   ui.form.addEventListener("submit", async (event) => {
@@ -193,7 +197,7 @@ export function mountRideCheckout() {
     message("Creating a simulation record. No funds will move.");
     update();
     try {
-      const body = await request({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ legId: state.leg.legId, mode: state.leg.mode, service: state.leg.service, from: state.leg.from, to: state.leg.to, amountCents: cents, completed: true, consent: true }) });
+      const body = await request({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ legId: state.leg.legId, ...(state.leg.journeyId === undefined ? {} : { journeyId: state.leg.journeyId }), mode: state.leg.mode, service: state.leg.service, from: state.leg.from, to: state.leg.to, amountCents: cents, completed: true, consent: true }) });
       if (revision !== state.revision || !state.leg) return;
       if (typeof body.replayed !== "boolean") throw new Error("The demo receipt response could not be verified.");
       const receipt = receiptFor(body.receipt, state.leg, body.replayed ? undefined : cents);
@@ -218,7 +222,7 @@ export function mountRideCheckout() {
     const receipt = state.receipt;
     const text = [
       "S’mile demo receipt", "SIMULATION ONLY — NO FUNDS MOVED", "",
-      `Reference: ${receipt.id}`, `Ride: ${receipt.legId}`, `Service: ${receipt.service}`, `Mode: ${receipt.mode}`,
+      `Reference: ${receipt.id}`, `Ride: ${receipt.legId}`, ...(receipt.journeyId ? [`Journey: ${receipt.journeyId}`] : []), `Service: ${receipt.service}`, `Mode: ${receipt.mode}`,
       `Planned boarding point: ${receipt.from}`, `Planned destination: ${receipt.to}`, `Demo amount: ${usd(receipt.amountCents)} USD`, `Created: ${receipt.paidAt}`, "",
       "Provider: Visa simulation. No real Visa API was used.", "Amount source: traveler-entered demo amount. This is not a live fare.",
       "Captured: false. No funds were charged, transferred, or paid to an operator.",
@@ -267,8 +271,9 @@ export function mountRideCheckout() {
     isOpen: () => dialog.hasAttribute("open"),
     open: (leg) => {
       if (dialog.hasAttribute("open")) return false;
-      if (!leg || !MODES.has(leg.mode) || typeof leg.onContinue !== "function" || ["legId", "service", "from", "to"].some((key) => typeof leg[key] !== "string" || !leg[key].trim())) throw new Error("This vehicle leg is missing the details needed for checkout.");
-      state.leg = { ...leg, legId: leg.legId.trim(), service: leg.service.trim(), from: leg.from.trim(), to: leg.to.trim() };
+      if (!leg || !MODES.has(leg.mode) || typeof leg.onContinue !== "function" || ["legId", "service", "from", "to"].some((key) => typeof leg[key] !== "string" || !leg[key].trim()) || (leg.journeyId !== undefined && (typeof leg.journeyId !== "string" || !leg.journeyId.trim()))) throw new Error("This vehicle leg is missing the details needed for checkout.");
+      state.leg = { ...leg, legId: leg.legId.trim(), ...(leg.journeyId === undefined ? {} : { journeyId: leg.journeyId.trim() }), service: leg.service.trim(), from: leg.from.trim(), to: leg.to.trim() };
+      if (leg.sessionLost === true || (state.leg.journeyId && lostJourneySessions.has(state.leg.journeyId))) blockedLegIds.add(state.leg.legId);
       state.receipt = null;
       state.phase = "checking";
       state.lookupReady = false;

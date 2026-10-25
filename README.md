@@ -34,6 +34,8 @@ After a bus, train, or taxi leg, S’mile asks the traveler to confirm that they
 
 Demo receipts are kept separately from booking authorizations, mandates, and the reimbursement ledger. A private browser cookie scopes access for 30 days; download a copy to retain it beyond the demo session. Retrying the same ride request within that session returns its existing receipt. If a session is lost during an uncertain request, another attempt for that ride is blocked rather than creating a new receipt. A traveler may skip the demo after confirming exit, or stop guidance without marking a ride complete. Real transport must still be paid for under the operator’s own rules.
 
+Each confirmed bus, train, or taxi ride keeps its own receipt when a simulated payment is recorded. After the last step, **Finish trip** creates a final, downloadable demo receipt containing those ride records and their recorded payment total. The server calculates this amount from the traveler’s stored receipts; it does not take another payment or estimate missing fares. Skipped payments are labeled **No payment recorded**, and an empty payment total does not mean the real journey was free. A finalized journey is kept unchanged on retry. **End guidance** only cancels navigation and does not claim that the trip was completed.
+
 ## Architecture
 
 | Area | Responsibility |

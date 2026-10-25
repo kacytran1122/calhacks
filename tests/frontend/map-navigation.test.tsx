@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, vi } from "vitest";
-import { assignRideLegIds, prepareSegment, projectOnPath, rideNearArrival, ridePaymentMode, taxiJourneySegment, userMapInteraction } from "../../frontend/public/map-assets/route-utils.js";
+import { assignRideLegIds, prepareSegment, projectOnPath, rideCompletionDescriptor, rideNearArrival, ridePaymentMode, taxiJourneySegment, userMapInteraction } from "../../frontend/public/map-assets/route-utils.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runtime = readFileSync(path.resolve(here, "../../frontend/public/map-assets/map.js"), "utf8");
@@ -11,17 +11,19 @@ const end = { name: "Venue Station", lat: 41.89, lng: -87.62 };
 const vehicle = (mode = "bus") => prepareSegment({ mode, label: "Regional service", from: start, to: end, points: [start, end], duration: 600, rideLegId: "ride-stable", live: false });
 
 function navigation(segment = vehicle(), otherSegments = [prepareSegment({ mode: "walk", points: [end, { ...end, lat: end.lat + .001 }], from: end, to: end, duration: 60 })]) {
-  const state = { routes: [{ segments: [segment, ...otherSegments] }], selectedRoute: 0, activeLeg: 0, legProgress: 0, legProjection: null, offRouteUpdates: 0, rerouting: false, rerouteAfter: 0, startLive: false, navigating: true, follow: true, paymentSession: "session", completedRideLegs: new Set<string>(), ridePromptCooldowns: new Map<string, number>(), user: null };
+  const state = { routes: [{ segments: [segment, ...otherSegments] }], selectedRoute: 0, activeLeg: 0, legProgress: 0, legProjection: null, offRouteUpdates: 0, rerouting: false, rerouteAfter: 0, startLive: false, navigating: true, follow: true, paymentSession: "session", rideLegIds: new Map(), completedRideLegs: new Set<string>(), completedRideDescriptors: new Map(), ridePromptCooldowns: new Map<string, number>(), journeyFrom: start.name, journeyTo: end.name, hasPaymentAttempt: false, receiptSessionLost: false, journeyFinalized: false, user: null };
   const ui = Object.fromEntries(["setup", "navigation", "recenter", "stepDistance", "stepInstruction", "maneuver", "remaining", "arrival", "currentStreet", "progressPercent", "overallProgress", "activeLegSummary", "previousLeg", "nextLeg"].map((name) => [name, document.createElement("div")]));
   let opened = false;
   const checkout = { open: vi.fn((context) => { opened = true; return context; }), isOpen: () => opened };
+  let finalOpened = false;
+  const finalReceipt = { open: vi.fn((context) => { finalOpened = true; return context; }), isOpen: () => finalOpened };
   const setActiveLeg = vi.fn((index) => { state.activeLeg = index; state.legProgress = 0; });
   const loadRoutes = vi.fn(async () => {});
   const map = { setView: vi.fn(), panTo: vi.fn() };
   const snippet = runtime.slice(runtime.indexOf("function checkoutCompletedRide("), runtime.indexOf("function resetRoutes("));
-  const dependencies = { state, ui, rideCheckout: checkout, ridePaymentMode, rideNearArrival, projectOnPath, setActiveLeg, focusLeg: vi.fn(), loadRoutes, map, collapsePlanner: vi.fn(), showToast: vi.fn(), metersText: String, arrivalText: String, instructionFor: () => ({ icon: "B", text: "Ride to your stop" }), routeProgress: () => 0, renderLegList: vi.fn(), renderProgressOnMap: vi.fn(), clearProgressLayers: vi.fn(), renderRoutes: vi.fn() };
+  const dependencies = { state, ui, rideCheckout: checkout, tripReceipt: finalReceipt, assignRideLegIds, rideCompletionDescriptor, ridePaymentMode, rideNearArrival, projectOnPath, setActiveLeg, focusLeg: vi.fn(), loadRoutes, map, collapsePlanner: vi.fn(), showToast: vi.fn(), metersText: String, arrivalText: String, instructionFor: () => ({ icon: "B", text: "Ride to your stop" }), routeProgress: () => 0, renderLegList: vi.fn(), renderProgressOnMap: vi.fn(), clearProgressLayers: vi.fn(), renderRoutes: vi.fn() };
   const functions = new Function(...Object.keys(dependencies), `${snippet}\nreturn {completeNavigationStep,updateNavigation,startNavigation,endNavigation};`)(...Object.values(dependencies));
-  return { state, checkout, setActiveLeg, loadRoutes, map, ...functions, acknowledge: () => { opened = false; checkout.open.mock.calls.at(-1)![0].onContinue(); }, dismiss: () => { opened = false; checkout.open.mock.calls.at(-1)![0].onDismiss(); } };
+  return { state, checkout, finalReceipt, setActiveLeg, loadRoutes, map, ...functions, acknowledge: (outcome = {}) => { opened = false; checkout.open.mock.calls.at(-1)![0].onContinue(outcome); }, dismiss: (outcome = {}) => { opened = false; checkout.open.mock.calls.at(-1)![0].onDismiss(outcome); }, acknowledgeFinal: () => { finalOpened = false; finalReceipt.open.mock.calls.at(-1)![0].onContinue(); }, dismissFinal: (outcome = {}) => { finalOpened = false; finalReceipt.open.mock.calls.at(-1)![0].onDismiss(outcome); } };
 }
 
 test("only bus, rail, train, and taxi vehicle legs can request checkout", () => {
@@ -33,7 +35,7 @@ test("manual Next pauses a preview vehicle leg until its explicit checkout ackno
   const app = navigation();
   app.completeNavigationStep();
   expect(app.checkout.open).toHaveBeenCalledTimes(1);
-  expect(app.checkout.open.mock.calls[0][0]).toMatchObject({ legId: "ride-stable", mode: "bus", preview: true, from: start.name, to: end.name });
+  expect(app.checkout.open.mock.calls[0][0]).toMatchObject({ journeyId: "session", legId: "ride-stable", mode: "bus", preview: true, from: start.name, to: end.name });
   expect(app.state.activeLeg).toBe(0);
   app.completeNavigationStep();
   expect(app.checkout.open).toHaveBeenCalledTimes(1);
@@ -101,10 +103,15 @@ test("Finish requires vehicle confirmation, while walking finishes without check
   expect(ride.state.navigating).toBe(true);
   expect(ride.checkout.open.mock.calls[0][0].mode).toBe("train");
   ride.acknowledge();
+  expect(ride.state.navigating).toBe(true);
+  expect(ride.finalReceipt.open).toHaveBeenCalledTimes(1);
+  ride.acknowledgeFinal();
   expect(ride.state.navigating).toBe(false);
   const walk = navigation(vehicle("walk"), []);
   walk.completeNavigationStep();
   expect(walk.checkout.open).not.toHaveBeenCalled();
+  expect(walk.finalReceipt.open).toHaveBeenCalledTimes(1);
+  walk.acknowledgeFinal();
   expect(walk.state.navigating).toBe(false);
 });
 
@@ -119,8 +126,140 @@ test("End guidance cancels navigation without claiming vehicle completion or ope
   expect(app.state.activeLeg).toBe(0);
   expect(app.state.completedRideLegs.size).toBe(0);
   expect(app.checkout.open).not.toHaveBeenCalled();
+  expect(app.finalReceipt.open).not.toHaveBeenCalled();
   const page = readFileSync(path.resolve(here, "../../frontend/app/map/MapClient.tsx"), "utf8");
   expect(page).toMatch(/id="end-navigation"[^>]*>End guidance</);
+});
+
+test("Finish trip summarizes confirmed rides in journey order, including an unpaid train but no unused alternative", () => {
+  const train = { ...vehicle("rail"), rideLegId: "train-confirmed", label: "Blue Line" };
+  const walk = vehicle("walk");
+  const app = navigation(vehicle(), [train, walk]);
+  app.state.routes.push({ segments: [{ ...vehicle("taxi"), rideLegId: "unused-alternative" }] });
+  app.completeNavigationStep();
+  app.acknowledge({ receipt: { id: "ride_sim_paid-bus" }, attempted: true });
+  expect(app.state.activeLeg).toBe(1);
+  expect(app.finalReceipt.open).not.toHaveBeenCalled();
+  app.completeNavigationStep();
+  expect(app.checkout.open.mock.calls[1][0]).toMatchObject({ journeyId: "session", legId: "train-confirmed", mode: "train" });
+  app.acknowledge({ skipped: true, attempted: false });
+  expect(app.state.activeLeg).toBe(2);
+  expect(app.finalReceipt.open).not.toHaveBeenCalled();
+  app.completeNavigationStep();
+  const final = app.finalReceipt.open.mock.calls[0][0];
+  expect(final).toMatchObject({ journeyId: "session", from: start.name, to: end.name, hasPaymentAttempt: true });
+  expect(final.legs).toEqual([
+    { legId: "ride-stable", mode: "bus", service: "Regional service", from: start.name, to: end.name, expectedReceiptId: "ride_sim_paid-bus" },
+    { legId: "train-confirmed", mode: "train", service: "Blue Line", from: start.name, to: end.name },
+  ]);
+  expect(app.state.navigating).toBe(true);
+  app.acknowledgeFinal();
+  expect(app.state.navigating).toBe(false);
+});
+
+test("a walking-only trip reaches a final summary with no vehicle charges", () => {
+  const app = navigation(vehicle("walk"), []);
+  app.completeNavigationStep();
+  expect(app.checkout.open).not.toHaveBeenCalled();
+  expect(app.finalReceipt.open.mock.calls[0][0]).toMatchObject({ journeyId: "session", legs: [], hasPaymentAttempt: false });
+  app.state.startLive = true;
+  app.updateNavigation({ ...end, accuracy: 10 });
+  expect(app.finalReceipt.open).toHaveBeenCalledTimes(1);
+  expect(app.state.navigating).toBe(true);
+  app.acknowledgeFinal();
+  expect(app.state.navigating).toBe(false);
+});
+
+test("returning from a final-summary error keeps navigation and permits an explicit Finish trip retry", () => {
+  const app = navigation(vehicle("walk"), []);
+  app.completeNavigationStep();
+  const first = app.finalReceipt.open.mock.calls[0][0];
+  app.dismissFinal();
+  expect(app.state.navigating).toBe(true);
+  expect(app.state.completedRideLegs.size).toBe(0);
+  first.onContinue();
+  expect(app.state.navigating).toBe(true);
+  app.completeNavigationStep();
+  expect(app.finalReceipt.open).toHaveBeenCalledTimes(2);
+  app.acknowledgeFinal();
+  expect(app.state.navigating).toBe(false);
+});
+
+test("an ambiguous final-summary dismissal preserves lost ownership and attempt flags for retry", () => {
+  const app = navigation(vehicle("walk"), []);
+  app.completeNavigationStep();
+  app.dismissFinal({ attempted: true, sessionLost: true });
+  expect(app.state.navigating).toBe(true);
+  expect(app.state.paymentSession).toBe("session");
+  expect(app.state.hasPaymentAttempt).toBe(true);
+  expect(app.state.receiptSessionLost).toBe(true);
+  app.completeNavigationStep();
+  expect(app.finalReceipt.open.mock.calls[1][0]).toMatchObject({ journeyId: "session", hasPaymentAttempt: true, sessionLost: true });
+});
+
+test("an uncertain payment dismissal stays remembered without falsely confirming the vehicle leg", () => {
+  const app = navigation(vehicle(), []);
+  app.completeNavigationStep();
+  app.dismiss({ attempted: true, sessionLost: true });
+  expect(app.state.hasPaymentAttempt).toBe(true);
+  expect(app.state.receiptSessionLost).toBe(true);
+  expect(app.state.completedRideDescriptors.size).toBe(0);
+  expect(app.state.completedRideLegs.size).toBe(0);
+  expect(app.finalReceipt.open).not.toHaveBeenCalled();
+  app.completeNavigationStep();
+  app.acknowledge({ skipped: true, attempted: false });
+  expect(app.finalReceipt.open.mock.calls[0][0]).toMatchObject({ hasPaymentAttempt: true, legs: [{ legId: "ride-stable" }] });
+  expect(app.finalReceipt.open.mock.calls[0][0].sessionLost).toBe(true);
+  expect(app.finalReceipt.open.mock.calls[0][0].legs[0].expectedReceiptId).toBeUndefined();
+});
+
+test("a lost receipt session remains sticky when the journey reaches its next train leg", () => {
+  const train = { ...vehicle("rail"), rideLegId: "next-train" };
+  const app = navigation(vehicle(), [train]);
+  app.completeNavigationStep();
+  expect(app.checkout.open.mock.calls[0][0]).toMatchObject({ hasPaymentAttempt: false, sessionLost: false });
+  app.dismiss({ attempted: true, sessionLost: true });
+  app.completeNavigationStep();
+  expect(app.checkout.open.mock.calls[1][0]).toMatchObject({ hasPaymentAttempt: true, sessionLost: true });
+  app.acknowledge({ skipped: true, attempted: false, sessionLost: false });
+  app.completeNavigationStep();
+  expect(app.checkout.open.mock.calls[2][0]).toMatchObject({ journeyId: "session", legId: "next-train", hasPaymentAttempt: true, sessionLost: true });
+  app.acknowledge({ skipped: true, attempted: false, sessionLost: false });
+  expect(app.finalReceipt.open.mock.calls[0][0]).toMatchObject({ hasPaymentAttempt: true, sessionLost: true });
+});
+
+test("End guidance and resuming the same journey retain confirmed receipts and original endpoints", () => {
+  const app = navigation();
+  app.completeNavigationStep();
+  app.acknowledge({ receipt: { id: "ride_sim_preserved" }, attempted: true });
+  app.endNavigation();
+  expect(app.finalReceipt.open).not.toHaveBeenCalled();
+  expect(app.state.completedRideDescriptors.size).toBe(1);
+  app.startNavigation();
+  app.completeNavigationStep();
+  expect(app.checkout.open).toHaveBeenCalledTimes(1);
+  app.completeNavigationStep();
+  expect(app.finalReceipt.open.mock.calls[0][0]).toMatchObject({ journeyId: "session", from: start.name, to: end.name, legs: [{ expectedReceiptId: "ride_sim_preserved" }] });
+});
+
+test("starting again after a verified final receipt creates a fresh journey and payable leg IDs", () => {
+  const app = navigation(vehicle(), []);
+  app.completeNavigationStep();
+  app.acknowledge({ receipt: { id: "ride_sim_first-journey" }, attempted: true });
+  app.acknowledgeFinal();
+  expect(app.state.journeyFinalized).toBe(true);
+  app.startNavigation();
+  expect(app.state.paymentSession).not.toBe("session");
+  expect(app.state.journeyFinalized).toBe(false);
+  expect(app.state.completedRideDescriptors.size).toBe(0);
+  expect(app.state.completedRideLegs.size).toBe(0);
+  expect(app.state.hasPaymentAttempt).toBe(false);
+  expect(app.state.receiptSessionLost).toBe(false);
+  expect(app.state.routes[0].segments[0].rideLegId).not.toBe("ride-stable");
+  app.completeNavigationStep();
+  expect(app.checkout.open).toHaveBeenCalledTimes(2);
+  expect(app.checkout.open.mock.calls[1][0].journeyId).toBe(app.state.paymentSession);
+  expect(app.checkout.open.mock.calls[1][0].legId).toBe(app.state.routes[0].segments[0].rideLegId);
 });
 
 test("ride IDs survive going back and alternative taxi paths retain one ID", () => {
@@ -154,6 +293,8 @@ test("a twenty-turn taxi journey with intermediate waypoints creates one payable
   app.completeNavigationStep(true);
   expect(app.checkout.open).toHaveBeenCalledTimes(1);
   app.acknowledge();
+  expect(app.finalReceipt.open).toHaveBeenCalledTimes(1);
+  app.acknowledgeFinal();
   expect(app.state.navigating).toBe(false);
   app.completeNavigationStep(true);
   expect(app.checkout.open).toHaveBeenCalledTimes(1);
@@ -199,15 +340,16 @@ test("off-route walking requests a continuous replan instead of leaving navigati
 function routeLoader(fail = false) {
   const original = { title: "Original walk", segments: [vehicle("walk"), vehicle("walk")], duration: 600 };
   const updated = { title: "Updated walk", segments: [vehicle("walk")], duration: 500 };
-  const state = { mode: "walk", routes: [original], selectedRoute: 0, activeLeg: 1, legProgress: .5, legProjection: { progress: .5 }, navigating: true, rideLegIds: new Map([["prior", "ride-stable"]]), completedRideLegs: new Set(["ride-stable"]), ridePromptCooldowns: new Map(), paymentSession: "same-session", waypoints: [], routeAbort: null };
+  const state = { mode: "walk", routes: [original], selectedRoute: 0, activeLeg: 1, legProgress: .5, legProjection: { progress: .5 }, navigating: true, rideLegIds: new Map([["prior", "ride-stable"]]), completedRideLegs: new Set(["ride-stable"]), completedRideDescriptors: new Map([["ride-stable", { legId: "ride-stable", mode: "bus", service: "Previous bus", from: start.name, to: end.name }]]), ridePromptCooldowns: new Map(), paymentSession: "same-session", journeyFrom: "Original starting point", journeyTo: end.name, hasPaymentAttempt: true, receiptSessionLost: true, journeyFinalized: false, waypoints: [], routeAbort: null };
   const ui = Object.fromEntries(["setup", "navigation", "status", "options", "legList", "start", "destinationName", "destinationAddress", "destinationLabel", "routeKicker", "routeSource"].map((name) => [name, document.createElement("div")]));
   ui.departure = document.createElement("input");
   const startNavigation = vi.fn();
   const fetchRoadRoutes = vi.fn(async () => { if (fail) throw new Error("Unavailable"); return [updated]; });
-  const dependencies = { state, ui, rideCheckout: { isOpen: () => false }, tripPoints: () => [start, end], clearRouteLayers: vi.fn(), fetchRoadRoutes, renderRoutes: vi.fn(), collapsePlanner: vi.fn(), startNavigation, showToast: vi.fn(), sequentialTransit: vi.fn(), flightRoute: vi.fn(), prepareItinerary: vi.fn() };
+  let requestedPoints = [start, end];
+  const dependencies = { state, ui, rideCheckout: { isOpen: () => false }, tripReceipt: { isOpen: () => false }, tripPoints: () => requestedPoints, clearRouteLayers: vi.fn(), fetchRoadRoutes, renderRoutes: vi.fn(), collapsePlanner: vi.fn(), startNavigation, showToast: vi.fn(), sequentialTransit: vi.fn(), flightRoute: vi.fn(), prepareItinerary: vi.fn() };
   const snippet = runtime.slice(runtime.indexOf("async function loadRoutes("), runtime.indexOf("function lineStyle("));
   const loadRoutes = new Function(...Object.keys(dependencies), `${snippet}\nreturn loadRoutes;`)(...Object.values(dependencies));
-  return { state, original, updated, startNavigation, loadRoutes };
+  return { state, original, updated, startNavigation, loadRoutes, setDestination: (name: string) => { requestedPoints = [start, { ...end, name }]; } };
 }
 
 test("successful automatic rerouting resumes navigation and preserves completed ride IDs", async () => {
@@ -218,14 +360,59 @@ test("successful automatic rerouting resumes navigation and preserves completed 
   expect(app.state.routes).toEqual([app.updated]);
   expect(app.state.paymentSession).toBe("same-session");
   expect(app.state.completedRideLegs.has("ride-stable")).toBe(true);
+  expect(app.state.completedRideDescriptors.get("ride-stable")?.service).toBe("Previous bus");
+  expect(app.state.journeyFrom).toBe("Original starting point");
+  expect(app.state.journeyTo).toBe(end.name);
+  expect(app.state.hasPaymentAttempt).toBe(true);
 });
 
 test("a failed automatic replan retains the previous navigation route instead of silently stopping", async () => {
   const app = routeLoader(true);
+  app.setDestination("Unreachable new venue");
   await app.loadRoutes({ resumeNavigation: true });
   expect(app.state.navigating).toBe(true);
   expect(app.state.routes).toEqual([app.original]);
   expect(app.state.activeLeg).toBe(1);
   expect(app.state.legProgress).toBe(.5);
   expect(app.state.paymentSession).toBe("same-session");
+  expect(app.state.journeyTo).toBe(end.name);
+});
+
+test("a manual mode or destination update during guidance preserves receipts and the original starting point", async () => {
+  const app = routeLoader();
+  app.state.mode = "taxi";
+  app.setDestination("New requested venue");
+  await app.loadRoutes(new Event("click"));
+  expect(app.state.navigating).toBe(true);
+  expect(app.state.paymentSession).toBe("same-session");
+  expect(app.state.completedRideDescriptors.get("ride-stable")?.service).toBe("Previous bus");
+  expect(app.state.completedRideLegs.has("ride-stable")).toBe(true);
+  expect(app.state.hasPaymentAttempt).toBe(true);
+  expect(app.state.receiptSessionLost).toBe(true);
+  expect(app.state.journeyFrom).toBe("Original starting point");
+  expect(app.state.journeyTo).toBe("New requested venue");
+  expect(app.startNavigation).toHaveBeenCalledTimes(1);
+});
+
+test("an explicit new search starts a separate journey without carrying old payment claims", async () => {
+  const app = routeLoader();
+  app.state.navigating = false;
+  await app.loadRoutes();
+  expect(app.state.paymentSession).not.toBe("same-session");
+  expect(app.state.completedRideDescriptors.size).toBe(0);
+  expect(app.state.completedRideLegs.size).toBe(0);
+  expect(app.state.hasPaymentAttempt).toBe(false);
+  expect(app.state.receiptSessionLost).toBe(false);
+  expect(app.state.journeyFrom).toBe(start.name);
+  expect(app.state.journeyTo).toBe(end.name);
+  expect(app.state.journeyFinalized).toBe(false);
+});
+
+test("only an explicit new-journey action can replace an active journey's receipt state", async () => {
+  const app = routeLoader();
+  await app.loadRoutes({ newJourney: true });
+  expect(app.state.paymentSession).not.toBe("same-session");
+  expect(app.state.completedRideDescriptors.size).toBe(0);
+  expect(app.state.hasPaymentAttempt).toBe(false);
+  expect(app.state.receiptSessionLost).toBe(false);
 });

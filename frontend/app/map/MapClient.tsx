@@ -50,6 +50,35 @@ export function RideCheckoutDialog() {
   );
 }
 
+export function TripReceiptDialog() {
+  return (
+    <dialog id="trip-receipt-dialog" className="ride-checkout trip-receipt" aria-labelledby="trip-receipt-title" aria-describedby="trip-receipt-description" aria-modal="true">
+      <div className="ride-checkout-head">
+        <span className="ride-checkout-kicker">Whole-trip summary · simulation</span>
+        <h2 id="trip-receipt-title" tabIndex={-1}>Your trip, in one receipt.</h2>
+        <p id="trip-receipt-description">A summary of the demo payments recorded for this journey. Creating this summary makes no additional payment.</p>
+      </div>
+      <div className="ride-checkout-body">
+        <div className="ride-checkout-journey"><small>Planned journey</small><span id="trip-receipt-journey" /></div>
+        <div id="trip-receipt-status" className="ride-checkout-status" role="status" aria-live="polite" />
+        <section id="trip-receipt-content" aria-label="Consolidated demo receipt" hidden>
+          <div className="trip-receipt-total"><span>Recorded demo total</span><b id="trip-receipt-total" /></div>
+          <p id="trip-receipt-empty" className="ride-checkout-context" hidden>No simulated payments recorded. This is not the actual cost of your journey.</p>
+          <ul id="trip-receipt-legs" className="trip-receipt-legs" aria-label="Vehicle legs and demo payments" />
+          <p id="trip-receipt-missing" className="ride-checkout-context" />
+          <dl className="trip-receipt-meta"><div><dt>Summary reference</dt><dd id="trip-receipt-reference" /></div><div><dt>Created</dt><dd id="trip-receipt-created" /></div></dl>
+          <p className="ride-checkout-receipt-warning">Simulation only. No funds moved. This summary is not an operator receipt, does not validate a ticket, and is not valid for reimbursement. Completion was confirmed by the traveler, not verified by GPS or an operator.</p>
+          <button id="trip-receipt-download" className="ride-checkout-secondary" type="button">Download trip receipt (.txt)</button>
+          <button id="trip-receipt-done" className="ride-checkout-pay" type="button">Done</button>
+        </section>
+        <button id="trip-receipt-retry" className="ride-checkout-secondary" type="button" hidden>Try generating the summary again</button>
+        <button id="trip-receipt-dismiss" className="ride-checkout-dismiss" type="button">Return to route</button>
+        <p className="ride-checkout-storage">Demo receipts are retained for up to 30 days. Recovery uses this browser’s private cookie; clearing it can prevent access. Download a copy to keep it longer.</p>
+      </div>
+    </dialog>
+  );
+}
+
 export function MapClient() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(true);
@@ -97,7 +126,7 @@ export function MapClient() {
         setPreparing(false);
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
         if (!window.L) await load("/map-assets/leaflet.js");
-        if (!cancelled) await load(`/map-assets/map.js?v=8`, true);
+        if (!cancelled) await load(`/map-assets/map.js?v=9`, true);
       } catch (cause) {
         if (!cancelled) {
           setPreparing(false);
@@ -216,6 +245,7 @@ export function MapClient() {
 
       <div id="toast" className="toast hidden" role="status" />
       <RideCheckoutDialog />
+      <TripReceiptDialog />
     </main>
   );
 }

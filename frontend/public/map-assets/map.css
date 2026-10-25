@@ -498,6 +498,25 @@ a:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; }
 .ride-checkout-receipt dd { margin: 0; color: #5a4166; text-align: right; font-weight: 750; overflow-wrap: anywhere; }
 .ride-checkout-receipt-warning { margin: 15px 0 12px; color: #9a7466; font-size: 10px; line-height: 1.55; }
 .ride-checkout-receipt .ride-checkout-pay { margin-top: 11px; }
+.trip-receipt { width: min(500px, calc(100vw - 28px)); }
+.trip-receipt #trip-receipt-content { margin: 0; padding: 0; min-height: 0; }
+.trip-receipt-total { display: grid; gap: 8px; margin: 22px 0 16px; text-align: center; }
+.trip-receipt-total span { color: #8d758f; font-size: 10px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.trip-receipt-total b { color: #2b1b3d; font: 850 43px/1 var(--font-heading); letter-spacing: -.05em; }
+.trip-receipt-legs { display: grid; gap: 10px; margin: 18px 0; padding: 0; list-style: none; }
+.trip-receipt-leg { min-width: 0; padding: 13px 14px; border: 1px solid #e5d8e7; border-radius: 14px; background: #fff; overflow-wrap: anywhere; }
+.trip-receipt-leg b, .trip-receipt-leg small, .trip-receipt-leg span, .trip-receipt-leg code { display: block; }
+.trip-receipt-leg b { color: #493353; font-size: 12px; line-height: 1.4; }
+.trip-receipt-leg small { margin-top: 5px; color: #938094; font-size: 10px; line-height: 1.5; }
+.trip-receipt-leg span { margin-top: 10px; color: #397b58; font-size: 11px; line-height: 1.5; font-weight: 850; }
+.trip-receipt-leg code { margin-top: 5px; color: #a18da2; font-family: inherit; font-size: 9px; line-height: 1.5; }
+.trip-receipt-leg.unrecorded { background: #faf6f0; border-style: dashed; }
+.trip-receipt-leg.unrecorded span { color: #9d7d62; }
+.trip-receipt-meta { margin: 17px 0; padding-top: 8px; border-top: 1px solid #eadfd4; }
+.trip-receipt-meta>div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; margin-top: 7px; font-size: 10px; line-height: 1.5; }
+.trip-receipt-meta dt { color: #9b869d; }
+.trip-receipt-meta dd { margin: 0; text-align: right; color: #695171; overflow-wrap: anywhere; }
+.trip-receipt #trip-receipt-done { margin-top: 12px; }
 @media (max-width: 480px) {
   .mode-tabs { gap: 5px; }
   .mode-tab { font-size: 11px; }

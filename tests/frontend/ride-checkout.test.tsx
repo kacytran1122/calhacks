@@ -160,7 +160,7 @@ test("locks a ride after POST session loss without creating a new owner, includi
   const user = userEvent.setup();
   await completeDemoForm(user);
   await user.click(screen.getByRole("button", { name: "Pay with Visa (simulation)" }));
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("result cannot be confirmed"));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("amounts cannot be confirmed"));
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(screen.getByRole("button", { name: "Pay with Visa (simulation)" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Check saved receipts again" })).not.toBeInTheDocument();
@@ -168,7 +168,7 @@ test("locks a ride after POST session loss without creating a new owner, includi
   expect(fetcher).toHaveBeenCalledTimes(2);
   await user.click(screen.getByRole("button", { name: "Still on board, return to route" }));
   controller.open({ ...leg, onContinue, onDismiss });
-  expect(screen.getByRole("status")).toHaveTextContent("result cannot be confirmed");
+  expect(screen.getByRole("status")).toHaveTextContent("amounts cannot be confirmed");
   expect(screen.getByRole("textbox", { name: "Demo amount (USD)" })).toHaveValue("2.50");
   expect(screen.getByRole("button", { name: "Pay with Visa (simulation)" })).toBeDisabled();
   expect(fetcher).toHaveBeenCalledTimes(2);
@@ -191,7 +191,7 @@ test("locks a ride when recovery after a lost POST response finds no receipt ses
   const user = userEvent.setup();
   await completeDemoForm(user);
   await user.click(screen.getByRole("button", { name: "Pay with Visa (simulation)" }));
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("result cannot be confirmed"));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("amounts cannot be confirmed"));
   expect(fetcher).toHaveBeenCalledTimes(3);
   expect(fetcher.mock.calls[2][0]).toBe("/api/map/ride-payments?recover=1");
   expect(screen.getByRole("button", { name: "Pay with Visa (simulation)" })).toBeDisabled();
@@ -264,4 +264,47 @@ test("allows an explicit unpaid skip only after confirming exit and safely rende
   expect(controller.isOpen()).toBe(false);
   expect(onContinue).toHaveBeenCalledOnce();
   expect(fetcher.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(0);
+});
+
+test("keeps journey association on a per-ride receipt and reports its saved reference to navigation", async () => {
+  const journeyId = "shared_journey";
+  const saved = { ...receipt, journeyId };
+  const fetcher = vi.fn((_url: unknown, init?: RequestInit) => init?.method === "POST" ? response({ receipt: saved, replayed: false }) : response({ receipts: [] }));
+  const { onContinue } = await openCheckout(fetcher, { journeyId });
+  const user = userEvent.setup();
+  await completeDemoForm(user);
+  await user.click(screen.getByRole("button", { name: "Pay with Visa (simulation)" }));
+  await waitFor(() => expect(screen.getByText("Your demo receipt")).toBeVisible());
+  expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body)).journeyId).toBe(journeyId);
+  await user.click(screen.getByRole("button", { name: "Continue trip" }));
+  expect(onContinue).toHaveBeenCalledWith({ receipt: expect.objectContaining({ id: receipt.id, journeyId }), attempted: true, sessionLost: false });
+});
+
+test("never starts a new receipt owner for a second vehicle after the journey session was lost", async () => {
+  let posted = false;
+  const fetcher = vi.fn((_url: unknown, init?: RequestInit) => {
+    if (init?.method === "POST") { posted = true; return Promise.reject(new Error("Bus receipt response lost.")); }
+    return posted ? sessionExpired() : response({ receipts: [] });
+  });
+  const journeyId = "journey_lost_session";
+  const { controller, onContinue, onDismiss } = await openCheckout(fetcher, { journeyId });
+  const user = userEvent.setup();
+  await completeDemoForm(user);
+  await user.click(screen.getByRole("button", { name: "Pay with Visa (simulation)" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("amounts cannot be confirmed"));
+  await user.click(screen.getByRole("button", { name: "Continue without another payment attempt" }));
+  expect(onContinue).toHaveBeenCalledWith({ receipt: null, skipped: true, attempted: true, sessionLost: true });
+  const before = fetcher.mock.calls.length;
+  controller.open({ ...leg, journeyId, legId: "journey_lost_session:train2", mode: "train", service: "Metro B Line", hasPaymentAttempt: true, sessionLost: true, onContinue, onDismiss });
+  expect(screen.getByRole("status")).toHaveTextContent("amounts cannot be confirmed");
+  expect(fetcher).toHaveBeenCalledTimes(before);
+  expect(screen.getByRole("button", { name: "Pay with Visa (simulation)" })).toBeDisabled();
+});
+
+test("uses recovery for a new vehicle when this journey already had a payment attempt", async () => {
+  const fetcher = vi.fn(() => sessionExpired());
+  await openCheckout(fetcher, { journeyId: "journey_prior_attempt", hasPaymentAttempt: true });
+  expect(fetcher.mock.calls[0][0]).toBe("/api/map/ride-payments?recover=1");
+  expect(screen.getByRole("status")).toHaveTextContent("amounts cannot be confirmed");
+  expect(screen.queryByRole("button", { name: "Check saved receipts again" })).not.toBeInTheDocument();
 });

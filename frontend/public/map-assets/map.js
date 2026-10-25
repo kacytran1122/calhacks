@@ -1,5 +1,6 @@
-import { assignRideLegIds, decodePolyline, distanceMeters, greatCirclePoints, itineraryDurationSeconds, onwardTransitTime, partialPath, prepareSegment, projectOnPath, rideNearArrival, ridePaymentMode, taxiJourneySegment, transitRoutePattern, usableTransitItineraries, userMapInteraction } from "./route-utils.js?v=5";
+import { assignRideLegIds, decodePolyline, distanceMeters, greatCirclePoints, itineraryDurationSeconds, onwardTransitTime, partialPath, prepareSegment, projectOnPath, rideCompletionDescriptor, rideNearArrival, ridePaymentMode, taxiJourneySegment, transitRoutePattern, usableTransitItineraries, userMapInteraction } from "./route-utils.js?v=6";
 import { mountRideCheckout } from "./ride-checkout.js?v=1";
+import { mountTripReceipt } from "./trip-receipt.js?v=1";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -52,8 +53,14 @@ const state = {
   rerouteAfter: 0,
   rideLegIds: new Map(),
   completedRideLegs: new Set(),
+  completedRideDescriptors: new Map(),
   ridePromptCooldowns: new Map(),
   paymentSession: crypto.randomUUID(),
+  journeyFrom: null,
+  journeyTo: null,
+  hasPaymentAttempt: false,
+  receiptSessionLost: false,
+  journeyFinalized: false,
   follow: true,
   followHeading: false,
   lastHeading: null,
@@ -61,6 +68,7 @@ const state = {
   routeAbort: null,
 };
 const rideCheckout = mountRideCheckout();
+const tripReceipt = mountTripReceipt();
 
 const map = L.map("map", { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([37.7749, -122.4194], 11);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -661,14 +669,20 @@ async function sequentialTransit(points, time) {
 
 async function loadRoutes(options = {}) {
   const points = tripPoints();
-  if (points.length < 2 || rideCheckout.isOpen()) return;
-  const resumeNavigation = options.resumeNavigation === true && state.navigating;
+  if (points.length < 2 || rideCheckout.isOpen() || tripReceipt.isOpen()) return;
+  const resumeNavigation = state.navigating && options.newJourney !== true;
   const previous = resumeNavigation ? { routes: state.routes, selectedRoute: state.selectedRoute, activeLeg: state.activeLeg, legProgress: state.legProgress, legProjection: state.legProjection } : null;
   if (!resumeNavigation) {
     state.rideLegIds.clear();
     state.completedRideLegs.clear();
+    state.completedRideDescriptors.clear();
     state.ridePromptCooldowns.clear();
     state.paymentSession = crypto.randomUUID();
+    state.journeyFrom = points[0].name;
+    state.journeyTo = points.at(-1).name;
+    state.hasPaymentAttempt = false;
+    state.receiptSessionLost = false;
+    state.journeyFinalized = false;
   }
   state.routeAbort?.abort();
   state.routeAbort = new AbortController();
@@ -696,6 +710,7 @@ async function loadRoutes(options = {}) {
     } else state.routes = await fetchRoadRoutes(points, state.mode, true);
     if (!state.routes.length) throw new Error("No route was returned for these locations and departure time.");
     state.routes.sort((a, b) => a.duration - b.duration);
+    if (resumeNavigation) state.journeyTo = points.at(-1).name;
     renderRoutes();
     collapsePlanner(true);
     if (resumeNavigation) startNavigation();
@@ -709,6 +724,7 @@ async function loadRoutes(options = {}) {
           title: index === 0 ? "OpenStreetMap fallback" : `Walking fallback ${index + 1}`,
           fallback: true,
         }));
+        if (resumeNavigation) state.journeyTo = points.at(-1).name;
         renderRoutes();
         collapsePlanner(true);
         if (resumeNavigation) startNavigation();
@@ -859,27 +875,32 @@ function setActiveLeg(index, progress = 0) {
 }
 
 function checkoutCompletedRide(segment, onContinue) {
-  const mode = ridePaymentMode(segment);
-  if (!mode || !segment.rideLegId || state.completedRideLegs.has(segment.rideLegId)) return false;
-  if (rideCheckout.isOpen()) return true;
+  const descriptor = rideCompletionDescriptor(segment);
+  if (!descriptor || state.completedRideLegs.has(segment.rideLegId)) return false;
+  if (rideCheckout.isOpen() || tripReceipt.isOpen()) return true;
   const session = state.paymentSession;
   let resolved = false;
   rideCheckout.open({
-    legId: segment.rideLegId,
-    mode,
-    service: segment.label || segment.name || mode,
-    from: segment.from?.name || "Your boarding point",
-    to: segment.to?.name || "Your destination",
-    preview: !state.startLive || !state.user || mode === "taxi",
-    onContinue: () => {
+    ...descriptor,
+    journeyId: session,
+    hasPaymentAttempt: state.hasPaymentAttempt,
+    sessionLost: state.receiptSessionLost,
+    preview: !state.startLive || !state.user || descriptor.mode === "taxi",
+    onContinue: (outcome = {}) => {
       if (resolved || state.paymentSession !== session) return;
       resolved = true;
+      state.hasPaymentAttempt ||= Boolean(outcome.attempted || outcome.receipt || outcome.sessionLost);
+      state.receiptSessionLost ||= Boolean(outcome.sessionLost);
       state.completedRideLegs.add(segment.rideLegId);
+      const expectedReceiptId = typeof outcome.receipt?.id === "string" && outcome.receipt.id.length < 200 ? outcome.receipt.id : undefined;
+      state.completedRideDescriptors.set(segment.rideLegId, { ...descriptor, ...(expectedReceiptId ? { expectedReceiptId } : {}) });
       onContinue();
     },
-    onDismiss: () => {
+    onDismiss: (outcome = {}) => {
       if (resolved || state.paymentSession !== session) return;
       resolved = true;
+      state.hasPaymentAttempt ||= Boolean(outcome.attempted || outcome.sessionLost);
+      state.receiptSessionLost ||= Boolean(outcome.sessionLost);
       state.ridePromptCooldowns.set(segment.rideLegId, Date.now() + 60_000);
       updateNavigation(state.user);
     },
@@ -887,16 +908,44 @@ function checkoutCompletedRide(segment, onContinue) {
   return true;
 }
 
+function finishJourney() {
+  if (rideCheckout.isOpen() || tripReceipt.isOpen()) return;
+  const route = state.routes[state.selectedRoute];
+  if (!route) return;
+  const session = state.paymentSession;
+  let resolved = false;
+  tripReceipt.open({
+    journeyId: session,
+    from: state.journeyFrom || route.segments[0]?.from?.name || "Your starting point",
+    to: state.journeyTo || route.segments.at(-1)?.to?.name || "Your destination",
+    legs: [...state.completedRideDescriptors.values()].map((leg) => ({ ...leg })),
+    hasPaymentAttempt: state.hasPaymentAttempt,
+    sessionLost: state.receiptSessionLost,
+    onContinue: () => {
+      if (resolved || state.paymentSession !== session) return;
+      resolved = true;
+      state.journeyFinalized = true;
+      endNavigation();
+    },
+    onDismiss: (outcome = {}) => {
+      if (resolved || state.paymentSession !== session) return;
+      resolved = true;
+      state.hasPaymentAttempt ||= Boolean(outcome.attempted || outcome.sessionLost);
+      state.receiptSessionLost ||= Boolean(outcome.sessionLost);
+    },
+  });
+}
+
 function advanceNavigationStep(finish = false) {
   const route = state.routes[state.selectedRoute];
   if (!route) return;
-  if (finish || state.activeLeg >= route.segments.length - 1) return endNavigation();
+  if (finish || state.activeLeg >= route.segments.length - 1) return finishJourney();
   setActiveLeg(state.activeLeg + 1, 0);
   focusLeg(state.activeLeg);
 }
 
 function completeNavigationStep(finish = false) {
-  if (rideCheckout.isOpen()) return;
+  if (rideCheckout.isOpen() || tripReceipt.isOpen()) return;
   const route = state.routes[state.selectedRoute];
   const segment = route?.segments[state.activeLeg];
   if (!route || !segment) return;
@@ -905,7 +954,7 @@ function completeNavigationStep(finish = false) {
 }
 
 function updateNavigation(position) {
-  if (rideCheckout.isOpen() || state.rerouting) return;
+  if (rideCheckout.isOpen() || tripReceipt.isOpen() || state.rerouting) return;
   const route = state.routes[state.selectedRoute];
   const segment = route?.segments[state.activeLeg];
   if (!route || !segment) return;
@@ -965,14 +1014,28 @@ function updateNavigation(position) {
   ui.overallProgress.style.width = `${Math.round(overall * 100)}%`;
   ui.activeLegSummary.textContent = `Step ${state.activeLeg + 1} of ${route.segments.length} · ${segment.live ? "Live timing" : "Scheduled or estimated timing"} · ${segment.from?.name || "Start"} → ${segment.to?.name || "Next point"}`;
   ui.previousLeg.disabled = state.activeLeg === 0;
-  ui.nextLeg.textContent = state.activeLeg === route.segments.length - 1 ? "Finish route" : "Next step";
+  ui.nextLeg.textContent = state.activeLeg === route.segments.length - 1 ? "Finish trip" : "Next step";
   renderLegList(state.activeLeg);
   renderProgressOnMap(projection);
 }
 
 function startNavigation() {
-  const route = state.routes[state.selectedRoute];
+  let route = state.routes[state.selectedRoute];
   if (!route) return;
+  if (state.journeyFinalized) {
+    state.paymentSession = crypto.randomUUID();
+    state.rideLegIds.clear();
+    state.completedRideLegs.clear();
+    state.completedRideDescriptors.clear();
+    state.ridePromptCooldowns.clear();
+    state.hasPaymentAttempt = false;
+    state.receiptSessionLost = false;
+    state.journeyFinalized = false;
+    state.journeyFrom = route.segments[0]?.from?.name || "Your starting point";
+    state.journeyTo = route.segments.at(-1)?.to?.name || "Your destination";
+    state.routes = state.routes.map((option) => ({ ...option, segments: assignRideLegIds(option.segments, state.rideLegIds) }));
+    route = state.routes[state.selectedRoute];
+  }
   state.navigating = true;
   state.activeLeg = 0;
   state.legProgress = 0;

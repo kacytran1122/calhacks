@@ -42,6 +42,18 @@ export function ridePaymentMode(segment) {
   return ({ bus: "bus", rail: "train", train: "train", taxi: "taxi" })[segment?.mode];
 }
 
+export function rideCompletionDescriptor(segment) {
+  const mode = ridePaymentMode(segment);
+  if (!mode || !segment.rideLegId) return null;
+  return {
+    legId: segment.rideLegId,
+    mode,
+    service: String(segment.label || segment.name || mode).trim(),
+    from: String(segment.from?.name || "Your boarding point").trim(),
+    to: String(segment.to?.name || "Your destination").trim(),
+  };
+}
+
 export function assignRideLegIds(segments, ids, createId = () => crypto.randomUUID()) {
   const occurrences = new Map();
   return segments.map((segment) => {
