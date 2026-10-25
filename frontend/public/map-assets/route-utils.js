@@ -38,6 +38,63 @@ export function prepareSegment(segment) {
   return { ...segment, points, cumulative, geometryDistance, distance: Number.isFinite(segment.distance) && segment.distance > 0 ? segment.distance : geometryDistance };
 }
 
+export function ridePaymentMode(segment) {
+  return ({ bus: "bus", rail: "train", train: "train", taxi: "taxi" })[segment?.mode];
+}
+
+export function assignRideLegIds(segments, ids, createId = () => crypto.randomUUID()) {
+  const occurrences = new Map();
+  return segments.map((segment) => {
+    const mode = ridePaymentMode(segment);
+    if (!mode) return segment;
+    const place = (value) => [value?.stopId || value?.name, value?.lat, value?.lng];
+    const signature = JSON.stringify(mode === "taxi"
+      ? [mode, place(segment.from), place(segment.to), segment.waypointLegs?.map((leg) => [place(leg.from), place(leg.to)])]
+      : [mode, segment.serviceId || segment.label, segment.agency, place(segment.from), place(segment.to), segment.startTime]);
+    const occurrence = occurrences.get(signature) || 0;
+    occurrences.set(signature, occurrence + 1);
+    const key = JSON.stringify([signature, occurrence]);
+    if (!ids.has(key)) ids.set(key, createId());
+    return { ...segment, rideLegId: ids.get(key) };
+  });
+}
+
+export function rideNearArrival(segment, position, progress) {
+  if (!ridePaymentMode(segment) || !position || !Number.isFinite(position.accuracy) || position.accuracy > 100 || progress < .985) return false;
+  const end = segment.points?.at(-1) || segment.to;
+  return Boolean(end && Number.isFinite(end.lat) && Number.isFinite(end.lng)
+    && distanceMeters(position, end) <= Math.max(30, Math.min(80, position.accuracy * 1.5)));
+}
+
+export function taxiJourneySegment(route, points, instructionForStep = (step) => step.name || "Follow the planned road route") {
+  const waypointLegs = (route.legs || []).map((leg, index) => ({
+    from: points[index], to: points[index + 1], duration: leg.duration, distance: leg.distance,
+    turns: (leg.steps || []).map((step) => ({ instruction: instructionForStep(step), duration: step.duration, distance: step.distance, coordinates: step.geometry?.coordinates || [] })),
+  }));
+  const coordinates = route.geometry?.coordinates?.length ? route.geometry.coordinates : waypointLegs.flatMap((leg) => leg.turns.flatMap((turn) => turn.coordinates));
+  const geometry = [];
+  for (const [lng, lat] of coordinates) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const previous = geometry.at(-1);
+    if (!previous || previous.lat !== lat || previous.lng !== lng) geometry.push({ lat, lng });
+  }
+  if (geometry.length < 2) throw new Error("A complete road geometry is required for the taxi route estimate.");
+  return prepareSegment({
+    mode: "taxi", icon: "T", name: "Taxi", label: "Taxi ride estimate", from: points[0], to: points.at(-1), points: geometry,
+    duration: route.duration ?? waypointLegs.reduce((sum, leg) => sum + (leg.duration || 0), 0),
+    distance: route.distance ?? waypointLegs.reduce((sum, leg) => sum + (leg.distance || 0), 0),
+    instruction: `Take your taxi from ${points[0].name} to ${points.at(-1).name}. This is a road-route estimate, not a booked ride or a verified taxi fare. Confirm when you have left the vehicle.`,
+    live: false, waypointLegs,
+  });
+}
+
+export function userMapInteraction(type, event) {
+  if (["dragstart", "boxzoomstart", "dblclick", "wheel"].includes(type)) return true;
+  if (type === "touchstart") return event?.touches?.length > 1;
+  if (type === "keydown") return ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "+", "-", "=", "_"].includes(event?.key);
+  return false;
+}
+
 export function itineraryDurationSeconds(route) {
   const elapsed = (Date.parse(route.endTime || "") - Date.parse(route.startTime || "")) / 1000;
   if (Number.isFinite(elapsed) && elapsed > 0) return elapsed;

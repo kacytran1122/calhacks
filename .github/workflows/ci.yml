@@ -86,6 +86,8 @@ jobs:
         run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/photon-join.test.ts
       - name: Venue photo upload integration
         run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/tour-contributions.test.ts
+      - name: Post-ride simulated payments and receipts
+        run: TSX_TSCONFIG_PATH=frontend/tsconfig.json node --conditions=react-server --import ./backend/node_modules/tsx/dist/loader.mjs --test tests/system/ride-payments.test.ts
       - run: npm run extension:build --prefix frontend
       - run: npm run build --prefix frontend
 

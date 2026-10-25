@@ -28,6 +28,12 @@ Only these product areas live at the repository root. Generated files, credentia
 
 The public traveler entry point is `https://smilefromhereto.work/landing`. Finding nearby events moves to `/finding-events`, while route guidance lives at `/map`. The typed starting point is remembered in tab-scoped session storage; precise coordinates remain only in page memory and are not retained after a full refresh. The root address and older `/find` links redirect to the canonical paths without retaining legacy location parameters in the address bar.
 
+## End-of-ride payment demo
+
+After a bus, train, or taxi leg, S’mile asks the traveler to confirm that they have left the vehicle. GPS proximity can offer this prompt but does not prove that someone has stepped off. The traveler enters a USD amount for the demo and explicitly selects **Pay with Visa (simulation)**. A generated, downloadable receipt is marked simulated, records the traveler-entered amount, and confirms that no funds moved. It is not an operator ticket, a real Visa transaction, or valid reimbursement evidence.
+
+Demo receipts are kept separately from booking authorizations, mandates, and the reimbursement ledger. A private browser cookie scopes access for 30 days; download a copy to retain it beyond the demo session. Retrying the same ride request within that session returns its existing receipt. If a session is lost during an uncertain request, another attempt for that ride is blocked rather than creating a new receipt. A traveler may skip the demo after confirming exit, or stop guidance without marking a ride complete. Real transport must still be paid for under the operator’s own rules.
+
 ## Architecture
 
 | Area | Responsibility |

@@ -1,0 +1,111 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+test("private simulated ride receipts persist with consent, isolation, retry safety, and no card network", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-ride-payments-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+  const route = pathToFileURL(path.join(root, "frontend/app/api/map/ride-payments/route.ts")).href;
+  const core = pathToFileURL(path.join(root, "backend/src/index.ts")).href;
+  const script = `
+    import assert from "node:assert/strict";
+    import { createHash } from "node:crypto";
+    const core = await import(${JSON.stringify(core)});
+    const { GET, POST } = await import(${JSON.stringify(route)});
+    const url = "https://smilefromhereto.work/api/map/ride-payments";
+    let externalFetches = 0;
+    globalThis.fetch = async () => { externalFetches++; throw new Error("No external calls belong in receipt simulation"); };
+    const get = async (cookie, extra = {}, recover = false) => {
+      const response = await GET(new Request(url + (recover ? "?recover=1" : ""), { headers: { ...(cookie ? { cookie } : {}), "sec-fetch-site": "same-origin", ...extra } }));
+      return { response, body: await response.json() };
+    };
+    const send = async (body, cookie, extra = {}) => {
+      const response = await POST(new Request(url, { method: "POST", headers: { origin: "https://smilefromhereto.work", "content-type": "application/json", ...(cookie ? { cookie } : {}), ...extra }, body: JSON.stringify(body) }));
+      return { response, body: await response.json() };
+    };
+    const input = { legId: "map-route:bus:0", mode: "bus", service: "Public express", from: "Origin stop", to: "Venue stop", amountCents: 250, completed: true, consent: true };
+    assert.equal((await send(input)).response.status, 401);
+    assert.equal((await get(undefined, { "sec-fetch-site": "cross-site" })).response.status, 403);
+    const start = await get();
+    assert.equal(start.response.status, 200);
+    assert.deepEqual(start.body, { receipts: [] });
+    const setCookie = start.response.headers.get("set-cookie");
+    assert.match(setCookie, /HttpOnly/i);
+    assert.match(setCookie, /SameSite=strict/i);
+    assert.match(setCookie, /Secure/i);
+    assert.match(setCookie, /Path=\\/api\\/map\\/ride-payments/);
+    const cookie = setCookie.split(";")[0];
+    const token = cookie.split("=")[1];
+    assert.equal(JSON.stringify(start.body).includes(token), false);
+    const financialSnapshot = (s) => JSON.stringify([s.trips, s.evidence, s.mandates, s.journal]);
+    const before = financialSnapshot(core.loadState());
+    const ownersBeforeRecovery = core.loadState().ridePayments.owners.length;
+    const missingRecovery = await get(undefined, {}, true);
+    assert.equal(missingRecovery.response.status, 401);
+    assert.equal(missingRecovery.body.code, "ride_demo_session_required");
+    assert.match(missingRecovery.response.headers.get("cache-control"), /private.*no-store/);
+    assert.match(missingRecovery.response.headers.get("set-cookie"), /Max-Age=0/);
+    assert.equal(core.loadState().ridePayments.owners.length, ownersBeforeRecovery);
+    assert.equal((await send(input, cookie, { origin: "https://evil.example" })).response.status, 403);
+    assert.equal((await send({ ...input, consent: false }, cookie)).response.status, 400);
+    assert.equal((await send({ ...input, completed: false }, cookie)).response.status, 400);
+    assert.equal((await send({ ...input, amountCents: 1.25 }, cookie)).response.status, 400);
+    assert.equal((await send({ ...input, cardNumber: "4111111111111111" }, cookie)).response.status, 400);
+    assert.equal((await send(input, cookie, { "content-length": "8193" })).response.status, 413);
+    assert.equal((await send({ ...input, padding: "x".repeat(9000) }, cookie)).response.status, 413);
+    const first = await send(input, cookie);
+    assert.equal(first.response.status, 201, JSON.stringify(first.body));
+    assert.equal(first.body.replayed, false);
+    assert.equal(first.body.receipt.provenance, "simulated");
+    assert.equal(first.body.receipt.captured, false);
+    assert.equal(first.body.receipt.provider, "visa_simulation");
+    assert.equal(first.body.receipt.amountSource, "traveler_entered_demo");
+    assert.equal(first.body.receipt.amountCents, 250);
+    assert.equal(first.body.receipt.currency, "USD");
+    assert.equal("ownerHash" in first.body.receipt, false);
+    assert.equal(JSON.stringify(first.body).includes(token), false);
+    assert.match(first.response.headers.get("cache-control"), /private.*no-store/);
+    const recovery = await get(cookie, {}, true);
+    assert.equal(recovery.response.status, 200);
+    assert.equal(recovery.body.receipts[0].id, first.body.receipt.id);
+    assert.equal(recovery.response.headers.get("set-cookie"), null);
+    const retries = await Promise.all(Array.from({ length: 5 }, () => send(input, cookie)));
+    assert.ok(retries.every((retry) => retry.response.status === 200 && retry.body.replayed && retry.body.receipt.id === first.body.receipt.id));
+    const changed = await send({ ...input, amountCents: 500 }, cookie);
+    assert.equal(changed.response.status, 409);
+    assert.equal(changed.body.code, "ride_demo_conflict");
+    const secondOwner = await get();
+    const otherCookie = secondOwner.response.headers.get("set-cookie").split(";")[0];
+    assert.deepEqual((await get(otherCookie)).body.receipts, []);
+    const otherReceipt = await send({ ...input, mode: "taxi" }, otherCookie);
+    assert.equal(otherReceipt.response.status, 201);
+    assert.notEqual(otherReceipt.body.receipt.id, first.body.receipt.id);
+    assert.equal((await get(cookie)).body.receipts[0].id, first.body.receipt.id);
+    assert.equal((await get(otherCookie)).body.receipts[0].id, otherReceipt.body.receipt.id);
+    const persisted = core.loadState();
+    assert.equal(persisted.ridePayments.receipts.length, 2);
+    assert.equal(financialSnapshot(persisted), before);
+    assert.equal(JSON.stringify(persisted.ridePayments).includes(token), false);
+    const ownerHash = createHash("sha256").update(token).digest("hex");
+    await core.withState((s) => { s.ridePayments.owners.find((owner) => owner.ownerHash === ownerHash).expiresAt = "2000-01-01T00:00:00Z"; });
+    const expired = await get(cookie);
+    assert.equal(expired.response.status, 401);
+    assert.equal(expired.body.code, "ride_demo_session_expired");
+    assert.match(expired.response.headers.get("set-cookie"), /Max-Age=0/);
+    assert.equal((await send(input, cookie)).response.status, 401);
+    process.env.VERCEL = "1";
+    assert.equal((await get()).response.status, 503);
+    assert.equal((await send(input, otherCookie)).response.status, 503);
+    assert.equal(externalFetches, 0);
+  `;
+  execFileSync(process.execPath, ["--conditions=react-server", "--import", path.join(root, "backend/node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], {
+    cwd: root,
+    env: { ...process.env, NODE_ENV: "production", VERCEL: "", SMILE_DATA_DIR: directory, TSX_TSCONFIG_PATH: path.join(root, "frontend/tsconfig.json") },
+    timeout: 30_000,
+    stdio: "pipe",
+  });
+});

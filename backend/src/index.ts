@@ -20,6 +20,7 @@ export { reviewTravelConstraints, fallbackTravelConstraints, TravelConstraintsSc
 export { discoverEvents, discoverCall, type DiscoverResult, type DiscoverOptions, type EventGroup } from "./agents/discover";
 export { eventStore, type EventListing } from "./eventStore";
 export { chargeTrip } from "../visa/payments";
+export { createRideDemoOwner, createRidePayment, listRidePayments, parseRidePaymentInput, requireRideDemoStorage, RidePaymentError, RIDE_DEMO_COOKIE, RIDE_DEMO_LIMITS, RIDE_DEMO_SESSION_SECONDS, type RideDemoReceipt, type RidePaymentState } from "../visa/ridePayments";
 export { tick, answer, applyDecision, planTrip, cachedTripPlan, bookTrip, buddiesFor, carpoolFor, notify, PlanRequestConflict, type PlanTripArgs, type PlanTripResult, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";

@@ -6,6 +6,50 @@ declare global {
   interface Window { L?: unknown }
 }
 
+export function RideCheckoutDialog() {
+  return (
+    <dialog id="ride-checkout-dialog" className="ride-checkout" aria-labelledby="ride-checkout-title" aria-describedby="ride-checkout-description" aria-modal="true">
+      <div className="ride-checkout-head">
+        <span className="ride-checkout-kicker">Visa simulation</span>
+        <h2 id="ride-checkout-title" tabIndex={-1}>Finished this ride?</h2>
+        <p id="ride-checkout-description">Confirm that you have left the vehicle before creating a demo receipt.</p>
+      </div>
+      <div className="ride-checkout-body">
+        <div className="ride-checkout-journey"><small>Planned ride</small><b id="ride-checkout-service" /><span id="ride-checkout-journey" /></div>
+        <p id="ride-checkout-preview" className="ride-checkout-context" />
+        <p className="ride-checkout-notice">This simulation does not buy or validate a ticket or pay the operator. Follow the operator’s actual payment rules for your journey.</p>
+        <form id="ride-checkout-form" noValidate>
+          <label className="ride-checkout-check"><input id="ride-checkout-completed" type="checkbox" /><span id="ride-checkout-completed-label">I have left this vehicle.</span></label>
+          <label className="ride-checkout-amount" htmlFor="ride-checkout-amount">Demo amount (USD)<span className="ride-checkout-money"><b aria-hidden="true">$</b><input id="ride-checkout-amount" type="text" inputMode="decimal" autoComplete="off" maxLength={12} placeholder="Enter an amount" aria-describedby="ride-checkout-amount-help" /></span></label>
+          <p id="ride-checkout-amount-help" className="ride-checkout-help">Enter a demo amount from $0.01 to $1,000.00 USD. This is not a live fare, and no card details are needed.</p>
+          <label className="ride-checkout-check"><input id="ride-checkout-consent" type="checkbox" /><span>I understand this creates a demo record and moves no funds.</span></label>
+          <button id="ride-checkout-pay" className="ride-checkout-pay" type="submit" disabled>Pay with Visa (simulation)</button>
+        </form>
+        <div id="ride-checkout-status" className="ride-checkout-status" role="status" aria-live="polite" />
+        <button id="ride-checkout-retry" className="ride-checkout-secondary" type="button" hidden>Check saved receipts again</button>
+        <section id="ride-checkout-receipt" className="ride-checkout-receipt" aria-labelledby="ride-checkout-receipt-title" hidden>
+          <span className="ride-checkout-receipt-mark" aria-hidden="true">✓</span>
+          <h3 id="ride-checkout-receipt-title">Your demo receipt</h3>
+          <b id="ride-checkout-receipt-amount" className="ride-checkout-receipt-amount" />
+          <dl>
+            <div><dt>Service</dt><dd id="ride-checkout-receipt-service" /></div>
+            <div><dt>Planned boarding point</dt><dd id="ride-checkout-receipt-from" /></div>
+            <div><dt>Planned destination</dt><dd id="ride-checkout-receipt-to" /></div>
+            <div><dt>Created</dt><dd id="ride-checkout-receipt-date" /></div>
+            <div><dt>Reference</dt><dd id="ride-checkout-receipt-id" /></div>
+          </dl>
+          <p className="ride-checkout-receipt-warning">Simulation only. No funds moved. Exit was confirmed by the traveler, not verified by GPS or an operator. This is not an operator receipt and is not valid for reimbursement.</p>
+          <button id="ride-checkout-download" className="ride-checkout-secondary" type="button">Download demo receipt (.txt)</button>
+          <button id="ride-checkout-continue" className="ride-checkout-pay" type="button">Continue trip</button>
+        </section>
+        <button id="ride-checkout-skip" className="ride-checkout-skip" type="button">Skip without payment and continue</button>
+        <button id="ride-checkout-dismiss" className="ride-checkout-dismiss" type="button">Still on board, return to route</button>
+        <p className="ride-checkout-storage">Demo receipts are retained for up to 30 days. Recovery uses this browser’s private cookie; clearing it can prevent access. Download a copy to keep it longer.</p>
+      </div>
+    </dialog>
+  );
+}
+
 export function MapClient() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(true);
@@ -53,7 +97,7 @@ export function MapClient() {
         setPreparing(false);
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
         if (!window.L) await load("/map-assets/leaflet.js");
-        if (!cancelled) await load(`/map-assets/map.js?v=7`, true);
+        if (!cancelled) await load(`/map-assets/map.js?v=8`, true);
       } catch (cause) {
         if (!cancelled) {
           setPreparing(false);
@@ -139,6 +183,7 @@ export function MapClient() {
         </div>
         <div className="mode-tabs" role="tablist" aria-label="Travel mode">
           <button className="mode-tab" data-mode="drive" role="tab" aria-selected="false" type="button"><span>↗</span>Drive</button>
+          <button className="mode-tab" data-mode="taxi" role="tab" aria-selected="false" type="button"><span>▰</span>Taxi</button>
           <button className="mode-tab" data-mode="walk" role="tab" aria-selected="false" type="button"><span>●</span>Walk</button>
           <button className="mode-tab active" data-mode="transit" role="tab" aria-selected="true" type="button"><span>▣</span>Transit</button>
           <button className="mode-tab" data-mode="flight" role="tab" aria-selected="false" type="button"><span>✈</span>Flight</button>
@@ -154,7 +199,7 @@ export function MapClient() {
         <div className="instruction-card">
           <div id="maneuver-icon" className="maneuver-icon" aria-hidden="true">↑</div>
           <div className="instruction-copy"><span id="step-distance">Starting route</span><b id="step-instruction">Continue to the route</b></div>
-          <button id="end-navigation" className="end-button" type="button">End trip</button>
+          <button id="end-navigation" className="end-button" type="button">End guidance</button>
         </div>
         <div className="progress-card">
           <div className="journey-head">
@@ -170,6 +215,7 @@ export function MapClient() {
       </section>
 
       <div id="toast" className="toast hidden" role="status" />
+      <RideCheckoutDialog />
     </main>
   );
 }

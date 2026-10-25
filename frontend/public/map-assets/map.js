@@ -1,4 +1,5 @@
-import { decodePolyline, distanceMeters, greatCirclePoints, itineraryDurationSeconds, onwardTransitTime, partialPath, prepareSegment, projectOnPath, transitRoutePattern, usableTransitItineraries } from "./route-utils.js?v=4";
+import { assignRideLegIds, decodePolyline, distanceMeters, greatCirclePoints, itineraryDurationSeconds, onwardTransitTime, partialPath, prepareSegment, projectOnPath, rideNearArrival, ridePaymentMode, taxiJourneySegment, transitRoutePattern, usableTransitItineraries, userMapInteraction } from "./route-utils.js?v=5";
+import { mountRideCheckout } from "./ride-checkout.js?v=1";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -48,12 +49,18 @@ const state = {
   legProjection: null,
   offRouteUpdates: 0,
   rerouting: false,
+  rerouteAfter: 0,
+  rideLegIds: new Map(),
+  completedRideLegs: new Set(),
+  ridePromptCooldowns: new Map(),
+  paymentSession: crypto.randomUUID(),
   follow: true,
   followHeading: false,
   lastHeading: null,
   searchAbort: null,
   routeAbort: null,
 };
+const rideCheckout = mountRideCheckout();
 
 const map = L.map("map", { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([37.7749, -122.4194], 11);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -359,9 +366,10 @@ function modeMeta(rawMode, agency, line) {
   if (raw === "WALK") return { mode: "walk", icon: "●", name: "Walk" };
   if (raw === "BIKE") return { mode: "bike", icon: "◆", name: "Bike" };
   if (raw === "CAR") return { mode: "drive", icon: "↗", name: "Drive" };
+  if (raw === "TAXI" || raw === "RIDESHARE") return { mode: "taxi", icon: "T", name: "Taxi" };
   if (raw === "BUS" || raw === "COACH") return { mode: "bus", icon: "▣", name: line ? `Bus ${line}` : "Bus" };
   if (raw === "SUBWAY" && /Bay Area Rapid Transit/i.test(agency || "")) return { mode: "rail", icon: "B", name: line ? `BART ${line}` : "BART" };
-  if (/SUBWAY|RAIL|TRAIN/.test(raw)) return { mode: "rail", icon: "▤", name: line || "Train" };
+  if (/SUBWAY|RAIL|TRAIN|LONG_DISTANCE|HIGH_SPEED|REGIONAL|SUBURBAN|MONORAIL/.test(raw)) return { mode: "rail", icon: "▤", name: line || "Train" };
   if (raw === "TRAM") return { mode: "rail", icon: "▤", name: line ? `Tram ${line}` : "Tram" };
   if (raw === "FERRY") return { mode: "ferry", icon: "≈", name: line || "Ferry" };
   if (raw === "FLIGHT" || raw === "AIRPLANE") return { mode: "flight", icon: "✈", name: line || "Flight" };
@@ -410,6 +418,12 @@ async function fetchRoadRoutes(points, mode, alternatives = true) {
   if (!body?.routes?.length) throw lastError || new Error("OpenStreetMap routing is unavailable");
   if (body.code !== "Ok" || !body.routes?.length) throw new Error(body.message || "No route found");
   return body.routes.map((route, routeIndex) => {
+    if (mode === "taxi") return prepareItinerary({
+      title: routeIndex === 0 ? "Taxi road-route estimate" : `Taxi alternative ${routeIndex}`,
+      segments: [taxiJourneySegment(route, points, (step) => roadInstruction(step, "taxi"))],
+      source: "OpenStreetMap + OSRM road-route estimate only · not a booked taxi ride or a verified fare",
+      sourceUrl: "https://www.openstreetmap.org/copyright",
+    });
     const segments = route.legs.flatMap((leg, legIndex) => {
       const meta = modeMeta(mode === "walk" ? "WALK" : mode === "bike" ? "BIKE" : "CAR");
       const steps = (leg.steps || []).filter((step) => step.geometry?.coordinates?.length);
@@ -534,6 +548,7 @@ async function fetchTransitRoutes(from, to, time) {
         instruction,
         live: leg.realTime,
         agency: leg.agencyName,
+        serviceId: leg.tripId || leg.routeId,
         headsign: leg.headsign,
         startTime: leg.startTime,
         endTime: leg.endTime,
@@ -609,6 +624,7 @@ async function flightRoute(from, to, time) {
 }
 
 function prepareItinerary(route) {
+  route = { ...route, segments: assignRideLegIds(route.segments, state.rideLegIds) };
   const duration = itineraryDurationSeconds(route);
   const distance = route.segments.reduce((sum, segment) => sum + (segment.distance || 0), 0);
   const summary = route.segments
@@ -643,17 +659,25 @@ async function sequentialTransit(points, time) {
   });
 }
 
-async function loadRoutes() {
+async function loadRoutes(options = {}) {
   const points = tripPoints();
-  if (points.length < 2) return;
+  if (points.length < 2 || rideCheckout.isOpen()) return;
+  const resumeNavigation = options.resumeNavigation === true && state.navigating;
+  const previous = resumeNavigation ? { routes: state.routes, selectedRoute: state.selectedRoute, activeLeg: state.activeLeg, legProgress: state.legProgress, legProjection: state.legProjection } : null;
+  if (!resumeNavigation) {
+    state.rideLegIds.clear();
+    state.completedRideLegs.clear();
+    state.ridePromptCooldowns.clear();
+    state.paymentSession = crypto.randomUUID();
+  }
   state.routeAbort?.abort();
   state.routeAbort = new AbortController();
-  state.routes = [];
+  if (!resumeNavigation) state.routes = [];
   state.selectedRoute = 0;
-  state.navigating = false;
+  state.navigating = resumeNavigation;
   clearRouteLayers();
-  ui.setup.classList.remove("hidden");
-  ui.navigation.classList.add("hidden");
+  ui.setup.classList.toggle("hidden", resumeNavigation);
+  ui.navigation.classList.toggle("hidden", !resumeNavigation);
   ui.status.textContent = state.mode === "transit" ? "Checking public schedules and live feeds…" : state.mode === "flight" ? "Building airport transfers and flight path…" : "Calculating street routes…";
   ui.options.innerHTML = "";
   ui.legList.innerHTML = "";
@@ -674,6 +698,7 @@ async function loadRoutes() {
     state.routes.sort((a, b) => a.duration - b.duration);
     renderRoutes();
     collapsePlanner(true);
+    if (resumeNavigation) startNavigation();
   } catch (error) {
     if (error.name === "AbortError") return;
     if (state.mode === "transit") {
@@ -686,6 +711,7 @@ async function loadRoutes() {
         }));
         renderRoutes();
         collapsePlanner(true);
+        if (resumeNavigation) startNavigation();
         showToast("Live transit was unavailable, so an OpenStreetMap walking route is shown.");
         return;
       } catch (fallbackError) {
@@ -695,6 +721,13 @@ async function loadRoutes() {
     ui.status.textContent = error.message || "Route planning is temporarily unavailable.";
     ui.routeSource.textContent = "OpenStreetMap routing is also unavailable. Try again or place a nearby point.";
     showToast(ui.status.textContent);
+    if (previous) {
+      Object.assign(state, previous);
+      state.navigating = true;
+      ui.setup.classList.add("hidden");
+      ui.navigation.classList.remove("hidden");
+      renderRoutes();
+    }
   }
 }
 
@@ -825,7 +858,54 @@ function setActiveLeg(index, progress = 0) {
   updateNavigation(state.user);
 }
 
+function checkoutCompletedRide(segment, onContinue) {
+  const mode = ridePaymentMode(segment);
+  if (!mode || !segment.rideLegId || state.completedRideLegs.has(segment.rideLegId)) return false;
+  if (rideCheckout.isOpen()) return true;
+  const session = state.paymentSession;
+  let resolved = false;
+  rideCheckout.open({
+    legId: segment.rideLegId,
+    mode,
+    service: segment.label || segment.name || mode,
+    from: segment.from?.name || "Your boarding point",
+    to: segment.to?.name || "Your destination",
+    preview: !state.startLive || !state.user || mode === "taxi",
+    onContinue: () => {
+      if (resolved || state.paymentSession !== session) return;
+      resolved = true;
+      state.completedRideLegs.add(segment.rideLegId);
+      onContinue();
+    },
+    onDismiss: () => {
+      if (resolved || state.paymentSession !== session) return;
+      resolved = true;
+      state.ridePromptCooldowns.set(segment.rideLegId, Date.now() + 60_000);
+      updateNavigation(state.user);
+    },
+  });
+  return true;
+}
+
+function advanceNavigationStep(finish = false) {
+  const route = state.routes[state.selectedRoute];
+  if (!route) return;
+  if (finish || state.activeLeg >= route.segments.length - 1) return endNavigation();
+  setActiveLeg(state.activeLeg + 1, 0);
+  focusLeg(state.activeLeg);
+}
+
+function completeNavigationStep(finish = false) {
+  if (rideCheckout.isOpen()) return;
+  const route = state.routes[state.selectedRoute];
+  const segment = route?.segments[state.activeLeg];
+  if (!route || !segment) return;
+  const advance = () => advanceNavigationStep(finish);
+  if (!checkoutCompletedRide(segment, advance)) advance();
+}
+
 function updateNavigation(position) {
+  if (rideCheckout.isOpen() || state.rerouting) return;
   const route = state.routes[state.selectedRoute];
   const segment = route?.segments[state.activeLeg];
   if (!route || !segment) return;
@@ -840,17 +920,26 @@ function updateNavigation(position) {
     } else if (state.legProjection) projection = state.legProjection;
     if (candidate.distance > Math.max(120, (position.accuracy || 25) * 2)) state.offRouteUpdates += 1;
     else state.offRouteUpdates = 0;
-    if (state.offRouteUpdates >= 4 && state.startLive && !state.rerouting) {
-      state.rerouting = true;
-      state.offRouteUpdates = 0;
-      showToast("You are off route. Recalculating from your live position…");
-      loadRoutes().finally(() => { state.rerouting = false; });
-      return;
+    if (state.offRouteUpdates >= 4 && state.startLive && Date.now() >= state.rerouteAfter) {
+      state.rerouteAfter = Date.now() + 30_000;
+      if (ridePaymentMode(segment) && !state.completedRideLegs.has(segment.rideLegId)) {
+        state.offRouteUpdates = 0;
+        showToast("Your position differs from this ride's planned route. Check with your driver or operator, and confirm when you have left the vehicle before continuing.", 6500);
+      } else {
+        state.rerouting = true;
+        state.offRouteUpdates = 0;
+        showToast("You are off route. Recalculating from your live position…");
+        loadRoutes({ resumeNavigation: true }).finally(() => { state.rerouting = false; updateNavigation(state.user); });
+        return;
+      }
     }
-    if (state.legProgress > .985 && state.activeLeg < route.segments.length - 1) {
-      state.activeLeg += 1;
-      state.legProgress = 0;
-      return updateNavigation(position);
+    if (ridePaymentMode(segment)) {
+      if (state.startLive && rideNearArrival(segment, position, state.legProgress) && !state.completedRideLegs.has(segment.rideLegId) && Date.now() >= (state.ridePromptCooldowns.get(segment.rideLegId) || 0)) {
+        if (checkoutCompletedRide(segment, () => advanceNavigationStep())) return;
+      }
+      if (state.completedRideLegs.has(segment.rideLegId) && state.legProgress > .985 && state.activeLeg < route.segments.length - 1) return completeNavigationStep();
+    } else if (state.legProgress > .985 && state.activeLeg < route.segments.length - 1) {
+      return completeNavigationStep();
     }
     if (projection.distance > threshold) ui.stepDistance.textContent = `${metersText(projection.distance)} from route`;
   }
@@ -970,12 +1059,7 @@ ui.closeRoute.addEventListener("click", resetRoutes);
 ui.start.addEventListener("click", startNavigation);
 ui.end.addEventListener("click", endNavigation);
 ui.previousLeg.addEventListener("click", () => setActiveLeg(state.activeLeg - 1, 0));
-ui.nextLeg.addEventListener("click", () => {
-  const route = state.routes[state.selectedRoute];
-  if (state.activeLeg >= route.segments.length - 1) return endNavigation();
-  setActiveLeg(state.activeLeg + 1, 0);
-  focusLeg(state.activeLeg);
-});
+ui.nextLeg.addEventListener("click", () => completeNavigationStep());
 ui.recenter.addEventListener("click", () => {
   if (!state.user) return requestLocation();
   state.follow = true;
@@ -997,10 +1081,14 @@ $$(".mode-tab").forEach((button) => button.addEventListener("click", () => {
   if (tripPoints().length > 1) loadRoutes();
 }));
 
-map.on("dragstart zoomstart", () => {
+const stopFollowingMap = () => {
   state.follow = false;
   ui.recenter.classList.remove("active");
-});
+};
+map.on("dragstart boxzoomstart dblclick", stopFollowingMap);
+for (const type of ["wheel", "touchstart", "keydown"]) map.getContainer().addEventListener(type, (event) => {
+  if (userMapInteraction(type, event)) stopFollowingMap();
+}, { passive: true });
 let pressTimer;
 map.on("mousedown touchstart", (event) => {
   pressTimer = setTimeout(async () => {
@@ -1015,7 +1103,9 @@ state.includeSelfDrive = params.get("includeSelfDrive") !== "false";
 const requestedMode = params.get("mode");
 const initialMode = requestedMode === "flight"
   ? "flight"
-  : requestedMode === "drive" || requestedMode === "rideshare"
+  : requestedMode === "taxi" || requestedMode === "rideshare"
+    ? "taxi"
+  : requestedMode === "drive"
     ? state.includeSelfDrive ? "drive" : "transit"
     : requestedMode === "walk"
       ? "walk"

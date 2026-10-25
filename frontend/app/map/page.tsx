@@ -11,7 +11,7 @@ export default function MapPage() {
   return (
     <>
       <link rel="stylesheet" href="/map-assets/leaflet.css" />
-      <link rel="stylesheet" href="/map-assets/map.css?v=5" />
+      <link rel="stylesheet" href="/map-assets/map.css?v=6" />
       <MapClient />
     </>
   );
