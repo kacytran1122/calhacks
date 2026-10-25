@@ -6,6 +6,7 @@ import type { Cents, Trip } from "../types";
 
 export interface RouteOption {
   mode: Trip["mode"];
+  routeTitle?: string;
   costCents: Cents;
   costSource: string;
   pMiss: number;
@@ -22,6 +23,7 @@ export type RouteBlockReason = "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTAN
 
 export interface RouteContext extends Omit<CarbonContext, "straightMiles"> {
   minutes?: Partial<Record<Trip["mode"], { minutes: number; source: string }>>;
+  itineraries?: Record<string, { minutes: number; source: string }>;
 }
 
 export function missRate(state: State, mode: Trip["mode"]) {
@@ -61,25 +63,28 @@ function lowCarbonSwap(pick: RouteOption, ok: RouteOption[]): { option: RouteOpt
 
 export function compareRoutes(
   state: State,
-  args: { miles: number; fares: { mode: string; amountUsd: number }[]; fareEvidenceId?: string; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; deadlineCritical?: boolean; context?: RouteContext },
+  args: { miles: number; fares: { mode: string; amountUsd: number; routeTitle?: string }[]; fareEvidenceId?: string; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; deadlineCritical?: boolean; context?: RouteContext },
 ): { options: RouteOption[]; pick?: RouteOption; pickReason?: string; fastest?: Trip["mode"]; lowestCarbon?: Trip["mode"]; carbon: CarbonComparison; cap: Cents; travelerBudgetCents?: Cents; maxDistanceMiles?: number; blockReason?: RouteBlockReason } {
   const cap = capFor(args.miles);
   const ctx: CarbonContext = { straightMiles: args.miles, ...args.context };
   const withinBudget = (costCents: Cents) => args.travelerBudgetCents === undefined || costCents <= args.travelerBudgetCents;
-  const extras = (mode: Trip["mode"]) => {
+  const extras = (mode: Trip["mode"], routeTitle?: string) => {
     const c = estimateCarbon(mode, ctx);
-    const t = args.context?.minutes?.[mode];
+    const t = args.context?.itineraries && mode !== "drive" ? routeTitle ? args.context.itineraries[routeTitle] : undefined : args.context?.minutes?.[mode];
     return { co2eKg: c?.kg, co2eFormula: c?.formula, minutes: t?.minutes, minutesSource: t?.source };
   };
   const options: RouteOption[] = [];
   const seen = new Set<string>();
   for (const f of [...args.fares].sort((a, b) => a.amountUsd - b.amountUsd)) {
-    const mode = (["train", "bus", "rideshare", "flight"].includes(f.mode) ? f.mode : "train") as Trip["mode"];
-    if (seen.has(mode)) continue;
-    seen.add(mode);
+    if (!["train", "bus", "rideshare", "flight"].includes(f.mode) || !Number.isFinite(f.amountUsd) || f.amountUsd < 0 || !Number.isSafeInteger(Math.round(f.amountUsd * 100))) continue;
+    const mode = f.mode as Trip["mode"];
+    const routeTitle = f.routeTitle?.trim() || undefined;
+    const identity = JSON.stringify([mode, routeTitle]);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
     const m = missRate(state, mode);
     const costCents = Math.round(f.amountUsd * 100);
-    options.push({ mode, costCents, costSource: args.fareEvidenceId ?? "web", pMiss: m.p, history: { trips: m.trips, late: m.late }, withinCap: costCents <= cap, withinBudget: withinBudget(costCents), ...extras(mode) });
+    options.push({ mode, ...(routeTitle ? { routeTitle } : {}), costCents, costSource: args.fareEvidenceId ?? "web", pMiss: m.p, history: { trips: m.trips, late: m.late }, withinCap: costCents <= cap, withinBudget: withinBudget(costCents), ...extras(mode, routeTitle) });
   }
   if (args.includeSelfDrive !== false) {
     const drive = missRate(state, "drive");
@@ -108,7 +113,7 @@ export function compareRoutes(
   // Speed comes from live routing, not fare availability. A route whose fare is still being
   // verified must not disappear from the fastest-route result.
   const timed = Object.entries(args.context?.minutes ?? {})
-    .filter((entry): entry is [Trip["mode"], { minutes: number; source: string }] => Number.isFinite(entry[1]?.minutes))
+    .filter((entry): entry is [Trip["mode"], { minutes: number; source: string }] => (args.includeSelfDrive !== false || entry[0] !== "drive") && Number.isFinite(entry[1]?.minutes))
     .sort((a, b) => a[1].minutes - b[1].minutes);
   const fastest = timed[0]?.[0];
   const rated = options.filter((o) => o.co2eKg !== undefined);

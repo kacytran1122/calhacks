@@ -11,7 +11,9 @@ type JsonRecord = Record<string, unknown>;
 const record = (value: unknown): value is JsonRecord => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function coordinate(value: string | null): [number, number] | null {
-  const parts = String(value ?? "").split(",").map(Number);
+  const tokens = String(value ?? "").split(",");
+  if (tokens.some((token) => !token.trim())) return null;
+  const parts = tokens.map(Number);
   if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return null;
   if (Math.abs(parts[0]) > 90 || Math.abs(parts[1]) > 180) return null;
   return [parts[0], parts[1]];
@@ -34,13 +36,14 @@ function place(value: unknown) {
     tz: text(source.tz),
     stopId: text(source.stopId),
     stopCode: text(source.stopCode),
+    cancelled: Boolean(source.cancelled),
     modes: Array.isArray(source.modes) ? source.modes.filter((mode): mode is string => typeof mode === "string") : [],
   };
 }
 
 function leg(value: unknown) {
   const source = record(value) ? value : {};
-  const rawGeometry = record(source.legGeometry) ? source.legGeometry : null;
+  const rawGeometry = record(source.legGeometry) ? source.legGeometry : record(source.geometry) ? source.geometry : null;
   return {
     mode: text(source.mode),
     from: place(source.from),
@@ -57,12 +60,47 @@ function leg(value: unknown) {
     displayName: text(source.displayName),
     agencyName: text(source.agencyName),
     routeColor: text(source.routeColor),
+    tripId: text(source.tripId),
+    routeId: text(source.routeId),
     geometry: rawGeometry ? {
       points: text(rawGeometry.points),
       precision: number(rawGeometry.precision) ?? 6,
       length: number(rawGeometry.length),
     } : null,
   };
+}
+
+function routePattern(itinerary: { legs: ReturnType<typeof leg>[] }) {
+  return JSON.stringify(itinerary.legs.filter((item) => !["WALK", "BIKE"].includes(item.mode || "")).map((item) => [item.mode, item.agencyName, item.displayName || item.routeShortName || item.routeLongName, item.from.stopId || item.from.name, item.to.stopId || item.to.name]));
+}
+
+function usableItineraries(payload: unknown) {
+  const source = record(payload) ? payload : {};
+  const seen = new Set<string>();
+  const candidates = (Array.isArray(source.itineraries) ? source.itineraries : []).flatMap((value) => {
+    if (!record(value) || !Array.isArray(value.legs) || !value.legs.length || value.legs.some((item) => !record(item) || !record(item.from) || !record(item.to))) return [];
+    const legs = value.legs.map(leg);
+    if (legs.some((item) => item.cancelled || item.from.cancelled || item.to.cancelled || !item.mode || /^(?:CAR(?:_.*)?|HGV)$/.test(item.mode))) return [];
+    if (!legs.some((item) => !["WALK", "BIKE"].includes(item.mode || ""))) return [];
+    const startTime = text(value.startTime);
+    const endTime = text(value.endTime);
+    const elapsed = (Date.parse(endTime || "") - Date.parse(startTime || "")) / 1000;
+    const duration = Number.isFinite(elapsed) && elapsed > 0 ? elapsed : number(value.duration);
+    if (duration === null || duration <= 0) return [];
+    const itinerary = { duration, startTime, endTime, transfers: number(value.transfers), legs };
+    const key = JSON.stringify([startTime, endTime, legs.map((item) => [item.mode, item.from.stopId || item.from.name, item.to.stopId || item.to.name, item.startTime, item.endTime, item.displayName || item.routeShortName || item.routeLongName, item.agencyName, item.tripId, item.routeId])]);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [itinerary];
+  }).sort((a, b) => a.duration - b.duration);
+  const patterns = new Set<string>();
+  const varied = candidates.filter((item) => {
+    const pattern = routePattern(item);
+    if (patterns.has(pattern)) return false;
+    patterns.add(pattern);
+    return true;
+  });
+  return [...varied, ...candidates.filter((item) => !varied.includes(item))].slice(0, 4).sort((a, b) => a.duration - b.duration);
 }
 
 export async function GET(request: Request) {
@@ -78,14 +116,24 @@ export async function GET(request: Request) {
     toPlace: `${to[0]},${to[1]}`,
     time: time.toISOString(),
     arriveBy: "false",
-    withFares: "true",
-    numItineraries: "4",
+    withFares: "false",
+    numItineraries: "6",
     maxTransfers: "5",
     detailedTransfers: "true",
     realtimeMode: "REALTIME",
+    timetableView: "true",
+    transitModes: "TRANSIT",
+    directModes: "",
+    preTransitModes: "WALK",
+    postTransitModes: "WALK",
   });
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+  const timer = setTimeout(() => controller.abort(), 9_000);
+  let itineraries: ReturnType<typeof usableItineraries> = [];
+  const reply = (note?: string) => NextResponse.json(
+    { itineraries, source: "Transitous public GTFS and GTFS-Realtime", ...(note ? { note } : {}) },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
   try {
     const response = await fetch(`${TRANSITOUS}?${params}`, {
       signal: controller.signal,
@@ -94,22 +142,19 @@ export async function GET(request: Request) {
     });
     if (!response.ok) return NextResponse.json({ error: `Transit service returned ${response.status}.` }, { status: 502 });
     const payload: unknown = await response.json();
-    const source = record(payload) ? payload : {};
-    const itineraries = (Array.isArray(source.itineraries) ? source.itineraries : []).slice(0, 4).map((value) => {
-      const itinerary = record(value) ? value : {};
-      return {
-        duration: number(itinerary.duration),
-        startTime: text(itinerary.startTime),
-        endTime: text(itinerary.endTime),
-        transfers: number(itinerary.transfers),
-        legs: (Array.isArray(itinerary.legs) ? itinerary.legs : []).map(leg).filter((item) => !item.cancelled),
-      };
-    });
-    return NextResponse.json(
-      { itineraries, source: "Transitous public GTFS and GTFS-Realtime" },
-      { headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" } },
-    );
+    itineraries = usableItineraries(payload);
+    if (new Set(itineraries.map(routePattern)).size < 2 && !controller.signal.aborted) {
+      const alternativeParams = new URLSearchParams(params);
+      alternativeParams.set("transitModes", "BUS,COACH");
+      const alternative = await fetch(`${TRANSITOUS}?${alternativeParams}`, { signal: controller.signal, headers: { Accept: "application/json", "User-Agent": USER_AGENT }, cache: "no-store" });
+      if (alternative.ok) {
+        const additional = usableItineraries(await alternative.json());
+        itineraries = usableItineraries({ itineraries: [...itineraries, ...additional] });
+      } else if (itineraries.length) return reply("Available transit routes are shown, but the additional bus and coach search could not be completed.");
+    }
+    return reply();
   } catch (error) {
+    if (itineraries.length) return reply("Available transit routes are shown, but the additional bus and coach search reached its time limit or was unavailable.");
     return NextResponse.json(
       { error: error instanceof Error && error.name === "AbortError" ? "Transit routing timed out." : "Transit routing is temporarily unavailable." },
       { status: 504 },

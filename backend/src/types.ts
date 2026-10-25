@@ -107,6 +107,8 @@ export interface Trip {
   period: string;
   method: PaymentMethod;
   mode: "train" | "bus" | "drive" | "rideshare" | "flight";
+  routeTitle?: string;
+  includeSelfDrive?: boolean;
   distanceMiles: number;
   travelerMaxDistanceMiles?: number;
   travelerBudgetCents?: Cents;
@@ -189,7 +191,7 @@ export interface InboxItem {
   id: string;
   kind: "mandate_approval" | "reconcile" | "notice";
   tripId: string;
-  meta: { code?: DecisionCode; amountCents?: Cents; topic?: string };
+  meta: { code?: DecisionCode; amountCents?: Cents; topic?: string; routeTitle?: string };
   createdAt: string;
   askedOf: HumanRole;
   question: string;

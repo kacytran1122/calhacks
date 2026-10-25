@@ -69,6 +69,28 @@ const RouteGuideCandidates = z.object({
 
 export type RouteGuide = z.infer<typeof RouteGuideCandidates>["options"][number];
 
+export function distinctRouteGuides(guides: RouteGuide[], includeSelfDrive = true) {
+  const seen = new Set<string>();
+  return guides.filter((guide) => {
+    if (!includeSelfDrive && guide.mode === "drive") return false;
+    const key = JSON.stringify([guide.mode, guide.title, guide.durationMinutes, guide.durationText, guide.sourceUrl, guide.steps]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 10);
+}
+
+export function itineraryFares<T extends { mode: string }>(fares: T[], guides: RouteGuide[]): T[] {
+  return fares.filter((fare) => {
+    if ("routeTitle" in fare && typeof fare.routeTitle === "string" && fare.routeTitle.trim()) return guides.filter((guide) => guide.mode === fare.mode && guide.title === fare.routeTitle).length <= 1;
+    return guides.filter((guide) => guide.mode === fare.mode).length <= 1;
+  });
+}
+
+export function routeGuideTimings(guides: RouteGuide[]): Record<string, { minutes: number; source: string }> {
+  return Object.fromEntries(guides.flatMap((guide) => typeof guide.durationMinutes === "number" && Number.isFinite(guide.durationMinutes) && guides.filter((other) => other.title === guide.title).length === 1 ? [[guide.title, { minutes: guide.durationMinutes, source: guide.sourceUrl }]] : []));
+}
+
 function faresByRules(results: SerpOrganic[]) {
   const out: { mode: "train" | "bus"; amountUsd: number; link: string; quote: string; provider: string; priceScope: "published_ticket"; fees: "not_applicable" }[] = [];
   for (const r of results) {
@@ -204,7 +226,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const officialFares = await currentOfficialFares(transit.options, event.startsAt);
   const needSearchFallback = officialFares.length === 0 && transit.options.every((option) => option.amountUsd === undefined);
   const fareSerp = needSearchFallback ? genericFareSerp : { status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined };
-  const directionsSerp = transit.options.length ? { status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined } : genericDirectionsSerp;
+  const directionsSerp = transit.options.length >= 2 ? { status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined } : genericDirectionsSerp;
   const targetedFareSerp = needSearchFallback && targetedQuery ? await serp(targetedQuery, 1, LIVE_SEARCH_TIMEOUT_MS) : null;
   const fareResults = [
     ...(targetedFareSerp?.status === "ok" && targetedFareSerp.body ? targetedFareSerp.body.slice(0, 8) : []),
@@ -219,7 +241,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     directionResults.length ? extractRouteGuides(directionResults, fromCity, destination, args.travelConstraintSummary) : Promise.resolve({ guides: [] as RouteGuide[], extractedBy: "none" }),
   ]);
   const transitFares = transit.options.flatMap((option) => option.amountUsd && option.fareQuote ? [{ mode: option.mode, amountUsd: option.amountUsd, link: option.fareUrl ?? option.sourceUrl, quote: option.fareQuote, routeTitle: option.title, provider: option.agencies.join(" + ") || "public transit operator", priceScope: "route_total" as const, fees: "not_applicable" as const }] : []);
-  const fares = [...officialFares, ...transitFares, ...fareExtraction.fares].filter((fare, index, all) => all.findIndex((candidate) => candidate.mode === fare.mode && candidate.amountUsd === fare.amountUsd) === index);
+  const fares = [...officialFares, ...transitFares, ...fareExtraction.fares].filter((fare, index, all) => all.findIndex((candidate) => candidate.mode === fare.mode && candidate.amountUsd === fare.amountUsd && ("routeTitle" in candidate ? candidate.routeTitle : undefined) === ("routeTitle" in fare ? fare.routeTitle : undefined)) === index);
   const fareStatus = fares.length ? "ok" : targetedFareSerp?.status === "error" ? targetedFareSerp.status : fareSerp.status === "ok" ? "empty" : fareSerp.status;
   out.push(
     push(state, {
@@ -261,9 +283,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
         ],
       }]
     : [];
-  const routeGuides = [...transitGuides, ...flightGuide, ...roadGuides, ...guideExtraction.guides]
-    .filter((guide, index, all) => all.findIndex((candidate) => candidate.mode === guide.mode && candidate.title === guide.title) === index)
-    .slice(0, 10);
+  const routeGuides = distinctRouteGuides([...transitGuides, ...flightGuide, ...roadGuides, ...guideExtraction.guides], args.includeSelfDrive !== false);
   out.push(
     push(state, {
       tripId,
@@ -286,9 +306,10 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const drive = road?.routes[0];
   if (drive) {
     if (args.includeSelfDrive !== false) minutes.drive = { minutes: drive.durationMinutes, source: "OSRM live road route" };
-    minutes.rideshare = { minutes: drive.durationMinutes, source: "OSRM live road route (pickup wait not included)" };
+    if (fares.some((fare) => fare.mode === "rideshare")) minutes.rideshare = { minutes: drive.durationMinutes, source: "OSRM live road route (pickup wait not included)" };
   }
   if (flightMinutes) minutes.flight = { minutes: flightMinutes, source: "Estimated door-to-door flight time using airport buffers and route distance" };
 
-  return { evidence: out, miles, homeLabel: fromCity, fares, routeGuides, roadMiles: drive?.distanceMiles, minutes, homePoint, venuePoint };
+  const itineraries = routeGuideTimings(routeGuides);
+  return { evidence: out, miles, homeLabel: fromCity, fares: itineraryFares(fares, routeGuides), routeGuides, roadMiles: drive?.distanceMiles, minutes, itineraries, homePoint, venuePoint };
 }

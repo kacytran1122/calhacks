@@ -18,11 +18,12 @@ test("Photon QR requires a trip token and never asks for contact information", (
     const { POST } = await import(${JSON.stringify(route)});
     const { GET: mapHandoff } = await import(${JSON.stringify(mapRoute)});
     const seeded = core.buildSeed().state;
-    core.saveState(seeded);
     const trip = seeded.trips[0];
     const traveler = seeded.travelers.find((candidate) => candidate.id === trip.travelerId);
     const event = seeded.events.find((candidate) => candidate.id === trip.eventId);
     assert.ok(trip && traveler && event);
+    trip.includeSelfDrive = false;
+    core.saveState(seeded);
     const tripId = trip.id;
     const tripToken = core.issueTripToken(tripId, trip.travelerId);
     let externalFetches = 0;
@@ -54,12 +55,22 @@ test("Photon QR requires a trip token and never asks for contact information", (
     const bootstrap = await bootstrapResponse.json();
     assert.equal(bootstrap.tripId, trip.id);
     assert.equal(bootstrap.mode, trip.mode);
+    assert.equal(bootstrap.includeSelfDrive, false);
     assert.equal(bootstrap.origin.query, traveler.homeZip);
     assert.equal(bootstrap.destination.label, event.name);
     assert.equal(bootstrap.destination.query, [event.venue, event.city].filter(Boolean).join(", "));
     assert.equal(JSON.stringify(bootstrap).includes(trip.travelerId), false);
     assert.match(bootstrapResponse.headers.get("cache-control"), /no-store/);
     assert.equal(bootstrapResponse.headers.get("referrer-policy"), "no-referrer");
+    delete trip.includeSelfDrive;
+    trip.mode = "flight";
+    core.saveState(seeded);
+    const legacyFlight = await mapHandoff(new Request("https://smilefromhereto.work/api/map/handoff?token=" + token));
+    assert.equal((await legacyFlight.json()).includeSelfDrive, false);
+    trip.mode = "drive";
+    core.saveState(seeded);
+    const legacyDrive = await mapHandoff(new Request("https://smilefromhereto.work/api/map/handoff?token=" + token));
+    assert.equal((await legacyDrive.json()).includeSelfDrive, true);
     assert.equal((await mapHandoff(new Request("https://smilefromhereto.work/api/map/handoff?token=phm1_" + "x".repeat(43)))).status, 404);
   `;
   execFileSync(process.execPath, ["--conditions=react-server", "--import", path.join(root, "backend/node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], {

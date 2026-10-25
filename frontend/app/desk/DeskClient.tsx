@@ -437,7 +437,7 @@ type PlanOut = {
   trip: { id: string; state: string; quoteCents: number; mode: string; distanceMiles: number; travelerId: string };
   event: { name: string; venue: string; startsAt: string };
   evidence: { id: string; kind: string; source: string; status: string; provenance: string; fetchedAt: string; url?: string; data: Record<string, unknown>; note?: string }[];
-  routes: { options: { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string }[]; pick?: { mode: string }; pickReason?: string; cap: number; travelerBudgetCents?: number; blockReason?: string } | null;
+  routes: { options: { mode: string; routeTitle?: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string }[]; pick?: { mode: string; routeTitle?: string; costCents: number }; pickReason?: string; cap: number; travelerBudgetCents?: number; blockReason?: string } | null;
   inbox: { id: string; question: string } | null;
 };
 
@@ -524,17 +524,19 @@ export function PlanPanel({ initialZip, busy, run }: { initialZip: string; busy:
                   </tr>
                 </thead>
                 <tbody>
-                  {plan.routes.options.map((o) => (
-                    <tr key={o.mode} className={plan.routes?.pick?.mode === o.mode ? "sel" : ""}>
+                  {plan.routes.options.map((o) => {
+                    const picked = plan.routes?.pick;
+                    const selected = picked?.mode === o.mode && picked.routeTitle === o.routeTitle && picked.costCents === o.costCents;
+                    return <tr key={JSON.stringify([o.mode, o.routeTitle, o.costCents])} className={selected ? "sel" : ""}>
                       <td>
-                        {o.mode} {plan.routes?.pick?.mode === o.mode && <span className="dk-tag">pick</span>}
+                        {o.routeTitle || o.mode} {selected && <span className="dk-tag">pick</span>}
                       </td>
                       <td className="r num">{fmt(o.costCents)}{!o.withinCap && " ⚠ over cap"}{!o.withinBudget && " ⚠ over traveler budget"}</td>
                       <td className="r num" title={`${o.history.late} late of ${o.history.trips} past trips`}>{Math.round(o.pMiss * 100)}%</td>
                       <td className="r num" title={o.co2eFormula}>{o.co2eKg !== undefined ? `${o.co2eKg} kg` : "—"}</td>
                       <td className="dk-mut">{o.costSource}</td>
-                    </tr>
-                  ))}
+                    </tr>;
+                  })}
                 </tbody>
               </table>
               <p className="dk-mut">
@@ -855,7 +857,7 @@ function SignIn({ onDone }: { onDone: () => void }) {
   );
 }
 
-type Status = { trip: { id: string; state: string; mode: string; quoteCents: number; distanceMiles: number }; event?: { name: string }; questions: { id: string; question: string; options: { id: string; label: string }[] }[] };
+type Status = { trip: { id: string; state: string; mode: string; routeTitle?: string; quoteCents: number; distanceMiles: number }; event?: { name: string }; questions: { id: string; question: string; options: { id: string; label: string }[] }[] };
 
 function TravelerApproval({ link, onExit }: { link: { token: string; tripId: string }; onExit: () => void }) {
   const [st, setSt] = useState<Status | null>(null);
@@ -899,7 +901,7 @@ function TravelerApproval({ link, onExit }: { link: { token: string; tripId: str
           <>
             <h2>{st.event?.name ?? st.trip.id}</h2>
             <p className="dk-mut">
-              {st.trip.mode} · {st.trip.distanceMiles} mi · {fmt(st.trip.quoteCents)} · {st.trip.state.replace(/_/g, " ")}
+              {st.trip.routeTitle ?? st.trip.mode} · {st.trip.distanceMiles} mi · {fmt(st.trip.quoteCents)} · {st.trip.state.replace(/_/g, " ")}
             </p>
             {st.questions.length === 0 && <p>Nothing waiting for you. Nothing is charged until you approve an exact amount.</p>}
             {st.questions.map((q) => (

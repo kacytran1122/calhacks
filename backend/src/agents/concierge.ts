@@ -34,6 +34,7 @@ export interface ConciergePlan {
   eventKey: string;
   eventName: string;
   mode: string;
+  routeTitle?: string;
   priceCents: number;
   capCents: number;
   pMiss: number | null;
@@ -265,14 +266,14 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
           event: picked && { key: picked.key, name: picked.name, startsAt: picked.startsAt, venue: picked.venue, city: picked.city, lat: picked.lat, lon: picked.lon, url: picked.url },
         });
         const pick = p.routes?.pick;
-        appendAudit(s, { actor: concierge, action: "concierge.planned", subject: p.trip.id, reason: `Planned from chat for ${me}: ${pick ? `${pick.mode} ${fmt(pick.costCents)} waiting for the traveler's approval` : "no approvable route"}`, refs: [p.trip.id, `chat:${input.room}`] });
+        appendAudit(s, { actor: concierge, action: "concierge.planned", subject: p.trip.id, reason: `Planned from chat for ${me}: ${pick ? `${pick.routeTitle ?? pick.mode} ${fmt(pick.costCents)} waiting for the traveler's approval` : "no approvable route"}`, refs: [p.trip.id, `chat:${input.room}`] });
         return { ...p, buddies: buddiesFor(s, p.trip.id) };
       });
       if (r.event.lat !== undefined && r.event.lon !== undefined && !input.listings.has(r.event.id))
         input.listings.set(r.event.id, { key: r.event.id, source: "luma", name: r.event.name, startsAt: r.event.startsAt, venue: r.event.venue, city: r.event.city, lat: r.event.lat, lon: r.event.lon, locationPrecision: "exact", url: r.event.url ?? "", kind: "hackathon", fetchedAt: new Date().toISOString(), via: "direct" });
       const pick = r.routes?.pick;
       if (!r.routes) return { event: r.event.name, event_key: r.event.id, status: "no_distance", note: "The ZIP or the venue's location couldn't be found." };
-      const options = r.routes.options.map((o) => ({ mode: o.mode, price: fmt(o.costCents), co2e_kg: o.co2eKg ?? null, minutes: o.minutes ?? null, within_cap: o.withinCap }));
+      const options = r.routes.options.map((o) => ({ mode: o.mode, routeTitle: o.routeTitle ?? null, price: fmt(o.costCents), co2e_kg: o.co2eKg ?? null, minutes: o.minutes ?? null, within_cap: o.withinCap }));
       const lowest = r.routes.carbon.estimates[0];
       const base = {
         event: r.event.name,
@@ -290,11 +291,11 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
         const status = r.routes.blockReason === "ORGANIZER_CAP" ? "needs_exception" : r.routes.blockReason === "NO_VERIFIED_FARE" ? "awaiting_fare" : "blocked";
         return { ...base, status, reason: r.routes.blockReason, note: status === "needs_exception" ? "No option fits the organizer cap; the organizer was asked about an exception." : status === "awaiting_fare" ? "Routes were found but no source stated a fare that can be approved yet." : "No route fits the limits." };
       }
-      plans.push({ tripId: r.trip.id, travelerId: r.trip.travelerId, eventKey: r.event.url ?? r.event.name, eventName: r.event.name, mode: pick.mode, priceCents: pick.costCents, capCents: r.routes.cap, pMiss: pick.history.trips ? pick.pMiss : null, historyTrips: pick.history.trips, co2eKg: pick.co2eKg ?? null, buddies: r.buddies.filter((b) => b.sameMode).map((b) => b.initials), timingNeedsConfirmation: Boolean(prepared.preferences.travelConstraints) });
+      plans.push({ tripId: r.trip.id, travelerId: r.trip.travelerId, eventKey: r.event.url ?? r.event.name, eventName: r.event.name, mode: pick.mode, ...(pick.routeTitle ? { routeTitle: pick.routeTitle } : {}), priceCents: pick.costCents, capCents: r.routes.cap, pMiss: pick.history.trips ? pick.pMiss : null, historyTrips: pick.history.trips, co2eKg: pick.co2eKg ?? null, buddies: r.buddies.filter((b) => b.sameMode).map((b) => b.initials), timingNeedsConfirmation: Boolean(prepared.preferences.travelConstraints) });
       return {
         ...base,
         status: "approval_link_sent_privately",
-        pick: { mode: pick.mode, price: fmt(pick.costCents), late_risk: pick.history.trips ? `${Math.round(pick.pMiss * 100)}% chance of missing kickoff (${pick.history.trips} past trips)` : "no trip history for this mode yet", co2e_kg: pick.co2eKg ?? null, why: r.routes.pickReason ?? null },
+        pick: { mode: pick.mode, routeTitle: pick.routeTitle ?? null, price: fmt(pick.costCents), late_risk: pick.history.trips ? `${Math.round(pick.pMiss * 100)}% chance of missing kickoff (${pick.history.trips} past trips)` : "no trip history for this mode yet", co2e_kg: pick.co2eKg ?? null, why: r.routes.pickReason ?? null },
       };
     },
 
@@ -446,7 +447,7 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
 function fallbackReply(me: string, plans: ConciergePlan[], input: ConciergeInput): string {
   const p = plans.at(-1);
   if (p) {
-    const ride = p.mode === "drive" ? "driving" : `taking the ${p.mode}`;
+    const ride = p.routeTitle ? `taking ${p.routeTitle}` : p.mode === "drive" ? "driving" : `taking the ${p.mode}`;
     if (p.timingNeedsConfirmation) return `@${me} I found a route option for ${ride} to ${p.eventName} at ${fmt(p.priceCents)} and sent an approval link in this private chat. Your requirements were passed to the planner, but please confirm the provider’s arrival and departure schedule before approval because your deadline has not been verified. Nothing is charged automatically.`;
     const miss = p.pMiss === null ? "no trip history for this mode yet" : `${Math.round(p.pMiss * 100)}% chance of missing kickoff`;
     return `@${me} best pick is ${ride} to ${p.eventName}: ${fmt(p.priceCents)} (${miss}${p.co2eKg !== null ? `, about ${p.co2eKg} kg CO₂e` : ""}). Nothing is charged until you approve. I’ve sent an approval link in this private chat.`;

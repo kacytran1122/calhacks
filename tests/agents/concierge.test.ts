@@ -148,6 +148,32 @@ const planRecorder = (withFare = false) => {
   return { calls, plan };
 };
 
+test("same-mode alternatives keep their itinerary labels and exact pick in chat", async () => {
+  const request = input("@smile 95616 no self-drive please plan my trip");
+  request.listings.set(event.key, event);
+  const recorder = planRecorder(true);
+  const options = [
+    { mode: "train" as const, routeTitle: "Train via Central at 8:00 AM", costCents: 2400, costSource: "fare", pMiss: 0.1, history: { trips: 10, late: 1 }, withinCap: true, withinBudget: true, minutes: 80 },
+    { mode: "train" as const, routeTitle: "Train via West Station at 8:30 AM", costCents: 1800, costSource: "fare", pMiss: 0.1, history: { trips: 10, late: 1 }, withinCap: true, withinBudget: true, minutes: 95 },
+  ];
+  const ai = scripted(toolUse("p1", "plan_trip", planInput(request)), say("@JP the train costs $99.99."));
+  const out = await core.converse(request, { create: ai.create, plan: async (state, args) => {
+    const result = await recorder.plan!(state, args);
+    return { ...result, routes: { ...result.routes!, options, pick: options[1] } };
+  } });
+  const result = JSON.parse((ai.calls[1]!.messages.at(-1)!.content as { content: string }[])[0]!.content);
+  assert.deepEqual(result.options.map((option: { routeTitle: string; price: string; minutes: number }) => [option.routeTitle, option.price, option.minutes]), [
+    [options[0]!.routeTitle, "$24.00", 80],
+    [options[1]!.routeTitle, "$18.00", 95],
+  ]);
+  assert.equal(result.pick.routeTitle, options[1]!.routeTitle);
+  assert.equal(result.pick.price, "$18.00");
+  assert.equal(out.plans[0]?.routeTitle, options[1]!.routeTitle);
+  assert.equal(out.by, "code");
+  assert.match(out.reply, /Train via West Station at 8:30 AM/);
+  assert.doesNotMatch(out.reply, /Train via Central/);
+});
+
 test("the chat planner receives no-drive, budget, distance, timing, and a stable message receipt key", async () => {
   const request: ConciergeInput = { ...input("@smile plan from 95616 to this event with no self-drive, my budget is $400, within 200 miles. Arrive at Fort Mason by 9 AM PST on November 14, 2026."), requestId: "photon:group:message42" };
   request.listings.set(event.key, event);

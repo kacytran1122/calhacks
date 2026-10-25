@@ -38,6 +38,44 @@ export function prepareSegment(segment) {
   return { ...segment, points, cumulative, geometryDistance, distance: Number.isFinite(segment.distance) && segment.distance > 0 ? segment.distance : geometryDistance };
 }
 
+export function itineraryDurationSeconds(route) {
+  const elapsed = (Date.parse(route.endTime || "") - Date.parse(route.startTime || "")) / 1000;
+  if (Number.isFinite(elapsed) && elapsed > 0) return elapsed;
+  if (Number.isFinite(route.duration) && route.duration > 0) return route.duration;
+  return (route.segments || []).reduce((sum, segment) => sum + (Number.isFinite(segment.duration) && segment.duration > 0 ? segment.duration : 0), 0);
+}
+
+export function onwardTransitTime(route, previousDeparture, dwellSeconds = 300) {
+  const arrival = Date.parse(route.endTime || "");
+  const fallback = new Date(previousDeparture).getTime() + itineraryDurationSeconds(route) * 1000;
+  return new Date((Number.isFinite(arrival) ? arrival : fallback) + dwellSeconds * 1000);
+}
+
+export function transitRoutePattern(itinerary) {
+  return JSON.stringify((itinerary.legs || []).filter((leg) => !["WALK", "BIKE"].includes(leg.mode)).map((leg) => [leg.mode, leg.agencyName, leg.displayName || leg.routeShortName || leg.routeLongName, leg.from?.stopId || leg.from?.name, leg.to?.stopId || leg.to?.name]));
+}
+
+export function usableTransitItineraries(itineraries) {
+  const seen = new Set();
+  const candidates = (Array.isArray(itineraries) ? itineraries : []).filter((itinerary) => {
+    if (!itinerary || !Array.isArray(itinerary.legs) || !itinerary.legs.length) return false;
+    if (itinerary.legs.some((leg) => !leg?.from || !leg?.to || !leg.mode || leg.cancelled || leg.from.cancelled || leg.to.cancelled || /^(?:CAR(?:_.*)?|HGV)$/.test(leg.mode))) return false;
+    if (!itinerary.legs.some((leg) => !["WALK", "BIKE"].includes(leg.mode)) || itineraryDurationSeconds(itinerary) <= 0) return false;
+    const key = JSON.stringify([itinerary.startTime, itinerary.endTime, itinerary.legs.map((leg) => [leg.mode, leg.from.stopId || leg.from.name, leg.to.stopId || leg.to.name, leg.startTime, leg.endTime, leg.displayName || leg.routeShortName || leg.routeLongName, leg.agencyName, leg.tripId, leg.routeId])]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a, b) => itineraryDurationSeconds(a) - itineraryDurationSeconds(b));
+  const patterns = new Set();
+  const varied = candidates.filter((itinerary) => {
+    const pattern = transitRoutePattern(itinerary);
+    if (patterns.has(pattern)) return false;
+    patterns.add(pattern);
+    return true;
+  });
+  return [...varied, ...candidates.filter((itinerary) => !varied.includes(itinerary))].slice(0, 4).sort((a, b) => itineraryDurationSeconds(a) - itineraryDurationSeconds(b));
+}
+
 function projectToSegment(point, start, end) {
   const scale = Math.cos(((start.lat + end.lat + point.lat) / 3) * Math.PI / 180);
   const ax = start.lng * scale;

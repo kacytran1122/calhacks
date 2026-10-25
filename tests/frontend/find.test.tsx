@@ -416,6 +416,7 @@ test("keeps detailed transit visible while its fare is being verified", async ()
   expect(screen.queryByText(/Bright Data did not respond/i)).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "A stop on the way" })).not.toBeInTheDocument();
   expect(screen.queryByText(/No route fits organizer policy/i)).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Search public-transit alternatives ↗" })).toHaveAttribute("href", expect.stringContaining("travelmode=transit"));
 });
 
 test("binds an official fare to the exact live itinerary it covers", async () => {
@@ -448,4 +449,185 @@ test("binds an official fare to the exact live itinerary it covers", async () =>
   expect(await screen.findByText("Best route")).toBeVisible();
   expect(container.querySelector(".fd-route-card.best")?.textContent).toContain("Take Metrolink OC Line.");
   expect(container.querySelector(".fd-route-card.best")?.textContent).not.toContain("Take Amtrak.");
+});
+
+test("keeps distinct transit alternatives and unpriced guides when self-drive is off", async () => {
+  const event = {
+    key: "transit-options", source: "luma", name: "University Build Night", city: "Los Angeles, CA", venue: "UCLA", locationPrecision: "exact" as const, url: "https://lu.ma/transit-options", kind: "tech" as const, distanceMiles: 12, fetchedAt: "2026-10-25T00:00:00Z", via: "direct",
+  };
+  const options = [
+    { mode: "bus", routeTitle: "Metro 720 via Wilshire", costCents: 175, costSource: "fare", pMiss: 0.2, history: { trips: 0, late: 0 }, withinCap: true, withinBudget: true },
+    { mode: "bus", routeTitle: "Big Blue Bus 1 via Westwood", costCents: 110, costSource: "fare", pMiss: 0.1, history: { trips: 0, late: 0 }, withinCap: true, withinBudget: true },
+  ];
+  const plan = {
+    approvalToken: "token",
+    trip: { id: "TR-transit", mode: "bus", quoteCents: 110, distanceMiles: 12, travelerId: "T-transit" },
+    event: { name: event.name, startsAt: "2026-10-25T17:00:00Z" },
+    evidence: [
+      { id: "fare", kind: "fare", source: "Published operator fares", status: "ok", provenance: "live", fetchedAt: "2026-10-25T00:00:00Z", data: { fares: [
+        { mode: "bus", routeTitle: options[0].routeTitle, amountUsd: 1.75, link: "https://www.metro.net/riding/fares/", quote: "Metro fare: $1.75." },
+        { mode: "bus", routeTitle: options[1].routeTitle, amountUsd: 1.1, link: "https://www.bigbluebus.com/", quote: "Big Blue Bus fare: $1.10." },
+      ] } },
+      { id: "guides", kind: "route_guide", source: "Transitous", status: "ok", provenance: "live", fetchedAt: "2026-10-25T00:00:00Z", data: { options: [
+        { mode: "bus", title: options[0].routeTitle, durationText: "55 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Metro itinerary.", steps: [{ instruction: "Board Metro 720 toward Santa Monica.", detail: "Leave at Westwood Boulevard." }] },
+        { mode: "bus", title: options[1].routeTitle, durationText: "45 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Big Blue Bus itinerary.", steps: [{ instruction: "Board Big Blue Bus 1 toward UCLA.", detail: "Leave at the campus stop." }] },
+        { mode: "bus", title: "Metro 2 via Sunset", durationText: "70 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "A second Metro itinerary; fare not verified.", steps: [{ instruction: "Board Metro 2 toward UCLA.", detail: "Check the displayed destination before boarding." }] },
+        { mode: "drive", title: "Stale self-drive option", durationText: "20 min", sourceUrl: "https://www.openstreetmap.org/", sourceQuote: "Road route from a stale response.", steps: [{ instruction: "Drive to UCLA.", detail: null }] },
+      ] } },
+    ],
+    routes: { options: [...options, { mode: "drive", costCents: 900, costSource: "mileage", pMiss: 0.1, history: { trips: 0, late: 0 }, withinCap: true, withinBudget: true }], pick: options[1], fastest: "drive", cap: 4000, travelerBudgetCents: 10000 },
+    inbox: null,
+    buddies: [],
+  };
+  let submittedPlan: Record<string, unknown> | undefined;
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "/api/plan") {
+      submittedPlan = JSON.parse(String(init?.body));
+      return response(plan);
+    }
+    return response({ ...result, origin: { zip: "90024", label: "Westwood, CA" }, events: [event] });
+  }));
+  const user = userEvent.setup();
+  const { container } = render(<FindClient initialZip="90024" initialOrigin="Westwood, CA" initialLat={34.061} initialLon={-118.446} />);
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.click(screen.getByLabelText("Include self-drive"));
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+
+  expect(await screen.findByText("Best route")).toBeVisible();
+  expect(submittedPlan?.includeSelfDrive).toBe(false);
+  const best = container.querySelector(".fd-route-card.best")!;
+  expect(best.textContent).toContain("Board Big Blue Bus 1 toward UCLA.");
+  expect(best.textContent).toContain("Big Blue Bus fare: $1.10.");
+  expect(best.textContent).not.toContain("Metro fare: $1.75.");
+  const alternatives = Array.from(container.querySelectorAll(".fd-route-card.alternative"));
+  expect(alternatives).toHaveLength(2);
+  expect(alternatives[0].querySelector("summary")?.textContent).toContain("Metro 720 via Wilshire");
+  expect(alternatives[0].textContent).toContain("Metro fare: $1.75.");
+  expect(alternatives[1].querySelector("summary")?.textContent).toContain("Metro 2 via Sunset");
+  expect(alternatives[1].querySelector("summary")?.textContent).toContain("70 min");
+  expect(alternatives[1].textContent).toContain("Board Metro 2 toward UCLA.");
+  expect(alternatives[1].textContent).not.toContain("fare verification needed");
+  expect(screen.queryByText("IRS mileage estimate")).not.toBeInTheDocument();
+  expect(screen.queryByText("Stale self-drive option")).not.toBeInTheDocument();
+  expect(screen.queryByText("Drive to UCLA.")).not.toBeInTheDocument();
+});
+
+test("locks the self-drive preference while a route request is in flight", async () => {
+  const event = { key: "pending-trip", source: "luma", name: "Campus Build Night", city: "Irvine, CA", venue: "UCI", locationPrecision: "exact" as const, url: "https://lu.ma/pending-trip", kind: "tech" as const, distanceMiles: 45, fetchedAt: "2026-10-25T00:00:00Z", via: "direct" };
+  let finish: (value: Response) => void = () => {};
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/plan" ? new Promise<Response>(resolve => { finish = resolve; }) : response({ ...result, events: [event] })));
+  const user = userEvent.setup();
+  render(<FindClient initialZip="92697" initialOrigin="Irvine, CA" initialLat={33.64} initialLon={-117.84} />);
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.click(screen.getByLabelText("Include self-drive"));
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+  expect(screen.getByLabelText("Include self-drive")).toBeDisabled();
+  expect(screen.getByLabelText("Include self-drive")).not.toBeChecked();
+  finish(await response({ trip: { id: "pending-trip", mode: "train", quoteCents: 0, distanceMiles: 45, travelerId: "T-pending" }, event: { name: event.name }, evidence: [], routes: { options: [], cap: 4000 }, inbox: null, buddies: [] }));
+  expect(await screen.findByText("Looking for another option?")).toBeVisible();
+});
+
+test("does not attach a generic train fare to an arbitrary live itinerary", async () => {
+  const event = { key: "generic-fare", source: "luma", name: "Irvine Demo Day", city: "Irvine, CA", venue: "UCI", locationPrecision: "exact" as const, url: "https://lu.ma/generic-fare", kind: "tech" as const, distanceMiles: 45, fetchedAt: "2026-10-25T00:00:00Z", via: "direct" };
+  const plan = {
+    approvalToken: "token",
+    trip: { id: "TR-generic", mode: "train", quoteCents: 1200, distanceMiles: 45, travelerId: "T-generic" },
+    event: { name: event.name, startsAt: "2026-10-25T17:00:00Z" },
+    evidence: [
+      { id: "fare", kind: "fare", source: "Published fare", status: "ok", provenance: "live", fetchedAt: "2026-10-25T00:00:00Z", data: { fares: [{ mode: "train", amountUsd: 12, link: "https://metrolinktrains.com/", quote: "Weekend pass $12." }] } },
+      { id: "guides", kind: "route_guide", source: "Transitous", status: "ok", provenance: "live", fetchedAt: "2026-10-25T00:00:00Z", data: { options: [
+        { mode: "train", title: "Amtrak Pacific Surfliner", durationText: "2 hr", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Amtrak schedule.", steps: [{ instruction: "Board the Pacific Surfliner toward San Diego.", detail: "A separate Amtrak ticket is required." }] },
+        { mode: "train", title: "Metrolink OC Line", durationText: "2 hr 30 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Metrolink schedule.", steps: [{ instruction: "Board the OC Line toward Oceanside.", detail: "Confirm the ticket covers this departure." }] },
+      ] } },
+    ],
+    routes: { options: [{ mode: "train", costCents: 1200, costSource: "fare", pMiss: 0.1, history: { trips: 0, late: 0 }, withinCap: true, withinBudget: true }], pick: { mode: "train", costCents: 1200 }, cap: 4000, travelerBudgetCents: 10000 },
+    inbox: { id: "I-generic", question: "Approve the fare?", askedOf: "traveler" },
+    buddies: [],
+  };
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/plan" ? response(plan) : response({ ...result, events: [event] })));
+  const user = userEvent.setup();
+  const { container } = render(<FindClient initialZip="90024" initialOrigin="Westwood, CA" initialLat={34.061} initialLon={-118.446} />);
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+
+  expect(await screen.findByText("Fare reference")).toBeVisible();
+  const reference = container.querySelector(".fd-route-card.best")!;
+  expect(reference.textContent).toContain("published fare");
+  expect(reference.textContent).not.toContain("trip total");
+  expect(reference.textContent).not.toContain("Board the Pacific Surfliner");
+  expect(reference.textContent).not.toContain("Board the OC Line");
+  expect(container.querySelectorAll(".fd-route-card.alternative")).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "Approve exactly $12.00" })).not.toBeInTheDocument();
+});
+
+test("keeps an explicit verified trip fare approvable before directions are available", async () => {
+  const event = { key: "verified-flight", source: "mlh", name: "Bay Area Build Day", city: "San Francisco, CA", locationPrecision: "city" as const, url: "https://example.org/build-day", kind: "hackathon" as const, distanceMiles: 1200, fetchedAt: "2026-10-25T00:00:00Z", via: "direct" };
+  const option = { mode: "flight", routeTitle: "ORD to SFO on January 16", costCents: 21900, costSource: "fare", pMiss: 0.1, history: { trips: 0, late: 0 }, withinCap: true, withinBudget: true };
+  const plan = {
+    approvalToken: "token",
+    trip: { id: "TR-verified", mode: "flight", quoteCents: 21900, distanceMiles: 1200, travelerId: "T-verified" },
+    event: { name: event.name, startsAt: "2027-01-17T17:00:00Z" },
+    evidence: [{ id: "fare", kind: "fare", source: "Verified flight fare", status: "ok", provenance: "live", fetchedAt: "2026-10-25T00:00:00Z", data: { fares: [{ mode: "flight", routeTitle: option.routeTitle, amountUsd: 219, priceScope: "route_total", fees: "included", link: "https://www.google.com/travel/flights", quote: "$219 total including taxes." }] } }],
+    routes: { options: [option], pick: option, cap: 50000, travelerBudgetCents: 50000 },
+    inbox: { id: "I-verified", question: "Approve the verified fare?", askedOf: "traveler" },
+    buddies: [],
+  };
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/plan" ? response(plan) : response({ ...result, events: [event] })));
+  const user = userEvent.setup();
+  const { container } = render(<FindClient initialZip="60601" initialOrigin="Chicago, IL" initialLat={41.88} initialLon={-87.63} />);
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "500");
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+  expect(await screen.findByRole("button", { name: "Approve exactly $219.00" })).toBeVisible();
+  expect(screen.getByText("Verified trip fare")).toBeVisible();
+  const best = container.querySelector(".fd-route-card.best")!;
+  expect(best.textContent).toContain("Leave Chicago, IL with enough time for the airport connection and check-in.");
+  expect(within(best).getByRole("button", { name: /Open step-by-step route/ })).toBeVisible();
+  expect(within(best).getByRole("link", { name: /Check Fare/ })).toHaveAttribute("href", "https://www.google.com/travel/flights");
+});
+
+test("keeps identically named itineraries separate until their fare can be bound uniquely", async () => {
+  const event = { key: "duplicate-guide", source: "luma", name: "Coastal Build Night", city: "Irvine, CA", venue: "UCI", locationPrecision: "exact" as const, url: "https://lu.ma/duplicate-guide", kind: "tech" as const, distanceMiles: 45, fetchedAt: "2026-10-25T00:00:00Z", via: "direct" };
+  const title = "Train to Irvine";
+  const option = { mode: "train", routeTitle: title, costCents: 1200, costSource: "fare", pMiss: 0.1, history: { trips: 0, late: 0 }, withinCap: true, withinBudget: true };
+  const plan = {
+    approvalToken: "token",
+    trip: { id: "TR-duplicate", mode: "train", quoteCents: 1200, distanceMiles: 45, travelerId: "T-duplicate" },
+    event: { name: event.name, startsAt: "2026-10-25T17:00:00Z" },
+    evidence: [
+      { id: "fare", kind: "fare", source: "Published fare", status: "ok", provenance: "live", fetchedAt: "2026-10-25T00:00:00Z", data: { fares: [{ mode: "train", routeTitle: title, amountUsd: 12, link: "https://metrolinktrains.com/", quote: "Weekend pass $12." }] } },
+      { id: "guides", kind: "route_guide", source: "Public route sources", status: "ok", provenance: "live", fetchedAt: "2026-10-25T00:00:00Z", data: { options: [
+        { mode: "train", title, durationText: "2 hr", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Amtrak service.", steps: [{ instruction: "Board the Pacific Surfliner toward San Diego.", detail: "This service uses an Amtrak ticket." }] },
+        { mode: "train", title, durationText: "3 hr", sourceUrl: "https://metrolinktrains.com/", sourceQuote: "Metrolink service.", steps: [{ instruction: "Board the OC Line toward Oceanside.", detail: "This service uses a Metrolink ticket." }] },
+      ] } },
+    ],
+    routes: { options: [option], pick: option, cap: 4000, travelerBudgetCents: 10000 },
+    inbox: { id: "I-duplicate", question: "Approve the fare?", askedOf: "traveler" },
+    buddies: [],
+  };
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/plan" ? response(plan) : response({ ...result, events: [event] })));
+  const user = userEvent.setup();
+  const { container } = render(<FindClient initialZip="90024" initialOrigin="Westwood, CA" initialLat={34.061} initialLon={-118.446} />);
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+  expect(await screen.findByText("Fare reference")).toBeVisible();
+  const reference = container.querySelector(".fd-route-card.best")!;
+  expect(reference.querySelector(".fd-route-steps")).toBeNull();
+  expect(reference.textContent).not.toContain("Pacific Surfliner");
+  expect(reference.textContent).not.toContain("OC Line");
+  expect(reference.textContent).not.toContain("trip total");
+  const alternatives = Array.from(container.querySelectorAll(".fd-route-card.alternative"));
+  expect(alternatives).toHaveLength(2);
+  expect(alternatives[0].textContent).toContain("Board the Pacific Surfliner toward San Diego.");
+  expect(alternatives[1].textContent).toContain("Board the OC Line toward Oceanside.");
+  expect(screen.queryByRole("button", { name: "Approve exactly $12.00" })).not.toBeInTheDocument();
 });

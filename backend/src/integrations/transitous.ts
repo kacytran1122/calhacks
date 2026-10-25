@@ -4,7 +4,7 @@ const API = "https://api.transitous.org/api/v6/plan";
 const ATTRIBUTION_URL = "https://transitous.org/sources/";
 const USER_AGENT = "Smile/0.1 (+https://github.com/kacytran1122/calhacks)";
 
-type Place = { name?: string; tz?: string };
+type Place = { name?: string; tz?: string; cancelled?: boolean };
 type Leg = {
   mode: string;
   from: Place;
@@ -19,6 +19,8 @@ type Leg = {
   displayName?: string;
   routeShortName?: string;
   agencyName?: string;
+  tripId?: string;
+  routeId?: string;
 };
 
 type FareProduct = { name: string; amount: number; currency: string; riderCategory?: { isDefaultFareCategory?: boolean } };
@@ -51,6 +53,8 @@ export interface TransitOption {
   agencies: string[];
   amountUsd?: number;
   fareQuote?: string;
+  departAt?: string;
+  arriveAt?: string;
 }
 
 const OPERATOR_FARE_PAGES: { agency: RegExp; url: string }[] = [
@@ -126,12 +130,13 @@ function fareTotal(itinerary: Itinerary) {
 }
 
 function toOption(itinerary: Itinerary): TransitOption | null {
-  const usable = itinerary.legs.filter((leg) => !leg.cancelled);
+  if (itinerary.legs.some((leg) => leg.cancelled || leg.from.cancelled || leg.to.cancelled || /^(?:CAR(?:_.*)?|HGV)$/.test(leg.mode))) return null;
+  const usable = itinerary.legs;
   const transit = usable.filter((leg) => !["WALK", "BIKE", "CAR"].includes(leg.mode));
   if (!transit.length) return null;
   const agencies = [...new Set(transit.map((leg) => leg.agencyName).filter((name): name is string => Boolean(name)))];
   const lines = [...new Set(transit.map(lineName))];
-  const intercityRail = transit.some((leg) => /RAIL|TRAIN/.test(leg.mode));
+  const intercityRail = transit.some((leg) => /RAIL|TRAIN/.test(leg.mode) || ["LONG_DISTANCE", "SUBURBAN"].includes(leg.mode));
   const coach = transit.some((leg) => leg.mode === "COACH");
   const rail = intercityRail || (!coach && transit.some((leg) => /SUBWAY|TRAM/.test(leg.mode)));
   const realtime = transit.filter((leg) => leg.realTime).length;
@@ -169,22 +174,51 @@ function toOption(itinerary: Itinerary): TransitOption | null {
     agencies,
     amountUsd: total,
     fareQuote: total ? `Transitous GTFS fare products total $${total.toFixed(2)}.` : undefined,
+    departAt: itinerary.startTime,
+    arriveAt: itinerary.endTime,
   };
 }
 
 export function transitOptionsFrom(body: TransitPlanPayload) {
   const seen = new Set<string>();
-  return (body.itineraries ?? [])
-    .sort((a, b) => a.duration - b.duration)
-    .map(toOption)
-    .filter((option): option is TransitOption => Boolean(option))
-    .filter((option) => {
-      const signature = option.steps.map((step) => step.instruction).join("|");
-      if (seen.has(signature)) return false;
-      seen.add(signature);
-      return true;
-    })
-    .slice(0, 4);
+  const options: TransitOption[] = [];
+  const descriptions: { departure: string; via?: string }[] = [];
+  for (const itinerary of [...(body.itineraries ?? [])].sort((a, b) => a.duration - b.duration)) {
+    const option = toOption(itinerary);
+    if (!option) continue;
+    const signature = JSON.stringify([itinerary.startTime, itinerary.endTime, itinerary.legs.map((leg) => [leg.mode, leg.from.name, leg.to.name, leg.startTime, leg.endTime, lineName(leg), leg.agencyName, leg.tripId, leg.routeId])]);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    options.push(option);
+    let departure = itinerary.startTime;
+    try {
+      departure = new Date(itinerary.startTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: itinerary.legs[0]?.from.tz || "UTC", timeZoneName: "short" });
+    } catch {}
+    const transitLegs = itinerary.legs.filter((leg) => leg.mode !== "WALK");
+    descriptions.push({ departure, via: transitLegs.length > 1 ? transitLegs[0]?.to.name : undefined });
+  }
+  const patterns = new Set<string>();
+  const distinct: number[] = [];
+  const laterDepartures: number[] = [];
+  for (const [index, option] of options.entries()) {
+    const pattern = option.steps.map((step) => step.instruction).join("|");
+    (patterns.has(pattern) ? laterDepartures : distinct).push(index);
+    patterns.add(pattern);
+  }
+  const selectedIndexes = [...distinct, ...laterDepartures].slice(0, 4);
+  const selected = selectedIndexes.map((index) => options[index]!);
+  const usedTitles = new Set<string>();
+  return selected.map((option, index) => {
+    if (selected.filter((other) => other.title === option.title).length === 1) return option;
+    const description = descriptions[selectedIndexes[index]!]!;
+    let suffix = ` · departs ${description.departure}`;
+    const caption = (tail: string) => `${option.title.slice(0, Math.max(0, 120 - tail.length))}${tail}`;
+    if (usedTitles.has(caption(suffix))) suffix += description.via ? ` · via ${description.via.slice(0, 40)}` : ` · option ${index + 1}`;
+    if (usedTitles.has(caption(suffix))) suffix += ` · option ${index + 1}`;
+    const title = caption(suffix);
+    usedTitles.add(title);
+    return { ...option, title };
+  });
 }
 
 export async function planPublicTransit(args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; startsAt?: string; includeFares?: boolean }): Promise<TransitPlanResult> {
@@ -202,19 +236,36 @@ export async function planPublicTransit(args: { from: { lat: number; lon: number
     maxTransfers: "5",
     detailedTransfers: "true",
     realtimeMode: "REALTIME",
+    timetableView: "true",
+    transitModes: "TRANSIT",
+    directModes: "",
+    preTransitModes: "WALK",
+    postTransitModes: "WALK",
   });
   const url = `${API}?${params}`;
   const t0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 9_000);
+  let options: TransitOption[] = [];
   try {
     const response = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": USER_AGENT, Accept: "application/json" } });
     if (!response.ok) return { status: "error", url, options: [], ms: Date.now() - t0, error: `Transitous returned HTTP ${response.status}` };
     const body = (await response.json()) as TransitPlanPayload;
-    const options = transitOptionsFrom(body);
+    options = transitOptionsFrom(body);
+    const routePatterns = new Set(options.map((option) => option.steps.map((step) => step.instruction).join("|")));
+    if (routePatterns.size < 2 && !options.some((option) => option.mode === "bus") && Date.now() - t0 < 8_400) {
+      const busParams = new URLSearchParams(params);
+      busParams.set("transitModes", "BUS,COACH");
+      const alternativeResponse = await fetch(`${API}?${busParams}`, { signal: ctrl.signal, headers: { "User-Agent": USER_AGENT, Accept: "application/json" } });
+      if (alternativeResponse.ok) {
+        const alternativeBody = await alternativeResponse.json() as TransitPlanPayload;
+        options = transitOptionsFrom({ itineraries: [...(body.itineraries ?? []), ...(alternativeBody.itineraries ?? [])] });
+      }
+    }
     return { status: options.length ? "ok" : "empty", url, options, ms: Date.now() - t0, error: options.length ? undefined : "No public-transit itinerary was returned for this time." };
   } catch (error) {
     const timedOut = (error as Error).name === "AbortError" || (error as Error).name === "TimeoutError";
+    if (options.length) return { status: "ok", url, options, ms: Date.now() - t0, error: timedOut ? "The available transit itinerary is shown; the additional bus/coach search reached the shared 9-second limit." : "The available transit itinerary is shown; the additional bus/coach search could not be completed." };
     return { status: timedOut ? "timeout" : "error", url, options: [], ms: Date.now() - t0, error: timedOut ? "Live public-transit routing took longer than 9 seconds." : (error as Error).message };
   } finally {
     clearTimeout(timer);

@@ -32,6 +32,7 @@ export function MapClient() {
           const body = await response.json().catch(() => ({})) as {
             error?: string;
             mode?: string;
+            includeSelfDrive?: boolean;
             destination?: { query?: string; label?: string; lat?: number; lon?: number };
           };
           if (!response.ok) {
@@ -45,13 +46,14 @@ export function MapClient() {
           if (typeof destination?.lon === "number" && Number.isFinite(destination.lon)) current.searchParams.set("lon", String(destination.lon));
           if (label) current.searchParams.set("to", label);
           if (body.mode && ["drive", "rideshare", "train", "bus", "flight"].includes(body.mode)) current.searchParams.set("mode", body.mode);
+          current.searchParams.set("includeSelfDrive", String(body.includeSelfDrive ?? body.mode === "drive"));
           current.searchParams.delete("handoff");
           window.history.replaceState(window.history.state, "", `${current.pathname}${current.search}${current.hash}`);
         }
         setPreparing(false);
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
         if (!window.L) await load("/map-assets/leaflet.js");
-        if (!cancelled) await load(`/map-assets/map.js?v=5`, true);
+        if (!cancelled) await load(`/map-assets/map.js?v=6`, true);
       } catch (cause) {
         if (!cancelled) {
           setPreparing(false);

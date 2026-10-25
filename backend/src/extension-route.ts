@@ -97,7 +97,7 @@ export async function planExtensionRoute(input: { originText?: string; originCoo
   const messages = [
     ...(transit.error ? [transit.error] : []),
     ...(driving?.error ? [driving.error] : []),
-    ...(!routes.length ? [input.includeSelfDrive ? "No live transit or driving route was returned. Try again closer to departure." : "No live public-transit route was returned. You can enable self-drive or try again closer to departure."] : []),
+    ...(!routes.length ? [input.includeSelfDrive ? "No live transit or driving route was returned. Try again closer to departure." : "No complete public-transit itinerary was returned for this time. Check the event address and current operator timetables, or try again closer to departure. Self-drive remains excluded."] : []),
   ];
   return {
     event: input.event,

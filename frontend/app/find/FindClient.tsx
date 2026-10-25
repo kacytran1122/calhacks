@@ -46,7 +46,7 @@ type Plan = {
   trip: { id: string; mode: string; quoteCents: number; distanceMiles: number; travelerId: string; travelerBudgetCents?: number; travelerMaxDistanceMiles?: number; organizerCapCents?: number; reimbursementEligibleCents?: number };
   event: { name: string; startsAt: string };
   evidence: Ev[];
-  routes: { options: RouteOption[]; pick?: { mode: string }; pickReason?: string; fastest?: string; lowestCarbon?: string; carbon?: CarbonComparison; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" | "NO_VERIFIED_FARE" } | null;
+  routes: { options: RouteOption[]; pick?: { mode: string; costCents?: number; routeTitle?: string }; pickReason?: string; fastest?: string; lowestCarbon?: string; carbon?: CarbonComparison; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" | "NO_VERIFIED_FARE" } | null;
   carpool?: Carpool | null;
   inbox: { id: string; question: string; askedOf: "traveler" | "organizer" | "controller" } | null;
   buddies: { initials: string; mode: string; sameMode: boolean; milesApart: number }[];
@@ -62,7 +62,7 @@ type ConstraintReview = {
   parsedBy: "claude" | "rules";
 };
 type ConstraintAnswer = { question: string; answer: string };
-type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string; minutes?: number; minutesSource?: string };
+type RouteOption = { mode: string; routeTitle?: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string; minutes?: number; minutesSource?: string };
 type RouteGuide = { mode: string; title: string; durationText: string | null; durationMinutes?: number | null; sourceUrl: string; sourceQuote: string; fareUrl?: string; agencies?: string[]; steps: { instruction: string; detail: string | null }[] };
 type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string; provider?: string; priceScope?: "route_total" | "published_ticket" | "day_pass"; fees?: "included" | "not_applicable" | "not_stated" };
 
@@ -113,6 +113,11 @@ function EventVisual({ event, compact = false }: { event: Listing; compact?: boo
 
 function modeName(mode: string) {
   return ({ train: "Train + local transit", bus: "Bus + local transit", rideshare: "Rideshare", flight: "Flight + airport transfer", drive: "Self-drive" } as Record<string, string>)[mode] ?? mode;
+}
+
+function transitSearchUrl(origin: string, event: Listing) {
+  const destination = event.lat !== undefined && event.lon !== undefined ? `${event.lat},${event.lon}` : [event.venue, event.city].filter(Boolean).join(", ");
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=transit`;
 }
 
 function fareCheckUrl(guide?: RouteGuide, fare?: FareItem) {
@@ -180,15 +185,16 @@ function routeDurationMinutes(guide: RouteGuide) {
   return total > 0 ? total : undefined;
 }
 
-function RouteInstructions({ option, guide, fare, origin, event, tripId, tripToken, best = false, tags = [], why }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; tripId: string; tripToken: string; best?: boolean; tags?: string[]; why?: string }) {
+function RouteInstructions({ option, guide, fare, origin, event, tripId, tripToken, best = false, ambiguous = false, tags = [], why }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; tripId: string; tripToken: string; best?: boolean; ambiguous?: boolean; tags?: string[]; why?: string }) {
   const destination = event.venue || event.city || event.name;
   const checkFareUrl = fareCheckUrl(guide, fare);
-  const steps = guide?.steps?.length ? guide.steps : fallbackRouteSteps(origin, destination, event, option.mode);
+  const itineraryFare = !ambiguous && Boolean(guide || option.routeTitle || fare?.routeTitle || fare?.priceScope === "route_total");
+  const steps = guide?.steps?.length ? guide.steps : itineraryFare ? fallbackRouteSteps(origin, destination, event, option.mode) : [];
   const content = (
     <>
       <div className="fd-route-head">
-        <div><span>{best ? "Best route" : "Alternative route"}</span><h3>{guide?.title || modeName(option.mode)}</h3></div>
-        <div className="fd-route-price"><b>{fmt(option.costCents)}</b><small>trip total</small></div>
+        <div><span>{guide ? best ? "Best route" : "Alternative route" : itineraryFare ? "Verified trip fare" : "Fare reference"}</span><h3>{guide?.title || option.routeTitle || modeName(option.mode)}</h3></div>
+        <div className="fd-route-price"><b>{fmt(option.costCents)}</b><small>{itineraryFare ? "trip total" : "published fare"}</small></div>
       </div>
       <div className="fd-route-facts">
         {guide?.durationText && <span>{guide.durationText}</span>}
@@ -198,13 +204,13 @@ function RouteInstructions({ option, guide, fare, origin, event, tripId, tripTok
         {option.co2eKg !== undefined && <span title={option.co2eFormula}>≈ {option.co2eKg} kg CO₂e per traveler</span>}
         {tags.map((t) => <span key={t} className="fd-tag">{t}</span>)}
       </div>
-      {why && <p className="fd-why"><b>Why this route:</b> {why}</p>}
-      <ol className="fd-route-steps">
+      {why && <p className="fd-why"><b>{guide ? "Why this route:" : "Why this fare option:"}</b> {why}</p>}
+      {steps.length > 0 ? <ol className="fd-route-steps">
         {steps.map((step, index) => <li key={`${option.mode}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
-      </ol>
+      </ol> : <p className="dk-note">Check which service this published fare covers before choosing an itinerary.</p>}
       {(option.mode === "drive" || fare) && (
         <div className="fd-cost-box">
-          <div><span>{option.mode === "drive" ? "Estimated driving cost" : "Published fare"}</span><b>{fmt(option.costCents)}</b></div>
+          <div><span>{option.mode === "drive" ? "Estimated driving cost" : itineraryFare ? "Published fare" : "Published fare reference"}</span><b>{fmt(option.costCents)}</b></div>
           <p>{option.mode === "drive" ? "Mileage estimate based on the current IRS rate and route distance." : `${fare?.provider ? `${fare.provider}: ` : ""}“${fare?.quote}”${fare?.fees === "included" ? " Taxes and mandatory fees are included in the quoted total." : fare?.fees === "not_applicable" ? " This is the published operator fare for the covered ticket or pass." : " The source does not separately state fees."}`}</p>
         </div>
       )}
@@ -217,7 +223,7 @@ function RouteInstructions({ option, guide, fare, origin, event, tripId, tripTok
     </>
   );
   if (best) return <section className="fd-route-card best">{content}</section>;
-  return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}{option.co2eKg !== undefined && <small> · {option.co2eKg} kg CO₂e</small>}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
+  return <details className="fd-route-card alternative"><summary><span>{guide?.title || option.routeTitle || modeName(option.mode)}{option.co2eKg !== undefined && <small> · {option.co2eKg} kg CO₂e</small>}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
 }
 
 function UnpricedRouteGuide({ guide, event, tripId, tripToken, best = false, tags = [] }: { guide: RouteGuide; event: Listing; tripId: string; tripToken: string; best?: boolean; tags?: string[] }) {
@@ -595,7 +601,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
         event: { key: event.key, name: event.name, startsAt: event.startsAt, venue: event.venue, city: event.city, lat: event.lat, lon: event.lon, url: event.url },
       });
       setPlan(p);
-      setStage(p.inbox?.askedOf === "traveler" && p.trip.quoteCents > 0 ? "planned" : "none");
+      setStage(p.inbox?.askedOf === "traveler" && p.trip.quoteCents > 0 && (includeSelfDrive || p.trip.mode !== "drive") ? "planned" : "none");
     });
 
   const approve = () =>
@@ -620,15 +626,27 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
   const constraint = plan?.evidence.find((e) => e.kind === "traveler_constraint");
   const fareItems = (Array.isArray(fare?.data.fares) ? fare.data.fares : []) as FareItem[];
   const stopItems = (Array.isArray(stops?.data.results) ? stops.data.results : []) as { title: string; link: string }[];
-  const routeGuides = (Array.isArray(routeGuide?.data.options) ? routeGuide.data.options : []) as RouteGuide[];
-  const pickedRoute = plan?.routes?.options.find((option) => option.mode === plan.routes?.pick?.mode);
-  const alternativeRoutes = plan?.routes?.options.filter((option) => option.mode !== plan.routes?.pick?.mode) ?? [];
-  const fareFor = (option: RouteOption) => fareItems.find((item) => item.mode === option.mode);
-  const guideFor = (option: RouteOption) => {
+  const routeGuides = ((Array.isArray(routeGuide?.data.options) ? routeGuide.data.options : []) as RouteGuide[])
+    .filter((guide) => includeSelfDrive || guide.mode !== "drive");
+  const routeOptions = (plan?.routes?.options ?? []).filter((option) => includeSelfDrive || option.mode !== "drive");
+  const pickedSpec = plan?.routes?.pick;
+  const pickedRoute = pickedSpec ? routeOptions.find((option) => option.mode === pickedSpec.mode
+    && (pickedSpec.routeTitle === undefined || option.routeTitle === pickedSpec.routeTitle)
+    && (pickedSpec.costCents === undefined || option.costCents === pickedSpec.costCents)) : undefined;
+  const alternativeRoutes = routeOptions.filter((option) => option !== pickedRoute);
+  const fareFor = (option: RouteOption) => {
+    const matchingMode = fareItems.filter((item) => item.mode === option.mode);
+    return (option.routeTitle ? matchingMode.find((item) => item.routeTitle === option.routeTitle && Math.round(item.amountUsd * 100) === option.costCents) : undefined)
+      ?? matchingMode.find((item) => Math.round(item.amountUsd * 100) === option.costCents && (!option.routeTitle || !item.routeTitle));
+  };
+  const matchingGuidesFor = (option: RouteOption) => {
     const matchedFare = fareFor(option);
-    return matchedFare?.routeTitle
-      ? routeGuides.find((guide) => guide.title === matchedFare.routeTitle)
-      : routeGuides.find((guide) => guide.mode === option.mode);
+    const title = option.routeTitle ?? matchedFare?.routeTitle;
+    return routeGuides.filter((guide) => guide.mode === option.mode && (!title || guide.title === title));
+  };
+  const guideFor = (option: RouteOption) => {
+    const matches = matchingGuidesFor(option);
+    return matches.length === 1 ? matches[0] : undefined;
   };
   const timedGuides = routeGuides
     .map((guide) => ({ guide, minutes: routeDurationMinutes(guide) }))
@@ -641,7 +659,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
   ];
   const tagsForGuide = (guide: RouteGuide) => guide === fastestGuide ? ["Fastest route"] : [];
   const representedGuideIndexes = new Set<number>();
-  for (const option of plan?.routes?.options ?? []) {
+  for (const option of routeOptions) {
     const selectedGuide = guideFor(option);
     const index = routeGuides.findIndex((guide, guideIndex) => guide === selectedGuide && !representedGuideIndexes.has(guideIndex));
     if (index >= 0) representedGuideIndexes.add(index);
@@ -651,6 +669,8 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
     .sort((a, b) => (a === fastestGuide ? -1 : b === fastestGuide ? 1 : (routeDurationMinutes(a) ?? Number.POSITIVE_INFINITY) - (routeDurationMinutes(b) ?? Number.POSITIVE_INFINITY)));
   const unpricedPrimary = !pickedRoute ? additionalRouteGuides[0] : undefined;
   const unpricedAlternatives = !pickedRoute ? additionalRouteGuides.slice(1) : additionalRouteGuides;
+  const ambiguousPickedFare = Boolean(pickedRoute && matchingGuidesFor(pickedRoute).length > 1);
+  const hasActionableQuote = Boolean(pickedRoute && !ambiguousPickedFare && pickedRoute.mode === plan?.trip.mode && pickedRoute.costCents === plan?.trip.quoteCents);
 
   return (
     <aside className="dk-panel fd-plan" aria-label={`Trip plan for ${event.name}`}>
@@ -719,7 +739,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
           {constraintReview?.status === "ready" && <div className="fd-constraint-ready"><b>Travel requirements confirmed</b><span>{constraintReview.summary}</span></div>}
           <label className="fd-drive">
             <span>Include self-drive</span>
-            <input type="checkbox" checked={includeSelfDrive} onChange={(e) => setIncludeSelfDrive(e.target.checked)} />
+            <input type="checkbox" checked={includeSelfDrive} disabled={!!busy} onChange={(e) => { setIncludeSelfDrive(e.target.checked); setPlan(null); setStage("none"); setMsg(null); }} />
             <span className="fd-drive-switch" aria-hidden="true"><i /></span>
           </label>
           <p className="dk-note">This is your personal limit. It filters routes but never raises the organizer’s reimbursement cap.</p>
@@ -740,16 +760,17 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
               <small>Includes the ground connections and transfers shown in the itinerary.</small>
             </section>
           )}
-          {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} best tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
+          {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} best ambiguous={ambiguousPickedFare} tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
           {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} best tags={tagsForGuide(unpricedPrimary)} />}
-          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} tags={tagsForGuide(guide)} />)}</section>}
-          {plan.routes.carbon && <CarbonCompare carbon={plan.routes.carbon} pick={plan.routes.pick?.mode} fastest={plan.routes.fastest} carpool={plan.carpool ?? null} />}
+          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span></div>{alternativeRoutes.map((option, index) => <RouteInstructions key={`${option.mode}-${option.routeTitle ?? option.costCents}-${index}`} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} ambiguous={matchingGuidesFor(option).length > 1} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} tags={tagsForGuide(guide)} />)}</section>}
+          {alternativeRoutes.length === 0 && unpricedAlternatives.length === 0 && <section className="fd-alternatives"><div className="fd-section-title"><span>Looking for another option?</span><small>No additional itinerary was verified in this search. Check current departures with another planner.</small></div><a className="dk-link" href={transitSearchUrl(originText || zip, event)} target="_blank" rel="noreferrer">Search public-transit alternatives ↗</a></section>}
+          {plan.routes.carbon && <CarbonCompare carbon={{ ...plan.routes.carbon, estimates: plan.routes.carbon.estimates.filter((estimate) => includeSelfDrive || estimate.mode !== "drive") }} pick={pickedRoute?.mode} fastest={fastestGuide?.mode} carpool={plan.carpool ?? null} />}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
             <i aria-hidden="true">→</i>
             <div><span>Organizer policy</span><b>{fmt(plan.routes.cap)} cap · R1</b></div>
             <i aria-hidden="true">→</i>
-            <div><span>Finance desk</span><b>{plan.routes.pick ? `${fmt(plan.trip.reimbursementEligibleCents ?? 0)} eligible` : "No approval yet"}</b></div>
+            <div><span>Finance desk</span><b>{hasActionableQuote ? `${fmt(plan.trip.reimbursementEligibleCents ?? 0)} eligible` : "No approval yet"}</b></div>
           </div>
           {plan.routes.blockReason === "TRAVELER_BUDGET" && (
             <div className="dk-q">
@@ -808,7 +829,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
             <PhotonJoinDialog tripId={plan.trip.id} tripToken={plan.approvalToken} eventName={event.name} />
           </div>
 
-          {stage === "planned" && plan.inbox && (
+          {stage === "planned" && plan.inbox && hasActionableQuote && (
             <div className="dk-q">
               <p>{plan.inbox.question}</p>
               <button className="dk-btn primary" disabled={!!busy} onClick={approve}>
@@ -816,7 +837,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
               </button>
             </div>
           )}
-          {stage === "approved" && (
+          {stage === "approved" && hasActionableQuote && (
             <div className="dk-row">
               <button className="dk-btn primary" disabled={!!busy} onClick={() => book(0)}>
                 Book at {fmt(plan.trip.quoteCents)}

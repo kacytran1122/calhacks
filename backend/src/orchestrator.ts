@@ -276,7 +276,7 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
   if (!state.events.some((e) => e.id === event.id)) state.events.push(event);
 
   const trip: Trip = {
-    id: newId("TR-L"), travelerId, eventId: event.id, period: state.company.openPeriod, method: "virtual_card", mode: "train", distanceMiles: 0,
+    id: newId("TR-L"), travelerId, eventId: event.id, period: state.company.openPeriod, method: "virtual_card", mode: "train", includeSelfDrive: args.includeSelfDrive !== false, distanceMiles: 0,
     travelerMaxDistanceMiles: args.maxDistanceMiles, travelerBudgetCents: args.travelerBudgetCents, travelConstraintSummary: args.travelConstraints?.summary,
     quoteCents: 0, requestedBy: "agent:policy", approvals: [], state: "planned",
   };
@@ -298,7 +298,7 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
   const routes = compareRoutes(state, {
     miles: g.miles, fares: g.fares, fareEvidenceId: fareEv?.id, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, includeSelfDrive: args.includeSelfDrive,
     deadlineCritical: Boolean(args.travelConstraints?.arriveBy || args.travelConstraints?.departAfter),
-    context: { roadMiles: g.roadMiles, from: g.homePoint, to: g.venuePoint, minutes: g.minutes, carpool: pool },
+    context: { roadMiles: g.roadMiles, from: g.homePoint, to: g.venuePoint, minutes: g.minutes, itineraries: g.itineraries, carpool: pool },
   });
   const pooled = routes.carbon.estimates.find((e) => e.mode === "carpool");
   const carpool = { ...pool, perTravelerKg: pooled?.kg ?? null, driveAloneKg: routes.carbon.driveAloneKg, savedKgPerTraveler: pooled ? Math.round((routes.carbon.driveAloneKg - pooled.kg) * 10) / 10 : null, formula: pooled?.formula ?? null };
@@ -321,11 +321,12 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
     return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: q };
   }
   trip.mode = routes.pick.mode;
+  trip.routeTitle = routes.pick.routeTitle;
   trip.quoteCents = routes.pick.costCents;
   trip.reimbursementEligibleCents = Math.min(trip.quoteCents, routes.cap);
   trip.co2eKg = routes.pick.co2eKg;
   trip.co2eDriveAloneKg = routes.carbon.driveAloneKg;
-  state.evidence.push({ id: `EV-${trip.id}-quote`, tripId: trip.id, kind: "quote", source: "S'mile Route Analyst", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: { amountCents: trip.quoteCents, mode: trip.mode, costSource: routes.pick.costSource, pMiss: routes.pick.pMiss, organizerCapCents: routes.cap, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, reimbursementEligibleCents: trip.reimbursementEligibleCents, pickReason: routes.pickReason, co2eKg: routes.pick.co2eKg, co2eFormula: routes.pick.co2eFormula, co2eDriveAloneKg: routes.carbon.driveAloneKg, fastest: routes.fastest, lowestCarbon: routes.lowestCarbon } });
+  state.evidence.push({ id: `EV-${trip.id}-quote`, tripId: trip.id, kind: "quote", source: "S'mile Route Analyst", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: { amountCents: trip.quoteCents, mode: trip.mode, routeTitle: routes.pick.routeTitle, costSource: routes.pick.costSource, pMiss: routes.pick.pMiss, organizerCapCents: routes.cap, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, reimbursementEligibleCents: trip.reimbursementEligibleCents, pickReason: routes.pickReason, co2eKg: routes.pick.co2eKg, co2eFormula: routes.pick.co2eFormula, co2eDriveAloneKg: routes.carbon.driveAloneKg, fastest: routes.fastest, lowestCarbon: routes.lowestCarbon } });
   const m = createMandate({ tripId: trip.id, maxCents: trip.quoteCents, merchantCategory: trip.mode === "drive" ? "fuel" : trip.mode === "bus" ? "bus" : "rail", requestedBy: "agent:policy" });
   state.mandates.push(m);
   trip.mandateId = m.id;
@@ -335,9 +336,9 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
     trip,
     "mandate_approval",
     "traveler",
-    `${trip.mode} for ${fmt(trip.quoteCents)} (cap ${fmt(capFor(g.miles))}, ${routes.pick.history.trips ? `${Math.round(routes.pick.pMiss * 100)}% chance of missing kickoff from ${routes.pick.history.trips} past trips` : "no trip history for this mode yet"}${routes.pick.co2eKg !== undefined ? `, about ${routes.pick.co2eKg} kg CO₂e` : ""})${args.travelConstraints ? `. Travel requirement: ${args.travelConstraints.summary}` : ""}. Approve exactly ${fmt(trip.quoteCents)}? Nothing is charged until you do.`,
+    `${trip.routeTitle ?? trip.mode} for ${fmt(trip.quoteCents)} (cap ${fmt(capFor(g.miles))}, ${routes.pick.history.trips ? `${Math.round(routes.pick.pMiss * 100)}% chance of missing kickoff from ${routes.pick.history.trips} past trips` : "no trip history for this mode yet"}${routes.pick.co2eKg !== undefined ? `, about ${routes.pick.co2eKg} kg CO₂e` : ""})${args.travelConstraints ? `. Travel requirement: ${args.travelConstraints.summary}` : ""}. Approve exactly ${fmt(trip.quoteCents)}? Nothing is charged until you do.`,
     [{ id: "approve", label: `Approve ${fmt(trip.quoteCents)}` }, { id: "reject", label: "Not now" }],
-    { amountCents: trip.quoteCents },
+    { amountCents: trip.quoteCents, routeTitle: trip.routeTitle },
   );
   appendAudit(state, { actor: { kind: "agent", id: "policy" }, action: "mandate.requested", subject: trip.id, reason: `Requested ${fmt(trip.quoteCents)} single-use mandate; season budget remaining ${fmt(remaining)}`, refs: [m.id, "R1", "R7", ...g.evidence.map((e) => e.id)] });
   if (trip.quoteCents > POLICY.controllerThresholdCents) ask(state, trip, "reconcile", "controller", `Pre-approve ${fmt(trip.quoteCents)} (over the R3 threshold)?`, [{ id: "approve", label: "Approve" }, { id: "reject", label: "Reject" }], {});
@@ -347,15 +348,17 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
 export async function bookTrip(state: State, tripId: string, fareDeltaCents = 0) {
   const trip = state.trips.find((t) => t.id === tripId);
   if (!trip || trip.state !== "pre_approved") throw new Error("trip isn't pre-approved");
+  const previousQuote = state.evidence.filter((e) => e.tripId === tripId && e.kind === "quote" && e.status === "ok").at(-1);
+  if (!trip.routeTitle && typeof previousQuote?.data.routeTitle === "string") trip.routeTitle = previousQuote.data.routeTitle;
   const amount = trip.quoteCents + fareDeltaCents;
   const r = await chargeTrip(state, tripId, amount, `${trip.mode.toUpperCase()} via S'mile`);
   if (!r.ok) {
-    state.evidence.push({ id: newId("EV-quote"), tripId, kind: "quote", source: "S'mile checkout verification", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: { amountCents: amount, mode: trip.mode, previousAmountCents: trip.quoteCents, reason: "fare_changed_at_checkout" } });
+    state.evidence.push({ id: newId("EV-quote"), tripId, kind: "quote", source: "S'mile checkout verification", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: { amountCents: amount, mode: trip.mode, routeTitle: trip.routeTitle, previousAmountCents: trip.quoteCents, reason: "fare_changed_at_checkout" } });
     const m = createMandate({ tripId, maxCents: amount, merchantCategory: state.mandates.find((x) => x.id === trip.mandateId)!.merchantCategory, requestedBy: "agent:policy" });
     state.mandates.push(m);
     trip.mandateId = m.id;
     trip.state = "planned";
-    ask(state, trip, "mandate_approval", "traveler", `The fare changed from ${fmt(trip.quoteCents)} to ${fmt(amount)} at checkout and the card declined it. Approve exactly ${fmt(amount)}?`, [{ id: "approve", label: `Approve ${fmt(amount)}` }, { id: "reject", label: "Cancel" }], { amountCents: amount });
+    ask(state, trip, "mandate_approval", "traveler", `The fare for ${trip.routeTitle ?? trip.mode} changed from ${fmt(trip.quoteCents)} to ${fmt(amount)} at checkout and the card declined it. Approve exactly ${fmt(amount)}?`, [{ id: "approve", label: `Approve ${fmt(amount)}` }, { id: "reject", label: "Cancel" }], { amountCents: amount, routeTitle: trip.routeTitle });
   }
   return r;
 }

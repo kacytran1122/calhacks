@@ -36,6 +36,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       tripId: trip.id,
       mode: trip.mode,
+      includeSelfDrive: trip.includeSelfDrive ?? trip.mode === "drive",
       origin: {
         query: traveler.homeZip,
         label: `ZIP ${traveler.homeZip}`,

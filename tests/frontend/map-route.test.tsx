@@ -32,6 +32,9 @@ describe("route guidance map", () => {
     expect(page).toMatch(/\/api\/map\/handoff\?token=/);
     expect(page).toMatch(/searchParams\.delete\("handoff"\)/);
     expect(page).not.toMatch(/tripToken/);
+    expect(page).toMatch(/body\.includeSelfDrive/);
+    expect(runtime).toMatch(/params\.get\("includeSelfDrive"\) !== "false"/);
+    expect(runtime).toMatch(/if \(!state\.includeSelfDrive\) throw new Error/);
   });
 
   it("keeps the map surface free of inherited project branding", () => {

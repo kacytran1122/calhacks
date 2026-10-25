@@ -1,4 +1,4 @@
-import { decodePolyline, distanceMeters, greatCirclePoints, partialPath, prepareSegment, projectOnPath } from "./route-utils.js?v=3";
+import { decodePolyline, distanceMeters, greatCirclePoints, itineraryDurationSeconds, onwardTransitTime, partialPath, prepareSegment, projectOnPath, transitRoutePattern, usableTransitItineraries } from "./route-utils.js?v=4";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -33,6 +33,7 @@ const state = {
   activeField: { type: "destination" },
   nextWaypointId: 1,
   mode: "transit",
+  includeSelfDrive: true,
   routes: [],
   selectedRoute: 0,
   routeLayers: [],
@@ -462,25 +463,53 @@ async function fetchRoadRoutes(points, mode, alternatives = true) {
 async function fetchTransitRoutes(from, to, time) {
   let body;
   let lastError;
-  for (const endpoint of TRANSIT_ENDPOINTS) {
-    const direct = endpoint.startsWith("https://api.transitous.org");
-    const params = new URLSearchParams(direct ? {
-      fromPlace: `${from.lat},${from.lng}`, toPlace: `${to.lat},${to.lng}`, time: time.toISOString(),
-      arriveBy: "false", withFares: "true", numItineraries: "4", maxTransfers: "5", detailedTransfers: "true", realtimeMode: "REALTIME",
-    } : { from: `${from.lat},${from.lng}`, to: `${to.lat},${to.lng}`, time: time.toISOString() });
-    try {
-      const response = await fetch(`${endpoint}?${params}`, { signal: state.routeAbort?.signal, headers: { Accept: "application/json" } });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || `Transit routing returned ${response.status}`);
-      body = payload;
-      break;
-    } catch (error) {
-      if (error.name === "AbortError") throw error;
-      lastError = error;
+  let attempts = 0;
+  const controller = new AbortController();
+  const parentSignal = state.routeAbort?.signal;
+  const cancel = () => controller.abort(parentSignal.reason);
+  if (parentSignal?.aborted) cancel();
+  else parentSignal?.addEventListener("abort", cancel, { once: true });
+  const timer = setTimeout(() => controller.abort(new DOMException("Transit routing reached its time limit.", "TimeoutError")), 11_000);
+  try {
+    for (const endpoint of TRANSIT_ENDPOINTS) {
+      if (attempts >= 2) break;
+      const direct = endpoint.startsWith("https://api.transitous.org");
+      const params = new URLSearchParams(direct ? {
+        fromPlace: `${from.lat},${from.lng}`, toPlace: `${to.lat},${to.lng}`, time: time.toISOString(),
+        arriveBy: "false", withFares: "false", numItineraries: "6", maxTransfers: "5", detailedTransfers: "true", realtimeMode: "REALTIME",
+        timetableView: "true", transitModes: "TRANSIT", directModes: "", preTransitModes: "WALK", postTransitModes: "WALK",
+      } : { from: `${from.lat},${from.lng}`, to: `${to.lat},${to.lng}`, time: time.toISOString() });
+      try {
+        attempts += 1;
+        const response = await fetch(`${endpoint}?${params}`, { signal: controller.signal, headers: { Accept: "application/json" } });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || `Transit routing returned ${response.status}`);
+        body = { ...payload, itineraries: usableTransitItineraries(payload.itineraries) };
+        if (direct && attempts < 2 && new Set(body.itineraries.map(transitRoutePattern)).size < 2) {
+          const alternativeParams = new URLSearchParams(params);
+          alternativeParams.set("transitModes", "BUS,COACH");
+          attempts += 1;
+          const alternative = await fetch(`${endpoint}?${alternativeParams}`, { signal: controller.signal, headers: { Accept: "application/json" } });
+          if (alternative.ok) {
+            const additional = await alternative.json();
+            body.itineraries = usableTransitItineraries([...body.itineraries, ...(Array.isArray(additional.itineraries) ? additional.itineraries : [])]);
+          }
+        }
+        break;
+      } catch (error) {
+        if (parentSignal?.aborted) throw error;
+        if (body?.itineraries?.length) break;
+        if (controller.signal.aborted) throw error;
+        lastError = error;
+      }
     }
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", cancel);
   }
   if (!body) throw lastError || new Error("Transit routing failed");
-  return (body.itineraries || []).slice().sort((a, b) => (a.duration || Infinity) - (b.duration || Infinity)).map((itinerary, itineraryIndex) => {
+  if (body.note) showToast(body.note);
+  return usableTransitItineraries(body.itineraries).map((itinerary, itineraryIndex) => {
     const segments = itinerary.legs.map((leg) => {
       const line = leg.displayName || leg.routeShortName || leg.routeLongName;
       const meta = modeMeta(leg.mode, leg.agencyName, line);
@@ -533,6 +562,7 @@ async function groundTransfer(from, to, time) {
   } catch (error) {
     if (error.name === "AbortError") throw error;
   }
+  if (!state.includeSelfDrive) throw new Error(`No public-transit airport transfer was verified from ${from.name} to ${to.name}. Driving is excluded; please choose a different connection or departure time.`);
   return (await fetchRoadRoutes([from, to], "drive", false))[0].segments;
 }
 
@@ -578,7 +608,7 @@ async function flightRoute(from, to, time) {
 }
 
 function prepareItinerary(route) {
-  const duration = route.segments.reduce((sum, segment) => sum + (segment.duration || 0), 0);
+  const duration = itineraryDurationSeconds(route);
   const distance = route.segments.reduce((sum, segment) => sum + (segment.distance || 0), 0);
   const summary = route.segments
     .map((segment) => segment.stepNumber ? segment.name : segment.label)
@@ -595,7 +625,7 @@ async function sequentialTransit(points, time) {
     const routes = await fetchTransitRoutes(points[index], points[index + 1], cursorTime);
     if (!routes.length) throw new Error(`No transit itinerary was found from ${points[index].name} to ${points[index + 1].name}.`);
     groups.push(routes);
-    cursorTime = new Date(cursorTime.getTime() + routes[0].duration * 1000 + 5 * 60_000);
+    cursorTime = onwardTransitTime(routes[0], cursorTime);
   }
   const count = points.length > 2 ? 1 : Math.min(3, ...groups.map((group) => group.length));
   return Array.from({ length: Math.max(1, count) }, (_, index) => {
@@ -958,6 +988,7 @@ ui.orientation.addEventListener("click", () => {
 });
 $$(".mode-tab").forEach((button) => button.addEventListener("click", () => {
   state.mode = button.dataset.mode;
+  if (state.mode === "drive") state.includeSelfDrive = true;
   $$(".mode-tab").forEach((item) => {
     item.classList.toggle("active", item === button);
     item.setAttribute("aria-selected", String(item === button));
@@ -979,11 +1010,12 @@ map.on("mousedown touchstart", (event) => {
 map.on("mouseup touchend mousemove", () => clearTimeout(pressTimer));
 
 const params = new URLSearchParams(location.search);
+state.includeSelfDrive = params.get("includeSelfDrive") !== "false";
 const requestedMode = params.get("mode");
 const initialMode = requestedMode === "flight"
   ? "flight"
   : requestedMode === "drive" || requestedMode === "rideshare"
-    ? "drive"
+    ? state.includeSelfDrive ? "drive" : "transit"
     : requestedMode === "walk"
       ? "walk"
       : requestedMode === "train" || requestedMode === "bus" || requestedMode === "transit"
