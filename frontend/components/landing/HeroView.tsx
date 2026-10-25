@@ -14,6 +14,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
   const [pendingOrigin, setPendingOrigin] = useState<PendingOrigin | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: "hint" | "error"; text: string } | null>(null);
 
   const findUrl = (origin: PendingOrigin, coordinates?: { lat: number; lon: number }) => `/find?zip=${origin.zip}&origin=${encodeURIComponent(origin.label)}${coordinates ? `&gps=1&lat=${coordinates.lat}&lon=${coordinates.lon}` : ""}`;
@@ -34,6 +35,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
         return;
       }
       setPendingOrigin({ zip: value, label: value });
+      setLocationError(null);
       return;
     }
 
@@ -50,6 +52,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
       if (!response.ok || !result.zip) throw new Error(result.error ?? "We couldn’t find that city.");
       setMessage({ kind: "hint", text: `${result.label ?? city} found.` });
       setPendingOrigin({ zip: result.zip, label: result.label ?? city.trim() });
+      setLocationError(null);
     } catch (error) {
       setMessage({ kind: "error", text: (error as Error).message });
     } finally {
@@ -63,24 +66,20 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
 
   const allowCurrentLocation = async () => {
     if (!navigator.geolocation) {
-      if (pendingOrigin) onNavigate(findUrl(pendingOrigin));
+      setLocationError("This browser cannot provide a current location. Use the location you entered instead.");
       return;
     }
     setLocating(true);
+    setLocationError(null);
     try {
       const position = await new Promise<GeolocationPosition>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }),
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5_000, maximumAge: 0 }),
       );
       const coordinates = { lat: position.coords.latitude, lon: position.coords.longitude };
-      let currentOrigin = pendingOrigin ? { ...pendingOrigin, label: "Current location" } : null;
-      try {
-        const response = await fetch(`/api/location/resolve?lat=${encodeURIComponent(coordinates.lat)}&lon=${encodeURIComponent(coordinates.lon)}`);
-        const result = (await response.json()) as { zip?: string; label?: string };
-        if (response.ok && result.zip) currentOrigin = { zip: result.zip, label: result.label ?? "Current location" };
-      } catch {}
-      if (currentOrigin) onNavigate(findUrl(currentOrigin, coordinates));
-    } catch {
-      if (pendingOrigin) onNavigate(findUrl(pendingOrigin));
+      if (pendingOrigin) onNavigate(findUrl({ ...pendingOrigin, label: "Current location" }, coordinates));
+    } catch (error) {
+      const code = (error as GeolocationPositionError).code;
+      setLocationError(code === 1 ? "Location access is blocked in the browser. Allow it and try again, or use the location you entered." : "We couldn’t get your current location within five seconds. Try again, or use the location you entered.");
     } finally {
       setLocating(false);
     }
@@ -154,6 +153,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
             <h2 id="location-modal-title">Allow location access?</h2>
             <p>S’mile can use your current location once to find events closest to you.</p>
             <small>Your precise location is not saved.</small>
+            {locationError && <div className="location-modal-error" role="alert">{locationError}</div>}
             <div className="location-modal-actions">
               <button type="button" className="location-skip" onClick={continueWithEnteredLocation}>Use {pendingOrigin.label} instead</button>
               <button type="button" className="location-allow" onClick={allowCurrentLocation} disabled={locating}>{locating ? "Checking location…" : "Allow location"}</button>

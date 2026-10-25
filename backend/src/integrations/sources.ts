@@ -28,11 +28,13 @@ async function direct(url: string, timeoutMs = 5_000): Promise<{ status: FetchSt
 
 export async function getPublic(url: string): Promise<{ status: FetchStatus; body?: string; via: "bright-data" | "direct"; note?: string }> {
   if (brightDataKey()) {
-    const [r, d] = await Promise.all([unlock(url, "html", { attempts: 1, timeoutMs: 5_000 }), direct(url)]);
+    const d = await direct(url, 2_500);
+    if (d.status === "ok" && d.body) return { ...d, via: "direct" };
+    const r = await unlock(url, "html", { attempts: 1, timeoutMs: 2_500 });
     if (r.status === "ok" && r.body) return { status: "ok", body: r.body, via: "bright-data" };
     return { ...d, via: "direct", note: `Bright Data: ${r.status}${r.errorCode ? ` (${r.errorCode})` : ""}; direct fetch: ${d.status}` };
   }
-  return { ...(await direct(url)), via: "direct" };
+  return { ...(await direct(url, 2_500)), via: "direct" };
 }
 
 export interface LumaEvent {

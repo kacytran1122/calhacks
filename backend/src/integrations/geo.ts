@@ -105,6 +105,11 @@ const STATE_ANCHORS: Record<string, [string, string]> = {
   VT: ["Montpelier", "05602"], VA: ["Richmond", "23219"], WA: ["Olympia", "98501"], WV: ["Charleston", "25301"], WI: ["Madison", "53703"], WY: ["Cheyenne", "82001"],
 };
 
+export function isLikelyUsLocation(location: string): boolean {
+  const region = location.split(",").at(-1)?.trim().toLowerCase() ?? "";
+  return Boolean(STATES[region] || (region.length === 2 && STATE_ANCHORS[region.toUpperCase()]));
+}
+
 const cityCache = new Map<string, GeoResult>();
 const placeCache = new Map<string, GeoResult>();
 const globalPlaceCache = new Map<string, GeoResult>();

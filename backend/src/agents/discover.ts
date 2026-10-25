@@ -1,5 +1,5 @@
 import { eventStore, type EventListing } from "../eventStore";
-import { cityToPoint, haversineMiles, zipToPoint } from "../integrations/geo";
+import { cityToPoint, haversineMiles, isLikelyUsLocation, zipToPoint } from "../integrations/geo";
 import { fetchDevpost, fetchLuma, fetchMlh, type SourceResult } from "../integrations/sources";
 
 export interface DiscoverOptions {
@@ -141,7 +141,7 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
   const mlhListings: EventListing[] = mlh.items
     .filter((e) => e.physical && rawInWindow(e.startsAt, e.endsAt) && rawMatches(e.name, e.location))
     .map((e) => ({ key: e.id, source: "mlh", name: e.name, startsAt: e.startsAt, endsAt: e.endsAt, city: e.location, locationPrecision: "unknown", url: e.url, thumbnailUrl: e.thumbnailUrl, kind: "hackathon", fetchedAt, via: mlh.via }));
-  await pool(mlhListings, 24, async (l) => {
+  await pool(mlhListings.filter((listing) => isLikelyUsLocation(listing.city ?? "")), 32, async (l) => {
     const g = await cityToPoint(l.city ?? "");
     if (g.status === "ok") Object.assign(l, { lat: g.lat, lon: g.lon, locationPrecision: "city" as const });
   });
