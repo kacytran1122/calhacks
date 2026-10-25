@@ -11,8 +11,44 @@ test("Google Flights URL fixes route, date, currency, and locale", () => {
   assert.ok(decoded.includes(Buffer.from("SFO")));
   assert.ok(decoded.includes(Buffer.from("LAX")));
   assert.ok(decoded.includes(Buffer.from("2027-01-16")));
+  assert.equal(url.searchParams.get("tfu"), "EgYIABABGAA");
   assert.equal(url.searchParams.get("curr"), "USD");
   assert.equal(url.searchParams.get("gl"), "US");
+});
+
+test("live fare accepts nested USD price values from the scraper", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  t.mock.method(globalThis, "fetch", async (input) => {
+    const url = String(input);
+    if (url.includes("/trigger?")) return new Response(JSON.stringify({ snapshot_id: "s_nested123" }), { status: 200 });
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    return new Response(JSON.stringify([
+      {
+        pricing: { price: { value: 219, currency: "USD" } },
+        provider: "Google Flights",
+      },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  const quote = await liveGoogleFlightQuote({ fromAirport: "SFO", toAirport: "DEN", departDate: "2027-01-16" });
+  assert.equal(quote.status, "ok");
+  assert.equal(quote.amountUsd, 219);
+});
+
+test("live fare rejects nested values in another currency", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  t.mock.method(globalThis, "fetch", async (input) => {
+    const url = String(input);
+    if (url.includes("/trigger?")) return new Response(JSON.stringify({ snapshot_id: "s_currency123" }), { status: 200 });
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    return new Response(JSON.stringify([
+      { pricing: { price: { value: 219, currency: "EUR" } } },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  const quote = await liveGoogleFlightQuote({ fromAirport: "SFO", toAirport: "DEN", departDate: "2027-01-16" });
+  assert.equal(quote.status, "empty");
+  assert.equal(quote.amountUsd, undefined);
 });
 
 test("live fare uses Bright Data structured Google Flights output", async (t) => {

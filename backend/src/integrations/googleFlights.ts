@@ -70,7 +70,7 @@ export function googleFlightsUrl(fromAirport: string, toAirport: string, departD
     ...scalar(19, 2),
   ];
   const tfs = Buffer.from(filter).toString("base64url");
-  const params = new URLSearchParams({ tfs, curr: "USD", hl: "en-US", gl: "US" });
+  const params = new URLSearchParams({ tfs, tfu: "EgYIABABGAA", curr: "USD", hl: "en-US", gl: "US" });
   return `https://www.google.com/travel/flights/search?${params}`;
 }
 
@@ -114,12 +114,15 @@ function candidatesFromDataset(value: unknown): Candidate[] {
       const lower = next.join(":").toLowerCase();
       const leaf = key.toLowerCase().split(":").at(-1) ?? "";
       const n = amount(child);
-      const isPrice = /^(price|amount|total|total_price|price_total|price_usd|amount_usd|total_amount)$/.test(leaf);
-      if (n !== undefined && n >= 20 && n <= 10_000 && isPrice) {
+      const isPrice = /^(price|amount|total|total_price|price_total|price_usd|amount_usd|total_amount|fare|fare_amount|price_value|display_price)$/.test(leaf);
+      const contextualValue = /^(value|units)$/.test(leaf) && /pricing|price|fare|total|cost/.test(lower);
+      const currency = stringAt(record, /(?:^|:)(?:currency|currency_code)$/i) ?? stringAt(top, /(?:^|:)(?:currency|currency_code)$/i);
+      if (n !== undefined && n >= 20 && n <= 10_000 && (isPrice || contextualValue) && (!currency || currency.toUpperCase() === "USD")) {
         let score = 0;
         if (/pricing|provider|booking/.test(lower)) score += 3;
         if (/total/.test(lower)) score += 3;
         if (/price/.test(leaf)) score += 2;
+        if (contextualValue) score += 2;
         if (/tax|fee|bag|change|carbon|points|mile/.test(lower)) score -= 5;
         const topUrl = googleFlightUrl(top.url);
         const localUrl = googleFlightUrl(record.url);
