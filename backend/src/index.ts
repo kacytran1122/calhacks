@@ -33,5 +33,5 @@ export { heatMapAround, heatCall, scoreCells, severityFor, confidenceFor, gridAr
 export { estimatePrices, checkFlightPrice, pricingCall, flightPriceCall, type PriceEstimate, type FlightPriceCheck } from "./agents/pricing";
 export { runAgent, runAgentIn, type AgentCall } from "./agents/run";
 export { converse, amountsGrounded, TOOLS as CONCIERGE_TOOLS, type ConciergeInput, type ConciergeOutput, type ConciergePlan, type ConciergeDeps } from "./agents/concierge";
-export { runDue, runJob, dueJobs, JOBS, type JobId, type JobResult, type SchedulerDeps } from "./scheduler";
+export { runDue, runJob, dueJobs, priceWatchTargets, JOBS, type JobId, type JobResult, type SchedulerDeps } from "./scheduler";
 export { compareCarbon, estimateCarbon, organizerCarbon, tripCarbon, FACTORS as EMISSION_FACTORS, CARBON_SOURCES, CARBON_METHOD, type CarbonEstimate, type CarbonComparison, type OrganizerCarbon } from "./carbon";

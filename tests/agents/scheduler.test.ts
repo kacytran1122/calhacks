@@ -73,6 +73,24 @@ test("price_watch compares a live Google Flights fare with the trained forecast 
   assert.match(notices()[0]!.question, /Live Google Flights check.*\$150\.00.*forecast is \$152\.00–\$247\.00/);
 });
 
+test("a pending Google Flights snapshot is resumed promptly and stops after it is ready", async () => {
+  await seedWithLiveTrip();
+  await core.withState((s) => {
+    s.trips.find((item) => item.id === "TR-L-test")!.mode = "flight";
+    s.scheduler = { lastRun: { price_watch: NOW.toISOString() } };
+    s.evidence.push({ id: "EV-pending-flight", tripId: "TR-L-test", kind: "price_watch", source: "test", fetchedAt: NOW.toISOString(), status: "ok", provenance: "live", data: { liveStatus: "timeout", liveSnapshotId: "s_pending_agent123", liveCollectionState: "running" } });
+  });
+  assert.deepEqual(core.dueJobs(core.loadState(), new Date(NOW.getTime() + 4 * 60_000)), ["reconcile", "weather_watch", "event_watch"]);
+  assert.ok(core.dueJobs(core.loadState(), new Date(NOW.getTime() + 6 * 60_000)).includes("price_watch"));
+  assert.equal(core.priceWatchTargets(core.loadState(), new Date(NOW.getTime() + 6 * 60_000))[0]?.snapshotId, "s_pending_agent123");
+
+  await core.withState((s) => {
+    s.evidence.push({ id: "EV-ready-flight", tripId: "TR-L-test", kind: "price_watch", source: "test", fetchedAt: new Date(NOW.getTime() + 7 * 60_000).toISOString(), status: "ok", provenance: "live", data: { liveStatus: "ok", liveSnapshotId: "s_pending_agent123", liveCollectionState: "ready", liveCents: 15_000 } });
+  });
+  assert.equal(core.priceWatchTargets(core.loadState(), new Date(NOW.getTime() + 8 * 60_000))[0]?.snapshotId, undefined);
+  assert.ok(!core.dueJobs(core.loadState(), new Date(NOW.getTime() + 8 * 60_000)).includes("price_watch"));
+});
+
 test("weather_watch warns travelers about heat at the venue in the next 3 days", async () => {
   await seedWithLiveTrip();
   assert.equal((await core.runJob("weather_watch", { now: NOW, heat: heat("Comfortable", 64) })).notices, 0);

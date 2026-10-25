@@ -28,6 +28,7 @@ export const JOBS: Record<JobId, { everyMinutes: number; what: string }> = {
 };
 
 export const PRICE_MOVE_PCT = 15;
+const PENDING_PRICE_RECHECK_MINUTES = 5;
 const PRICE_DAYS = 120;
 const HEAT_DAYS = 3;
 const EVENT_DAYS = 120;
@@ -80,8 +81,10 @@ export function priceWatchTargets(state: State, now: Date) {
   return upcoming(state, now, PRICE_DAYS).flatMap(({ trip, event }) => {
     const from = homeOf(state, trip.id);
     const to = venueOf(event);
-    const pending = [...state.evidence].reverse().find((item) => item.tripId === trip.id && item.kind === "price_watch" && item.data.liveStatus === "timeout" && typeof item.data.liveSnapshotId === "string" && item.data.liveCollectionState !== "ready");
-    const snapshotId = pending?.data.liveSnapshotId as string | undefined;
+    const latest = [...state.evidence].reverse().find((item) => item.tripId === trip.id && item.kind === "price_watch");
+    const snapshotId = latest?.data.liveStatus === "timeout" && typeof latest.data.liveSnapshotId === "string" && latest.data.liveCollectionState !== "ready"
+      ? latest.data.liveSnapshotId
+      : undefined;
     return (trip.mode === "rideshare" || trip.mode === "flight") && from && to && trip.quoteCents > 0 ? [{ trip, event, from, to, snapshotId }] : [];
   });
 }
@@ -299,7 +302,10 @@ export async function runJob(job: JobId, deps: SchedulerDeps = {}): Promise<JobR
 export function dueJobs(state: State, now: Date): JobId[] {
   return (Object.keys(JOBS) as JobId[]).filter((job) => {
     const last = state.scheduler?.lastRun[job];
-    return !last || now.getTime() - new Date(last).getTime() >= JOBS[job].everyMinutes * 60_000;
+    if (!last) return true;
+    const elapsed = now.getTime() - new Date(last).getTime();
+    if (job === "price_watch" && elapsed >= PENDING_PRICE_RECHECK_MINUTES * 60_000 && priceWatchTargets(state, now).some((target) => target.snapshotId)) return true;
+    return elapsed >= JOBS[job].everyMinutes * 60_000;
   });
 }
 
