@@ -1,4 +1,4 @@
-const TRANSITOUS = "https://api.transitous.org/api/v6/plan";
+const TRANSITOUS = process.env.TRANSITOUS_BASE_URL || "https://api.transitous.org/api/v6/plan";
 const USER_AGENT = "LiveDirections/1.0 (+https://github.com/kacytran1122/calhacks)";
 
 function coordinate(value) {
