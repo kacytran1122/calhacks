@@ -53,6 +53,15 @@ textarea.dk-in{width:100%;resize:vertical}
 .dk-stats .l{font-size:12.5px;color:var(--mut);margin-top:4px}
 .dk-meter{height:10px;border-radius:10px;background:var(--color-neutral-300);overflow:hidden;margin-top:14px}
 .dk-meter div{height:100%;background:linear-gradient(90deg,var(--color-accent),var(--butter))}
+.dk-close-state{font:800 11px var(--font-heading);letter-spacing:.06em;text-transform:uppercase;padding:5px 9px;border-radius:99px}
+.dk-close-state.ready{background:#E3F6EC;color:#14583F}.dk-close-state.review{background:#FFF0D1;color:#765500}
+.dk-control-totals{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}
+.dk-control-totals div{display:flex;flex-direction:column;gap:4px;background:var(--color-neutral-200);padding:10px;border-radius:12px}
+.dk-control-totals span{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}.dk-control-totals b{font-size:16px}
+.dk-control-list{display:flex;flex-wrap:wrap;gap:7px}.dk-control-list span{font-size:12px;font-weight:700;padding:5px 8px;border-radius:8px}
+.dk-control-list .pass{background:#E3F6EC;color:#14583F}.dk-control-list .fail{background:var(--color-accent-100);color:var(--color-accent-800)}
+.dk-issue-list{margin:10px 0 0;padding-left:20px;color:var(--color-accent-800);font-size:12.5px}
+@media(max-width:560px){.dk-control-totals{grid-template-columns:1fr 1fr}}
 .dk-agent{display:grid;grid-template-columns:96px minmax(0,1fr);gap:2px 12px;padding:9px 0;border-top:1px solid var(--color-divider)}
 .dk-agent b{font:800 14px var(--font-heading);grid-row:span 2}
 .dk-caps{font:12px ui-monospace,Menlo,monospace;color:var(--plum)}

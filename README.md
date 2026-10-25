@@ -94,10 +94,10 @@ No production deployment occurs without an explicitly configured hosting environ
 |---|---|
 | Anthropic | Public-page extraction, explanations, and audit defense; amounts remain deterministic |
 | Bright Data | Live logged-out event, route, fare, and stop pages |
-| Hyphenate | Organizer finance desk, reconciliation, controls, and accountable handoffs |
+| Hyphenate | Organizer finance desk with evidence matching, exception routing, control totals, and close readiness |
 | Photon 2.0 | `@smile` group conversation and private trip-scoped approval links |
 | TigerData | Time-series snapshots for event date and venue changes |
-| Visa | Reviewed, exact-amount travel basket; signed Visa Acceptance sandbox authorization when configured, capture disabled |
+| Visa | Traveler-approved fare binding, category and expiry controls, replay protection, and signed sandbox authorization with capture disabled |
 | Open-Meteo | Live forecast and ERA5 history for the venue heat map (no key) |
 | OpenStreetMap | Map tiles for the heat map |
 

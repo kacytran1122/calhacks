@@ -252,6 +252,30 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
             </div>
           </div>
 
+          {snap.closeReadiness && (
+          <div className="dk-panel">
+            <div className="dk-ph">
+              <h2>Close readiness</h2>
+              <span className={`dk-close-state ${snap.closeReadiness.ready ? "ready" : "review"}`}>
+                {snap.closeReadiness.ready ? "Ready to close" : "Review needed"}
+              </span>
+            </div>
+            <p className="dk-mut">A live control check across approvals, authorizations, reimbursements, open exceptions, duplicate requests, and the trial balance.</p>
+            <div className="dk-control-totals">
+              <div><span>Approved</span><b className="num">{fmt(snap.closeReadiness.approvedCents)}</b></div>
+              <div><span>Authorized</span><b className="num">{fmt(snap.closeReadiness.authorizedCents)}</b></div>
+              <div><span>Reimbursed</span><b className="num">{fmt(snap.closeReadiness.reimbursedCents)}</b></div>
+              <div><span>Open items</span><b className="num">{snap.closeReadiness.openItems}</b></div>
+            </div>
+            <div className="dk-control-list">
+              <span className={snap.closeReadiness.booksBalanced ? "pass" : "fail"}>{snap.closeReadiness.booksBalanced ? "✓" : "!"} Books balance</span>
+              <span className={snap.closeReadiness.duplicateAuthorizations === 0 ? "pass" : "fail"}>{snap.closeReadiness.duplicateAuthorizations === 0 ? "✓" : "!"} No duplicate authorizations</span>
+              <span className={snap.closeReadiness.unresolvedTrips === 0 ? "pass" : "fail"}>{snap.closeReadiness.unresolvedTrips === 0 ? "✓" : "!"} {snap.closeReadiness.unresolvedTrips} unresolved trips</span>
+            </div>
+            {snap.closeReadiness.issues.length > 0 && <ul className="dk-issue-list">{snap.closeReadiness.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+          </div>
+          )}
+
           <div className="dk-panel">
             <div className="dk-ph">
               <h2>Trial balance</h2>

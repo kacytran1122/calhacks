@@ -14,6 +14,7 @@ import { capFor, POLICY } from "./policy";
 import type { State } from "./store";
 import { newId } from "./store";
 import type { Actor, Cents, Decision, HumanRole, InboxItem, Trip } from "./types";
+import { bindApproval } from "./financeControls";
 
 const recon: Actor = { kind: "agent", id: "reconciler" };
 const orch: Actor = { kind: "agent", id: "orchestrator" };
@@ -149,6 +150,7 @@ function resolveMandate(state: State, trip: Trip, item: InboxItem, who: Answerer
   m.status = "approved";
   m.approvedBy = who.id;
   trip.quoteCents = m.maxCents;
+  bindApproval(state, trip, m, item.answer!.at);
   trip.state = "pre_approved";
   appendAudit(state, { actor: orch, action: "mandate.approved", subject: trip.id, reason: `${who.id} approved exactly ${fmt(m.maxCents)} on ${m.token}`, refs: [m.id, who.id, "R7"] });
   return { tripId: trip.id, outcome: `approved ${fmt(m.maxCents)}` };
@@ -292,6 +294,7 @@ export async function bookTrip(state: State, tripId: string, fareDeltaCents = 0)
   const amount = trip.quoteCents + fareDeltaCents;
   const r = await chargeTrip(state, tripId, amount, `${trip.mode.toUpperCase()} via S'mile`);
   if (!r.ok) {
+    state.evidence.push({ id: newId("EV-quote"), tripId, kind: "quote", source: "S'mile checkout verification", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: { amountCents: amount, mode: trip.mode, previousAmountCents: trip.quoteCents, reason: "fare_changed_at_checkout" } });
     const m = createMandate({ tripId, maxCents: amount, merchantCategory: state.mandates.find((x) => x.id === trip.mandateId)!.merchantCategory, requestedBy: "agent:policy" });
     state.mandates.push(m);
     trip.mandateId = m.id;

@@ -15,6 +15,7 @@ import {
   trialBalance,
   verifyChain,
   visaAcceptanceConfigured,
+  closeReadiness,
   type State,
   type User,
 } from "@smile/core";
@@ -50,6 +51,7 @@ export function snapshot(user: User) {
     people: s.people,
     integrations: integrations(),
     budget: { seasonCents: POLICY.seasonBudgetCents, spentCents: spent, remainingCents: POLICY.seasonBudgetCents - spent },
+    closeReadiness: staff ? closeReadiness(s) : null,
     chain: verifyChain(s.audit),
     user,
     trialBalance: staff ? tb : [],

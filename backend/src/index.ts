@@ -4,6 +4,7 @@ export * from "./policy";
 export * from "./audit";
 export * from "./ledger";
 export * from "./permissions";
+export * from "./financeControls";
 export * from "./store";
 export { login, logout, userForSession, ensureUsers, issueTripToken, travelerForTripToken, assertClaimMatches, TooManyAttempts, type User } from "./auth";
 export * from "./llm";

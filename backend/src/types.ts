@@ -154,6 +154,24 @@ export interface Mandate {
   status: "pending" | "approved" | "consumed" | "declined" | "void";
   requestedBy: string;
   approvedBy?: string;
+  approvalBinding?: {
+    travelerId: string;
+    eventId: string;
+    fareEvidenceId: string;
+    amountCents: Cents;
+    currency: "USD";
+    merchantCategory: string;
+    approvedAt: string;
+    fingerprint: string;
+  };
+  authorization?: {
+    idempotencyKey: string;
+    provider: "visa_acceptance" | "simulated";
+    providerReference?: string;
+    status: "authorized" | "declined";
+    amountCents: Cents;
+    authorizedAt: string;
+  };
   provenance: "simulated";
 }
 
