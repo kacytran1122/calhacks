@@ -142,12 +142,15 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
 
   authorize(state, agent, "web.read", tripId);
   const venueQ = [event.venue, event.address ?? event.city].filter(Boolean).join(", ");
-  const fromCity = args.originText?.trim() || home.label || homeZip;
-  const destination = event.address ?? event.venue ?? event.city ?? event.name ?? "event venue";
+  const enteredOrigin = args.originText?.trim();
+  const fromCity = enteredOrigin && enteredOrigin !== homeZip ? enteredOrigin : home.label || homeZip;
+  const destination = [...new Set([event.address, event.venue, event.city].filter((value): value is string => Boolean(value)))].join(", ") || event.name || "event venue";
   const transitPromise = home.status === "ok" && home.lat !== undefined && home.lon !== undefined && event.lat !== undefined && event.lon !== undefined
     ? planPublicTransit({ from: { lat: home.lat, lon: home.lon }, to: { lat: event.lat, lon: event.lon }, startsAt: event.startsAt })
     : Promise.resolve({ status: "empty" as const, url: "https://transitous.org/sources/", options: [] as TransitOption[], ms: 0, error: "Coordinates were unavailable for live transit routing." });
-  const fareQuery = `${fromCity} to ${destination} ${event.startsAt ?? ""} exact total fare ticket price taxes mandatory fees official train bus flight${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
+  const travelDate = event.startsAt?.slice(0, 10) ?? "";
+  const fareModes = miles !== undefined && miles < 400 ? "train bus" : "train bus flight";
+  const fareQuery = `${fromCity} to ${destination} ${travelDate} official adult ${fareModes} ticket fare${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
   const directionsQuery = `${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
   const [stops, transit, genericFareSerp, genericDirectionsSerp] = await Promise.all([
     venueQ ? serp(`breakfast coffee near ${venueQ}`, 1, LIVE_SEARCH_TIMEOUT_MS) : Promise.resolve(null),
