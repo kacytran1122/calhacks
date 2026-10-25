@@ -106,16 +106,25 @@ function toOption(itinerary: Itinerary): TransitOption | null {
   const coach = transit.some((leg) => leg.mode === "COACH");
   const rail = intercityRail || (!coach && transit.some((leg) => /SUBWAY|TRAM/.test(leg.mode)));
   const realtime = transit.filter((leg) => leg.realTime).length;
-  const steps = usable.slice(0, 10).map((leg) => {
+  const steps = usable.slice(0, 12).map((leg, index, legs) => {
     const from = leg.from.name || "your current stop";
     const to = leg.to.name || "the next stop";
     const zone = leg.from.tz || leg.to.tz;
     const timing = `${timeText(leg.startTime, zone)}–${timeText(leg.endTime, zone)}`;
-    if (leg.mode === "WALK") return { instruction: `Walk to ${to}.`, detail: `${durationText(leg.duration)} · ${timing}` };
+    const nextLeg = legs[index + 1];
+    if (leg.mode === "WALK") {
+      const nextAction = nextLeg && !["WALK", "BIKE", "CAR"].includes(nextLeg.mode)
+        ? ` When you arrive, look for ${lineName(nextLeg)} toward ${nextLeg.headsign || nextLeg.tripTo?.name || nextLeg.to.name || "your destination"}.`
+        : "";
+      return { instruction: `Walk from ${from} to ${to}.${nextAction}`, detail: `Allow ${durationText(leg.duration)} · leave about ${timeText(leg.startTime, zone)} · arrive about ${timeText(leg.endTime, zone)}` };
+    }
     const toward = leg.headsign || leg.tripTo?.name || to;
+    const agency = leg.agencyName ? ` operated by ${leg.agencyName}` : "";
+    const transfer = index > 0 ? `At ${from}, follow station signs for ${lineName(leg)}. ` : "";
+    const finish = index === legs.length - 1 ? ` Get off at ${to}; from there, follow local signs toward the event.` : ` Stay aboard until ${to}, then get off for your next connection.`;
     return {
-      instruction: `Take ${lineName(leg)} toward ${toward}.`,
-      detail: `${from} → ${to} · ${timing}${leg.realTime ? " · live timing" : " · scheduled"}`,
+      instruction: `${transfer}Board ${lineName(leg)}${agency} at ${from}, in the direction of ${toward}.${finish}`,
+      detail: `Board about ${timeText(leg.startTime, zone)} · get off about ${timeText(leg.endTime, zone)} · ${leg.realTime ? "live timing" : "scheduled timing"}`,
     };
   });
   const total = fareTotal(itinerary);

@@ -28,9 +28,11 @@ test("Transitous turns GTFS legs into detailed live route instructions", () => {
   assert.equal(options[0].mode, "train");
   assert.equal(options[0].durationMinutes, 120);
   assert.deepEqual(options[0].agencies, ["Metro - Los Angeles", "Metrolink"]);
-  assert.match(options[0].steps[0].instruction, /Walk to Westwood/);
+  assert.match(options[0].steps[0].instruction, /Walk from UCLA to Westwood/);
+  assert.match(options[0].steps[0].instruction, /look for 761 toward Downtown/);
   assert.match(options[0].steps[1].detail ?? "", /live timing/);
-  assert.match(options[0].steps[2].instruction, /Orange County Line toward Oceanside/);
+  assert.match(options[0].steps[2].instruction, /follow station signs for Orange County Line/);
+  assert.match(options[0].steps[2].instruction, /direction of Oceanside/);
 });
 
 test("Transitous keeps an intercity coach itinerary in the bus category", () => {

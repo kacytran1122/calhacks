@@ -3,8 +3,8 @@ import type { FetchStatus } from "../types";
 const API = "https://router.project-osrm.org/route/v1/driving";
 const USER_AGENT = "Smile/0.2 (+https://github.com/kacytran1122/calhacks)";
 
-type Maneuver = { type?: string; modifier?: string };
-type Step = { name?: string; distance?: number; duration?: number; maneuver?: Maneuver };
+type Maneuver = { type?: string; modifier?: string; bearing_after?: number };
+type Step = { name?: string; ref?: string; destinations?: string; exits?: string; distance?: number; duration?: number; maneuver?: Maneuver };
 type Route = { duration: number; distance: number; legs?: { steps?: Step[] }[] };
 export type OsrmPayload = { code?: string; routes?: Route[]; message?: string };
 
@@ -36,27 +36,70 @@ function durationText(seconds: number) {
   return hours ? `${hours} hr${hours === 1 ? "" : "s"}${rest ? ` ${rest} min` : ""}` : `${rest} min`;
 }
 
-function instructionFor(step: Step, index: number, total: number) {
-  const road = step.name?.trim() || "the road";
-  const type = step.maneuver?.type ?? "continue";
-  const modifier = step.maneuver?.modifier?.replace(/_/g, " ");
-  if (index === total - 1 || type === "arrive") return "Arrive at the event.";
-  if (type === "depart") return `Start on ${road}.`;
-  if (type === "turn") return `Turn${modifier ? ` ${modifier}` : ""} onto ${road}.`;
-  if (type === "merge") return `Merge${modifier ? ` ${modifier}` : ""} onto ${road}.`;
-  if (type === "fork") return `Keep${modifier ? ` ${modifier}` : ""} to stay on ${road}.`;
-  if (type === "roundabout" || type === "rotary") return `Enter the roundabout and continue onto ${road}.`;
-  return `Continue${road === "the road" ? "" : ` on ${road}`}.`;
+function distanceText(meters = 0) {
+  const miles = meters / 1609.344;
+  if (miles >= 0.2) return `${Math.round(miles * 10) / 10} mile${miles >= 1.5 ? "s" : ""}`;
+  const feet = Math.max(50, Math.round((meters * 3.28084) / 50) * 50);
+  return `${feet} feet`;
 }
 
-export function driveRoutesFrom(body: OsrmPayload, sourceUrl: string): DriveRoute[] {
+function roadName(step: Step) {
+  const name = step.name?.trim();
+  const ref = step.ref?.trim();
+  if (name && ref && !name.includes(ref)) return `${name} (${ref})`;
+  return name || ref || "";
+}
+
+function compassDirection(bearing?: number) {
+  if (!Number.isFinite(bearing)) return "";
+  const points = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+  return points[Math.round((((bearing as number) % 360) / 45)) % 8];
+}
+
+function nextNamedRoad(steps: Step[], index: number) {
+  const current = steps[index];
+  for (let cursor = index + 1; cursor < steps.length; cursor += 1) {
+    const candidate = steps[cursor];
+    if (!candidate) continue;
+    const road = roadName(candidate);
+    if (road && (!current || road !== roadName(current))) return road;
+  }
+  return "the event entrance";
+}
+
+function instructionFor(step: Step, index: number, steps: Step[], context?: { fromLabel?: string; toLabel?: string }) {
+  const road = roadName(step);
+  const type = step.maneuver?.type ?? "continue";
+  const modifier = step.maneuver?.modifier?.replace(/_/g, " ");
+  const span = distanceText(step.distance);
+  const next = nextNamedRoad(steps, index);
+  const heading = compassDirection(step.maneuver?.bearing_after);
+  const signs = step.destinations?.trim() ? ` Follow signs for ${step.destinations.trim()}.` : "";
+  const exit = step.exits?.trim() ? ` Take exit ${step.exits.trim()}` : "Take the exit";
+  if (index === steps.length - 1 || type === "arrive") return `You’ll reach ${context?.toLabel || "the event"}. Slow down, follow the venue signs, and look for the event check-in entrance.`;
+  if (type === "depart") return `Leave ${context?.fromLabel || "your starting point"}${road ? ` via ${road}` : ""}${heading ? ` heading ${heading}` : ""}. Follow it for ${span}.`;
+  if (type === "turn") return `At the next junction, turn${modifier ? ` ${modifier}` : ""}${road ? ` onto ${road}` : ""}. Stay on it for ${span}, until the next decision point near ${next}.`;
+  if (type === "merge") return `Use the ${modifier || "matching"} lane to join${road ? ` ${road}` : " the main traffic lanes"}.${signs} Stay on this stretch for ${span}.`;
+  if (type === "fork") return `At the fork, keep${modifier ? ` ${modifier}` : " straight"}${road ? ` to remain on ${road}` : ""}.${signs} Follow it for ${span}.`;
+  if (type === "on ramp") return `Take the${modifier ? ` ${modifier}` : ""} entrance ramp${road ? ` onto ${road}` : ""}.${signs} Join traffic carefully and stay on it for ${span}.`;
+  if (type === "off ramp") return `${exit}${modifier ? ` on the ${modifier}` : ""}${road ? ` toward ${road}` : ""}.${signs}`;
+  if (type === "end of road") return `At the end of the road, turn${modifier ? ` ${modifier}` : ""}${road ? ` onto ${road}` : ""}, then follow it for ${span}.`;
+  if (type === "new name") return `The road becomes ${road || next}. Keep going for ${span}; no turn is needed.`;
+  if (type === "roundabout" || type === "rotary") return `Enter the roundabout, follow signs for ${road || next}, and take the indicated exit. Continue for ${span}.`;
+  if (road) return `Stay on ${road} for ${span}. Keep following it until you reach the junction for ${next}.`;
+  return `Follow the current road${heading ? ` ${heading}` : ""} for ${span}. Your next named road is ${next}.`;
+}
+
+export function driveRoutesFrom(body: OsrmPayload, sourceUrl: string, context?: { fromLabel?: string; toLabel?: string }): DriveRoute[] {
   return (body.routes ?? []).slice(0, 3).map((route, routeIndex) => {
     const rawSteps = (route.legs ?? []).flatMap((leg) => leg.steps ?? []);
-    const steps = rawSteps
-      .filter((step, index) => index === 0 || index === rawSteps.length - 1 || (step.distance ?? 0) >= 160)
-      .slice(0, 12)
+    const important = new Set(["depart", "arrive", "turn", "merge", "fork", "on ramp", "off ramp", "end of road", "new name", "roundabout", "rotary"]);
+    const selectedSteps = rawSteps
+      .filter((step, index) => index === 0 || index === rawSteps.length - 1 || important.has(step.maneuver?.type ?? "") || (step.distance ?? 0) >= 240)
+      .slice(0, 16);
+    const steps = selectedSteps
       .map((step, index, all) => ({
-        instruction: instructionFor(step, index, all.length),
+        instruction: instructionFor(step, index, all, context),
         detail: `${Math.max(0.1, Math.round(((step.distance ?? 0) / 1609.344) * 10) / 10)} mi · ${durationText(step.duration ?? 0)}`,
       }));
     const distanceMiles = Math.round((route.distance / 1609.344) * 10) / 10;
@@ -73,7 +116,7 @@ export function driveRoutesFrom(body: OsrmPayload, sourceUrl: string): DriveRout
   });
 }
 
-export async function planDrivingRoutes(args: { from: { lat: number; lon: number }; to: { lat: number; lon: number } }): Promise<DrivePlanResult> {
+export async function planDrivingRoutes(args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; fromLabel?: string; toLabel?: string }): Promise<DrivePlanResult> {
   const coordinates = `${args.from.lon},${args.from.lat};${args.to.lon},${args.to.lat}`;
   const url = `${API}/${coordinates}?alternatives=2&steps=true&overview=false`;
   const sourceUrl = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${args.from.lat}%2C${args.from.lon}%3B${args.to.lat}%2C${args.to.lon}`;
@@ -84,7 +127,7 @@ export async function planDrivingRoutes(args: { from: { lat: number; lon: number
     const response = await fetch(url, { signal: controller.signal, headers: { "User-Agent": USER_AGENT, Accept: "application/json" } });
     if (!response.ok) return { status: "error", url, routes: [], ms: Date.now() - started, error: `OSRM returned HTTP ${response.status}` };
     const body = await response.json() as OsrmPayload;
-    const routes = driveRoutesFrom(body, sourceUrl);
+    const routes = driveRoutesFrom(body, sourceUrl, { fromLabel: args.fromLabel, toLabel: args.toLabel });
     return { status: routes.length ? "ok" : "empty", url, routes, ms: Date.now() - started, error: routes.length ? undefined : body.message ?? "No road route was returned." };
   } catch (error) {
     const timedOut = (error as Error).name === "AbortError" || (error as Error).name === "TimeoutError";

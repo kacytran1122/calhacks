@@ -68,7 +68,7 @@ export async function planExtensionRoute(input: { originText?: string; originCoo
 
   const [transit, driving] = await Promise.all([
     planPublicTransit({ from: origin, to: destination, startsAt: input.event.startsAt, includeFares: false }),
-    input.includeSelfDrive ? planDrivingRoutes({ from: origin, to: destination }) : Promise.resolve(undefined),
+    input.includeSelfDrive ? planDrivingRoutes({ from: origin, to: destination, fromLabel: origin.label, toLabel: destination.label }) : Promise.resolve(undefined),
   ]);
   const transitRoutes: ExtensionRoute[] = transit.options.map((option, index) => ({
     id: `transit-${index + 1}`,
