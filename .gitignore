@@ -4,5 +4,8 @@
 node_modules
 .next
 /backend/
-/frontend/
+/frontend/.next/
+/frontend/out/
+/frontend/next-env.d.ts
+/frontend/*.tsbuildinfo
 npm-debug.log*

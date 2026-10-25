@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
