@@ -3,13 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#10130f" />
+    <meta name="theme-color" content="#fff8ef" />
     <meta name="description" content="Private, browser-based live directions using your device location." />
     <title>Directions</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://tile.openstreetmap.org" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Nunito:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
-    <link rel="stylesheet" href="/assets/map.css?v=3" />
+    <link rel="stylesheet" href="/assets/map.css?v=4" />
   </head>
   <body>
     <main id="app">
@@ -42,7 +45,7 @@
               <button id="add-stop" type="button">＋ Add stop</button>
               <label class="departure-field"><span>Leave</span><input id="departure-time" type="datetime-local" aria-label="Departure time" /></label>
             </div>
-            <button id="plan-route" class="plan-button" type="button" disabled>Show routes</button>
+            <button id="plan-route" class="plan-button" type="button" disabled>Find my routes</button>
           </div>
         </form>
         <p id="search-hint" class="map-hint">Select a field, then search or press and hold the map</p>
@@ -55,9 +58,9 @@
         </div>
         <div>
           <b>Use your live location</b>
-          <span>Your position stays in this browser and is only sent to the routing service when a route is requested.</span>
+          <span>Turn on GPS for live progress and automatic rerouting. Your location is used only for guidance.</span>
         </div>
-        <button id="location-permission" type="button">Enable GPS</button>
+        <button id="location-permission" type="button">Use live GPS</button>
       </section>
 
       <div class="map-controls" aria-label="Map controls">
@@ -82,9 +85,9 @@
           <button class="mode-tab" data-mode="flight" role="tab" aria-selected="false" type="button"><span>✈</span>Flight</button>
         </div>
         <div id="route-status" class="route-status" aria-live="polite">Waiting for your location…</div>
+        <button id="start-navigation" class="primary-button" type="button" disabled>Start trip</button>
         <div id="route-options" class="route-options"></div>
         <div id="leg-list" class="leg-list" aria-label="Journey legs"></div>
-        <button id="start-navigation" class="primary-button" type="button" disabled>Start navigation</button>
         <p id="route-source" class="route-source"></p>
       </section>
 
@@ -92,7 +95,7 @@
         <div class="instruction-card">
           <div id="maneuver-icon" class="maneuver-icon" aria-hidden="true">↑</div>
           <div class="instruction-copy"><span id="step-distance">Starting route</span><b id="step-instruction">Continue to the route</b></div>
-          <button id="end-navigation" class="end-button" type="button">End</button>
+          <button id="end-navigation" class="end-button" type="button">End trip</button>
         </div>
         <div class="progress-card">
           <div class="journey-head">
@@ -110,6 +113,6 @@
       <div id="toast" class="toast hidden" role="status"></div>
     </main>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
-    <script type="module" src="/assets/map.js?v=3"></script>
+    <script type="module" src="/assets/map.js?v=4"></script>
   </body>
 </html>

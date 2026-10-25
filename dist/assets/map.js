@@ -239,7 +239,7 @@ function onPosition(position) {
   ui.accuracy.textContent = `±${Math.round(next.accuracy)} m`;
   if (!state.userMarker) {
     state.userMarker = L.marker([next.lat, next.lng], { icon: userIcon, zIndexOffset: 1200, title: "Live location" }).addTo(map);
-    state.accuracyCircle = L.circle([next.lat, next.lng], { radius: next.accuracy, color: "#dfff82", fillColor: "#dfff82", fillOpacity: 0.09, weight: 1 }).addTo(map);
+    state.accuracyCircle = L.circle([next.lat, next.lng], { radius: next.accuracy, color: "#1f9e72", fillColor: "#7fd8b4", fillOpacity: 0.16, weight: 2 }).addTo(map);
     map.setView([next.lat, next.lng], 16);
   } else {
     state.userMarker.setLatLng([next.lat, next.lng]);
@@ -624,7 +624,7 @@ async function loadRoutes() {
 function lineStyle(segment, selected, alternative = false) {
   const dashed = segment.mode === "flight" ? "10 12" : segment.mode === "walk" ? "3 8" : undefined;
   return {
-    color: alternative ? "#727971" : selected ? "#587da8" : "#727971",
+    color: alternative ? "#b9a6ff" : selected ? "#6d4cff" : "#b9a6ff",
     weight: alternative ? 5 : 9,
     opacity: alternative ? 0.48 : 0.96,
     dashArray: dashed,
@@ -649,7 +649,7 @@ function renderRoutes() {
     const active = route === selected;
     route.segments.forEach((segment) => {
       if (segment.points.length < 2) return;
-      const casing = L.polyline(segment.points.map((point) => [point.lat, point.lng]), { color: "#121711", weight: active ? 13 : 8, opacity: active ? .85 : .4, lineCap: "round" }).addTo(map);
+      const casing = L.polyline(segment.points.map((point) => [point.lat, point.lng]), { color: "#2b1b3d", weight: active ? 13 : 8, opacity: active ? .86 : .42, lineCap: "round" }).addTo(map);
       const line = L.polyline(segment.points.map((point) => [point.lat, point.lng]), lineStyle(segment, active, !active)).addTo(map);
       line.on("click", () => selectRoute(state.routes.indexOf(route)));
       state.routeLayers.push(casing, line);
@@ -672,7 +672,7 @@ function renderRoutes() {
   renderLegList();
   ui.routeSource.innerHTML = `${escapeHtml(selected.source)} · <a href="${escapeHtml(selected.sourceUrl)}" target="_blank" rel="noreferrer">source ↗</a>`;
   ui.start.disabled = false;
-  ui.start.textContent = `Start guidance · ${durationText(selected.duration)}`;
+  ui.start.textContent = `Start trip · ${durationText(selected.duration)}`;
   const allPoints = selected.segments.flatMap((segment) => segment.points);
   if (allPoints.length) map.fitBounds(L.latLngBounds(allPoints.map((point) => [point.lat, point.lng])), { paddingTopLeft: [50, 90], paddingBottomRight: [50, window.innerWidth < 760 ? 420 : 90], maxZoom: 17 });
 }
@@ -724,8 +724,8 @@ function renderProgressOnMap(projection) {
     if (segment.points.length < 2 || index > state.activeLeg) return;
     const points = index < state.activeLeg ? segment.points : partialPath(segment.points, projection);
     if (points.length < 2) return;
-    const casing = L.polyline(points.map((point) => [point.lat, point.lng]), { color: "#15200f", weight: 10, opacity: .96, lineCap: "round" }).addTo(map);
-    const line = L.polyline(points.map((point) => [point.lat, point.lng]), { color: "#dfff82", weight: 6, opacity: 1, lineCap: "round", dashArray: segment.mode === "flight" ? "10 12" : undefined }).addTo(map);
+    const casing = L.polyline(points.map((point) => [point.lat, point.lng]), { color: "#2b1b3d", weight: 11, opacity: .96, lineCap: "round" }).addTo(map);
+    const line = L.polyline(points.map((point) => [point.lat, point.lng]), { color: "#ffd84d", weight: 7, opacity: 1, lineCap: "round", dashArray: segment.mode === "flight" ? "10 12" : undefined }).addTo(map);
     state.progressLayers.push(casing, line);
   });
 }

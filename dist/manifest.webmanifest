@@ -3,7 +3,7 @@
   "short_name": "Directions",
   "start_url": "/map/",
   "display": "standalone",
-  "background_color": "#10130f",
-  "theme_color": "#10130f",
+  "background_color": "#fff8ef",
+  "theme_color": "#fff8ef",
   "icons": []
 }

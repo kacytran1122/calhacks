@@ -5,6 +5,7 @@ const required = ["dist/index.html", "dist/map/index.html", "dist/assets/map.css
 for (const file of required) assert.ok(existsSync(file), `${file} must exist`);
 const html = readFileSync("dist/map/index.html", "utf8");
 const script = readFileSync("dist/assets/map.js", "utf8");
+const styles = readFileSync("dist/assets/map.css", "utf8");
 assert.match(html, /id="map"/, "map canvas exists");
 assert.match(html, /id="navigation-panel"/, "navigation UI exists");
 assert.match(html, /id="start-input"/, "explicit starting point exists");
@@ -17,5 +18,9 @@ assert.match(script, /alternatives \? 3/, "alternative routes are requested");
 assert.match(script, /projectOnPath/, "route progress follows GPS position along segments");
 assert.match(script, /OpenStreetMap walking fallback/, "OpenStreetMap fallback is configured");
 assert.match(script, /TRANSIT_ENDPOINTS/, "multimodal transit routing with a direct fallback is configured");
+assert.match(html, /Bricolage\+Grotesque/, "shared heading typography is loaded");
+assert.match(styles, /--cream:\s*#fff8ef/i, "shared cream theme is configured");
+assert.match(styles, /--coral:\s*#ff6b5b/i, "shared coral accent is configured");
+assert.match(styles, /button:focus-visible/, "keyboard focus remains visible");
 assert.doesNotMatch(`${html}\n${script}`, /S[’']?mile|calhacks|James West|UCLA/i, "no inherited project branding is visible");
 console.log("Static navigation checks passed.");
