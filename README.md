@@ -105,15 +105,16 @@ No production deployment occurs without an explicitly configured hosting environ
 
 Two planning aids in the trip pane: **a model produces evidence, plain code decides**.
 
-**Price outlook.** Gradient-boosted quantile models predict a p10 / p50 / p90 range for transport whose price moves with time and demand:
+**Price outlook — each time of day has its own price.** Gradient-boosted quantile models predict a p10 / p50 / p90 range, and the trip pane charts the same trip at every hour of the day with your departure and the cheapest hour that still arrives on time.
 
-| Model | Trained on (public data) | Held-out test | Typical error (p50) | Simple baseline | p10–p90 holds |
+| Model | Trained on (public data) | Held-out test | Typical error (p50) | Baseline | p10–p90 holds |
 |---|---|---|---|---|---|
-| Rideshare (Uber, Lyft) | 5.0M NYC TLC high-volume trips, Feb + Aug 2026 | last week of Aug 2026, 665,722 trips | $5.54 (R² 0.83) | rate card $7.16 (R² 0.74) | 79% |
-| Airfare | U.S. DOT Consumer Airfare Report, 2015–2025 | last 4 quarters, 8,281 routes | $32.64 (R² 0.51) | distance only $51.47 (R² 0.12) | 73% |
+| Rideshare (Uber, Lyft) | 5.0M NYC TLC high-volume trips, Feb + Aug 2026 | last week of Aug 2026, 665,722 trips | $6.40 (R² 0.78) | flat per-mile rate $7.41 · same model without time features $6.63 | 79% |
+| Airfare, route level | U.S. DOT Consumer Airfare Report, 2015–2025 | last 4 quarters, 8,281 routes | $32.64 (R² 0.51) | distance only $51.47 | 73% |
+| Flight departure hour | 162,809 Expedia fares with departure times (Mendeley Data, CC BY 4.0) | last 3 weeks of travel dates, 28,963 fares | NZ$63.75 | same-route daily median NZ$78.89 | 80% |
 
-- Rideshare uses the live OSRM road distance and drive time, the departure hour and weekday, and the company. It is learned from New York City prices, which the UI says.
-- Airfare picks the nearest airports with real scheduled traffic, counting ground travel at the policy's IRS mileage rate, so a cheaper fare 80 miles away doesn't win.
+- **Rideshare** uses the road distance (live OSRM) and the time of the request: hour, weekday, hour of week, weekend and named day periods (late night, early morning, morning rush, midday, evening rush, evening, night). Trip minutes are deliberately not an input — before a trip the app only knows free-flow drive time, so traffic and surge have to come from the time features. Riders paid $5.29/mile weekday late nights vs $7.46 in the evening rush; the model's weekday swing for the same 8-mile ride is 37% ($28.66 at 4 am, $39.18 at 5 pm). Learned from New York City prices, which the UI says.
+- **Flights** combine the season-level fare for the airport pair (DOT) with a departure-hour shape learned from fares that record each flight's departure time, scaled so the day's departures average to the route fare. The DOT data has no times of day; the departure-time data has no booking date, so how far ahead you book is not modeled. Airports are chosen counting ground travel at the policy's IRS mileage rate.
 - Estimates are never the approvable amount: a traveler still approves an exact, live-quoted price.
 - Training runs on a GPU in `backend/ml/notebooks/smile_price_models.ipynb` (XGBoost). Trees are exported to compact JSON in `backend/ml/models/` and evaluated in TypeScript (`backend/src/ml/gbdt.ts`); the notebook and `tests/backend/price-models.test.ts` both check the TypeScript numbers against XGBoost.
 

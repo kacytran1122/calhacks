@@ -1,15 +1,13 @@
 /**
  * Heat map around an event venue:
  *
- *   select region -> gather thermal evidence per cell -> propose hotspot candidates
- *   -> deterministic anomaly gate -> severity x confidence -> ranked findings
+ *   select region -> thermal evidence per cell -> propose hotspot candidates
+ *   -> anomaly gate -> severity x confidence -> ranked findings
  *
- * Evidence is the live forecast "feels like"
- * temperature at each grid cell from two independent weather models (GFS and ECMWF,
- * via Open-Meteo). Beyond the 16-day forecast it falls back to the same calendar week
- * in recent years (ERA5 archive) and says so. The numbers are relative
- * evidence for planning, not calibrated measurements, and no model or LLM owns the
- * ranking math below.
+ * Evidence is the forecast "feels like" temperature at each grid cell from two independent
+ * weather models (GFS and ECMWF, via Open-Meteo). Beyond the 16-day forecast it falls back to
+ * the same calendar date in recent years (ERA5 archive) and says so. The numbers are relative
+ * evidence for planning, not calibrated measurements, and no model or LLM owns the ranking math.
  */
 import type { FetchStatus } from "../types";
 
@@ -116,7 +114,7 @@ export function scoreCells(
     const anomalyF = Math.round((c.feelsLikeF - regionMedianF) * 10) / 10;
     const severity = Math.round(severityFor(c.feelsLikeF).score * 1000) / 1000;
     const confidence = confidenceFor(leadDays, c.modelSpreadF, basis);
-    // Heat anomaly gate: discard candidates whose anomaly is below the threshold.
+    // Gate: discard candidates whose anomaly is below the threshold.
     const rank = anomalyF < ANOMALY_THRESHOLD_F ? 0 : Math.round(severity * confidence * 1000) / 1000;
     return { ...c, anomalyF, severity, confidence, rank };
   });

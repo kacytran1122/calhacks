@@ -17,7 +17,7 @@ test("confidence drops with lead time and model disagreement", () => {
   assert.ok(confidenceFor(30, null, "climatology") < confidenceFor(10, 0, "forecast"));
 });
 
-test("Heat anomaly gate: only cells hotter than the area become ranked hotspots", () => {
+test("anomaly gate: only cells hotter than the area become ranked hotspots", () => {
   const base = { lat: 0, lon: 0, airTempF: 80, modelSpreadF: 1 };
   const { cells, regionMedianF } = scoreCells(
     [
