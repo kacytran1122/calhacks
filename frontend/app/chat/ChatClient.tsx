@@ -88,7 +88,7 @@ export function ChatClient() {
         <div className="pj-copy">
           <p className="pj-kicker">Your route, sent privately</p>
           <h1 id="photon-title">Message <em>@smile</em><br />from iMessage.</h1>
-          <p className="pj-lede">Scan one QR to open the dedicated @smile line. The route request is already filled in, and this website never asks for your phone number or email address.</p>
+          <p className="pj-lede">Scan one QR to open your private @smile conversation. The route request is already filled in, and this website never asks for your phone number or email address.</p>
           <ol className="pj-steps" aria-label="How it works">
             <li><span>1</span><div><b>Create the secure QR</b><small>It contains a short-lived code for this trip, not your trip token.</small></div></li>
             <li><span>2</span><div><b>Scan and send</b><small>The message begins with @smile so the assistant can respond.</small></div></li>
@@ -99,7 +99,7 @@ export function ChatClient() {
         <section className="pj-card" aria-label="Open @smile in iMessage">
           <div className="pj-card-top">
             <span className="pj-orb" aria-hidden="true">☺</span>
-            <div><b>@smile on Messages</b><small>Dedicated line · one-to-one conversation</small></div>
+            <div><b>@smile on Messages</b><small>Photon-assigned line · one-to-one conversation</small></div>
           </div>
 
           {credentials === undefined ? (
@@ -119,7 +119,7 @@ export function ChatClient() {
                 <h2>Scan, then send the message.</h2>
                 <p>Send the filled-in request within 15 minutes. @smile will reply with your secure map link.</p>
               </div>
-              <figure className="pj-qr" aria-label="QR code that opens the dedicated @smile conversation in Messages">
+              <figure className="pj-qr" aria-label="QR code that opens a private @smile conversation in Messages">
                 <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#201f1d" title="Open @smile in Messages with the route request filled in" />
               </figure>
               <a className="pj-button primary" href={result.messageUrl}>Open Messages</a>
@@ -134,7 +134,7 @@ export function ChatClient() {
             <div className="pj-gate">
               <span className="pj-gate-icon" aria-hidden="true">↗</span>
               <h2>Create your Messages QR</h2>
-              <p>No phone number or email address is requested. The QR opens the dedicated line with an @smile route request ready to send.</p>
+              <p>No phone number or email address is requested. The QR opens your private conversation with an @smile route request ready to send.</p>
               {error && <p className="pj-error" role="alert">{error}</p>}
               <button className="pj-button primary" type="button" disabled={loading} onClick={() => void requestQr()}>
                 {loading ? "Creating secure QR…" : error ? "Try again" : "Create Messages QR"}

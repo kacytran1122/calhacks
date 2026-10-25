@@ -98,7 +98,7 @@ function secretFrom(env: NodeJS.ProcessEnv): string {
 function lineFrom(env: NodeJS.ProcessEnv): string {
   const line = env.PHOTON_LINE_ADDRESS?.trim() ?? "";
   if (!/^\+[1-9]\d{7,14}$/.test(line)) {
-    throw new PhotonHandoffError("A dedicated Photon iMessage line has not been configured yet.", 503, "LINE_NOT_CONFIGURED");
+    throw new PhotonHandoffError("A Photon iMessage line has not been configured yet.", 503, "LINE_NOT_CONFIGURED");
   }
   return line;
 }

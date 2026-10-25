@@ -17,7 +17,7 @@ test("does not create a Photon handoff without a trip-scoped link", async () => 
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-test("creates a prefilled dedicated-line Messages QR without collecting a phone number or email", async () => {
+test("creates a prefilled Photon-line Messages QR without collecting a phone number or email", async () => {
   window.history.replaceState(null, "", "/chat#trip=TR-L-test&token=private-trip-token");
   const starterMessage = "@smile open my route SMILE-2345-6789-ABCD-EFGH";
   const messageUrl = `sms:+14155550199?&body=${encodeURIComponent(starterMessage)}`;
@@ -36,7 +36,7 @@ test("creates a prefilled dedicated-line Messages QR without collecting a phone 
   await user.click(screen.getByRole("button", { name: "Create Messages QR" }));
 
   expect(await screen.findByRole("heading", { name: "Scan, then send the message." })).toBeVisible();
-  const qr = screen.getByLabelText("QR code that opens the dedicated @smile conversation in Messages").querySelector("svg");
+  const qr = screen.getByLabelText("QR code that opens a private @smile conversation in Messages").querySelector("svg");
   expect(qr).not.toBeNull();
   expect(qr?.querySelector("title")).toHaveTextContent("Open @smile in Messages with the route request filled in");
   expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", messageUrl);
@@ -49,11 +49,11 @@ test("creates a prefilled dedicated-line Messages QR without collecting a phone 
 
 test("keeps a contact-free retry available when QR creation fails", async () => {
   window.history.replaceState(null, "", "/chat#trip=TR-L-test&token=private-trip-token");
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({ error: "A dedicated Photon iMessage line has not been configured yet." }) })));
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({ error: "A Photon iMessage line has not been configured yet." }) })));
   const user = userEvent.setup();
   render(<ChatClient />);
   await user.click(await screen.findByRole("button", { name: "Create Messages QR" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("A dedicated Photon iMessage line has not been configured yet.");
+  expect(await screen.findByRole("alert")).toHaveTextContent("A Photon iMessage line has not been configured yet.");
   expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();

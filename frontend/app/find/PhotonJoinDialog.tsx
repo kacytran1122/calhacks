@@ -171,8 +171,8 @@ export function PhotonJoinDialog({
               <div className="fd-photon-ready" aria-live="polite">
                 <p className="fd-photon-kicker">Your secure QR is ready</p>
                 <h2 id="photon-dialog-title" ref={headingRef} tabIndex={-1}>Scan, then send the message</h2>
-                <p id="photon-dialog-description">The QR opens the dedicated @smile conversation with your one-time route request already filled in. Send it within 15 minutes.</p>
-                <figure className="fd-photon-qr" aria-label="QR code that opens the dedicated @smile conversation in Messages">
+                <p id="photon-dialog-description">The QR opens your private @smile conversation with a one-time route request already filled in. Send it within 15 minutes.</p>
+                <figure className="fd-photon-qr" aria-label="QR code that opens a private @smile conversation in Messages">
                   <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#2b1b3d" title="Open @smile in Messages with the route request filled in" />
                 </figure>
                 <a className="dk-btn primary fd-photon-open" href={result.messageUrl}>Open Messages</a>

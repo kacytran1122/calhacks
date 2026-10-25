@@ -29,7 +29,7 @@ function fixture(t: TestContext) {
 
 const identity = { projectId: "pho_prj_test", spaceId: "direct_1", senderId: "human_1" };
 
-test("creates a contact-free QR request for only the configured dedicated line", (t) => {
+test("creates a contact-free QR request for only the configured Photon line", (t) => {
   const runtime = fixture(t);
   const result = createPhotonTripHandoff({ tripId: "TR-L-test", travelerId: "T-test" }, runtime);
   assert.match(result.starterMessage, /^@smile open my route SMILE-(?:[23456789A-Z]{4}-){3}[23456789A-Z]{4}$/);

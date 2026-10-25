@@ -31,7 +31,7 @@ test("opens an accessible in-page QR dialog without exposing the trip token or a
   await waitFor(() => expect(trigger).toHaveFocus());
 });
 
-test("creates the prefilled dedicated-line QR immediately and sends no contact data", async () => {
+test("creates the prefilled Photon-line QR immediately and sends no contact data", async () => {
   const starterMessage = "@smile open my route SMILE-2345-6789-ABCD-EFGH";
   const messageUrl = `sms:+14155550199?&body=${encodeURIComponent(starterMessage)}`;
   const fetcher = vi.fn(async () => ({
@@ -45,7 +45,7 @@ test("creates the prefilled dedicated-line QR immediately and sends no contact d
   await user.click(screen.getByRole("button", { name: /Message @smile privately in iMessage/ }));
 
   expect(await screen.findByRole("heading", { name: "Scan, then send the message" })).toHaveFocus();
-  const qr = screen.getByLabelText("QR code that opens the dedicated @smile conversation in Messages").querySelector("svg");
+  const qr = screen.getByLabelText("QR code that opens a private @smile conversation in Messages").querySelector("svg");
   expect(qr).not.toBeNull();
   expect(qr?.querySelector("title")).toHaveTextContent("Open @smile in Messages with the route request filled in");
   expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", messageUrl);
@@ -62,16 +62,16 @@ test("creates the prefilled dedicated-line QR immediately and sends no contact d
   expect(screen.getByRole("button", { name: "Message copied" })).toBeVisible();
 });
 
-test("keeps the popup open with a retry when the dedicated line is unavailable", async () => {
+test("keeps the popup open with a retry when the Photon line is unavailable", async () => {
   const fetcher = vi.fn()
-    .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "A dedicated Photon iMessage line has not been configured yet." }) })
+    .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "A Photon iMessage line has not been configured yet." }) })
     .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Still unavailable." }) });
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<PhotonJoinDialog tripId="TR-L-test" tripToken="private-trip-token" eventName="Cal Hacks 13.0" />);
 
   await user.click(screen.getByRole("button", { name: /Message @smile privately in iMessage/ }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("A dedicated Photon iMessage line has not been configured yet.");
+  expect(await screen.findByRole("alert")).toHaveTextContent("A Photon iMessage line has not been configured yet.");
   expect(screen.getByRole("dialog")).toBeVisible();
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Try again" }));
