@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,17 +28,25 @@ async function fixture(t: TestContext, replies: Reply[] = [{ id: "reply_1", text
   const directory = await mkdtemp(join(tmpdir(), "smile-photon-test-"));
   const calls: BrainBody[] = [];
   const requestTimes: number[] = [];
-  const controls = { status: 200, raw: undefined as string | undefined };
+  const controls: {
+    status: number;
+    raw?: string;
+    beforeResponse?: () => Promise<void>;
+    responseFor?: (body: BrainBody) => { status: number; raw: string } | undefined;
+  } = { status: 200 };
   const server = createServer(async (req, res) => {
     assert.equal(req.url, "/api/chat/photon");
     assert.equal(req.method, "POST");
     assert.equal(req.headers["x-smile-photon-secret"], "test-secret");
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as BrainBody;
+    calls.push(body);
     requestTimes.push(Date.now());
-    res.writeHead(controls.status, { "content-type": "application/json" });
-    res.end(controls.raw ?? JSON.stringify({ replies }));
+    await controls.beforeResponse?.();
+    const response = controls.responseFor?.(body);
+    res.writeHead(response?.status ?? controls.status, { "content-type": "application/json" });
+    res.end(response?.raw ?? controls.raw ?? JSON.stringify({ replies }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -83,6 +92,14 @@ async function until(check: () => boolean | Promise<boolean>, message = "conditi
   }
 }
 const cursorOf = async (config: Config) => JSON.parse(await readFile(config.cursorFile, "utf8")) as { seq: number; projectId: string };
+const journalPathFor = (config: Config, projectId = config.projectId) =>
+  `${config.cursorFile}.${createHash("sha256").update(projectId).digest("hex").slice(0, 16)}.pending`;
+const journalOf = async (config: Config) => JSON.parse(await readFile(journalPathFor(config), "utf8")) as {
+  version: number;
+  projectId: string;
+  deliveries: { seq: number; message: PhotonMessage | null }[];
+  deadLetters: { seq: number; messageId?: string; stage: string; status?: number; diagnosticCode?: string }[];
+};
 
 test("does not contact the brain or Photon until someone explicitly mentions smile", async (t) => {
   const f = await fixture(t);
@@ -184,6 +201,150 @@ test("retries a failed first delivery in memory when the durable cursor starts a
   assert.equal(f.effects.size, 1);
   assert.equal(socket.connections.length, 1);
   assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [0]);
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "first delivery cleanup");
+});
+
+test("writes an inbound delivery to the durable journal before calling the bridge and clears it only after checkpointing", async (t) => {
+  const f = await fixture(t);
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  let inspected = 0;
+  f.controls.beforeResponse = async () => {
+    const journal = await journalOf(f.config);
+    assert.equal(journal.version, 1);
+    assert.equal(journal.projectId, "pho_prj_test");
+    assert.deepEqual(journal.deliveries.map(({ seq }) => seq), [22]);
+    const saved = await readFile(journalPathFor(f.config), "utf8");
+    assert.doesNotMatch(saved, /private@example\.com|outer-private-metadata|handle|metadata/);
+    await assert.rejects(readFile(f.config.cursorFile), /ENOENT/);
+    inspected++;
+  };
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket });
+  const privateMessage = incoming("journal_first");
+  privateMessage.sentBy.handle = "private@example.com";
+  socket.emit("delivery", { ...eventFor(privateMessage), metadata: "outer-private-metadata" }, { seq: 22, replyExpected: true });
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 22; } catch { return false; } }, "journaled delivery checkpoint");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "journal clear after checkpoint");
+  assert.equal(inspected, 1);
+  assert.equal(f.effects.size, 1);
+});
+
+test("journals later deliveries while the head delivery is still retrying", async (t) => {
+  const f = await fixture(t);
+  f.controls.status = 503;
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket, retryBaseMs: 50, retryMaxMs: 100 });
+  socket.deliver(incoming("blocked_head"), 31);
+  socket.deliver(incoming("queued_second"), 32);
+  socket.deliver(incoming("queued_third"), 33);
+
+  await until(async () => (await journalOf(f.config)).deliveries.length === 3, "all queued deliveries journaled");
+  assert.deepEqual((await journalOf(f.config)).deliveries.map(({ seq }) => seq), [31, 32, 33]);
+  assert.deepEqual(f.calls.map(({ messageId }) => messageId), ["blocked_head"]);
+  f.controls.status = 200;
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 33; } catch { return false; } }, "journaled queue recovery");
+  assert.deepEqual(f.calls.slice(-3).map(({ messageId }) => messageId), ["blocked_head", "queued_second", "queued_third"]);
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "journaled queue cleanup");
+});
+
+test("replays a pending delivery after restart without waiting for another socket delivery", async (t) => {
+  const f = await fixture(t);
+  const pendingMessages = [
+    incoming("survived_restart_1", "direct_restart"),
+    incoming("survived_restart_2", "direct_restart"),
+    incoming("survived_restart_3", "direct_restart"),
+  ];
+  await writeFile(journalPathFor(f.config), JSON.stringify({
+    version: 1,
+    projectId: f.config.projectId,
+    deliveries: pendingMessages.map((message, index) => ({ seq: 35 + index, message })),
+    deadLetters: [],
+    savedAt: new Date().toISOString(),
+  }) + "\n", { mode: 0o600 });
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket });
+
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 37; } catch { return false; } }, "restart journal replay");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "restart journal clear");
+  assert.deepEqual(f.calls.map(({ messageId }) => messageId), ["survived_restart_1", "survived_restart_2", "survived_restart_3"]);
+  assert.deepEqual(f.sent.map((value) => value.headers["idempotency-key"]), [
+    "smile:survived_restart_1:room:0",
+    "smile:survived_restart_2:room:0",
+    "smile:survived_restart_3:room:0",
+  ]);
+  assert.ok(f.sent.every((message) => message.body.spaceId === "direct_restart"));
+});
+
+test("treats the cursor as authoritative when a restart finds a stale journal entry", async (t) => {
+  const f = await fixture(t);
+  await writeFile(f.config.cursorFile, JSON.stringify({ seq: 44, projectId: f.config.projectId }) + "\n", { mode: 0o600 });
+  await writeFile(journalPathFor(f.config), JSON.stringify({
+    version: 1,
+    projectId: f.config.projectId,
+    deliveries: [{ seq: 44, message: incoming("already_checkpointed") }],
+    deadLetters: [],
+  }) + "\n", { mode: 0o600 });
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket });
+  assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [44]);
+  assert.equal((await journalOf(f.config)).deliveries.length, 0);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.sent.length, 0);
+});
+
+test("fails closed on a corrupt pending-event journal", async (t) => {
+  const f = await fixture(t);
+  await writeFile(journalPathFor(f.config), "{truncated", { mode: 0o600 });
+  const socket = new FakeSocket();
+  await assert.rejects(
+    start(f.config, { photon: f.photon, socket: socket as unknown as Socket }),
+    (error: unknown) => Boolean(error && typeof error === "object" && "stage" in error && error.stage === "journal"),
+  );
+  assert.equal(socket.connections.length, 0);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.sent.length, 0);
+});
+
+test("uses a project-scoped journal without overwriting another project's pending events", async (t) => {
+  const f = await fixture(t);
+  const otherProject = "pho_prj_other";
+  const otherJournal = journalPathFor(f.config, otherProject);
+  const original = JSON.stringify({
+    version: 1,
+    projectId: otherProject,
+    deliveries: [{ seq: 9, message: incoming("other_project_pending") }],
+    deadLetters: [],
+  }) + "\n";
+  await writeFile(otherJournal, original, { mode: 0o600 });
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket });
+  assert.equal(await readFile(otherJournal, "utf8"), original);
+  assert.equal((await journalOf(f.config)).deliveries.length, 0);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.sent.length, 0);
+});
+
+test("pauses socket intake while a large durable backlog drains, then resumes from its checkpoint", async (t) => {
+  const f = await fixture(t);
+  await writeFile(journalPathFor(f.config), JSON.stringify({
+    version: 1,
+    projectId: f.config.projectId,
+    deliveries: Array.from({ length: 128 }, (_, index) => ({ seq: index + 1, message: null })),
+    deadLetters: [],
+  }) + "\n", { mode: 0o600 });
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket });
+  assert.equal(socket.connections.length, 0);
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 128; } catch { return false; } }, "durable backlog checkpoint", 5_000);
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "durable backlog cleanup", 5_000);
+  assert.equal(socket.connections.length, 1);
+  assert.equal(socket.subscriptions[0]!.startSeq >= 64, true);
+  assert.equal(f.calls.length, 0);
 });
 
 test("persists the cursor only after deliveries succeed and keeps later deliveries queued during a local retry", async (t) => {
@@ -204,6 +365,7 @@ test("persists the cursor only after deliveries succeed and keeps later deliveri
   assert.equal(socket.connections.length, 1);
   assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [0]);
   await until(async () => (await cursorOf(f.config)).seq === 3, "locally retried and queued cursor");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "retried queue cleanup");
   assert.equal(f.effects.size, 6);
   assert.equal(f.calls.filter((body) => body.messageId === "second").length, 2);
   assert.equal(f.calls.filter((body) => body.messageId === "not_processed_yet").length, 1);
@@ -217,6 +379,7 @@ test("persists the cursor only after deliveries succeed and keeps later deliveri
   restarted.deliver(incoming("not_processed_yet"), 3);
   restarted.deliver(incoming("fourth"), 4);
   await until(async () => (await cursorOf(f.config)).seq === 4, "new message after restart");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "restart delivery cleanup");
   assert.equal(f.calls.length, count + 1);
   assert.equal(f.calls.at(-1)!.messageId, "fourth");
 });
@@ -236,6 +399,7 @@ test("skips unrelated projects, bot loops, group spaces, and malformed events wi
   socket.deliver(group, 4);
   socket.deliver(incoming("real", "direct_2"), 5);
   await until(async () => { try { return (await cursorOf(f.config)).seq === 5; } catch { return false; } }, "later direct delivery");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "ignored delivery cleanup");
   assert.deepEqual(f.calls.map((body) => body.messageId), ["real"]);
   assert.equal(f.sent[0]!.body.spaceId, "direct_2");
 });
@@ -270,8 +434,91 @@ test("repeated brain failures increase local retry backoff without reconnecting 
   assert.equal(f.sent.length, 0);
   f.controls.status = 200;
   await until(async () => { try { return (await cursorOf(f.config)).seq === 1; } catch { return false; } }, "recovered message");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "recovered message cleanup");
   assert.equal(f.effects.size, 1);
   assert.equal(socket.connections.length, 1);
+});
+
+test("logs an allowlisted bridge diagnostic code without exposing the response body", async (t) => {
+  const f = await fixture(t);
+  f.controls.status = 503;
+  f.controls.raw = JSON.stringify({
+    error: "secret deployment detail",
+    code: "PHOTON_PROJECT_NOT_CONFIGURED",
+    internal: "private-stack-trace",
+  });
+  const logs: unknown[][] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => { logs.push(args); });
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket, retryBaseMs: 25, retryMaxMs: 100 });
+  socket.deliver(incoming("diagnostic_code"), 1);
+  await until(() => JSON.stringify(logs).includes("PHOTON_PROJECT_NOT_CONFIGURED"), "safe bridge diagnostic");
+  assert.match(JSON.stringify(logs), /bridge \(HTTP 503, PHOTON_PROJECT_NOT_CONFIGURED\)/);
+  assert.doesNotMatch(JSON.stringify(logs), /secret deployment detail|private-stack-trace/);
+  f.controls.status = 200;
+  f.controls.raw = undefined;
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 1; } catch { return false; } }, "diagnostic retry recovery");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "diagnostic retry cleanup");
+});
+
+test("quarantines a permanent replay conflict and continues with the next valid event", async (t) => {
+  const f = await fixture(t);
+  f.controls.responseFor = (body) => body.messageId === "poison_conflict"
+    ? { status: 409, raw: JSON.stringify({ error: "private conflict detail", code: "CHAT_REPLAY_CONFLICT" }) }
+    : undefined;
+  const logs: unknown[][] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => { logs.push(args); });
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket, retryBaseMs: 10 });
+  socket.deliver(incoming("poison_conflict"), 61);
+  socket.deliver(incoming("valid_after_conflict"), 62);
+
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 62; } catch { return false; } }, "event after quarantined conflict");
+  assert.deepEqual(f.calls.map(({ messageId }) => messageId), ["poison_conflict", "valid_after_conflict"]);
+  assert.deepEqual(f.sent.map((value) => value.headers["idempotency-key"]), ["smile:valid_after_conflict:room:0"]);
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "conflict journal cleanup");
+  const journal = await journalOf(f.config);
+  assert.deepEqual(journal.deadLetters.map(({ seq, messageId, stage, status, diagnosticCode }) => ({ seq, messageId, stage, status, diagnosticCode })), [{
+    seq: 61,
+    messageId: "poison_conflict",
+    stage: "bridge",
+    status: 409,
+    diagnosticCode: "CHAT_REPLAY_CONFLICT",
+  }]);
+  assert.match(JSON.stringify(logs), /quarantined.*bridge \(HTTP 409, CHAT_REPLAY_CONFLICT\)/);
+  assert.doesNotMatch(JSON.stringify(logs), /private conflict detail/);
+  assert.doesNotMatch(JSON.stringify(journal), /@smile|private conflict detail/);
+});
+
+test("bounds malformed bridge-response retries before quarantining the poison event", async (t) => {
+  const f = await fixture(t);
+  f.controls.responseFor = (body) => body.messageId === "poison_response"
+    ? { status: 200, raw: JSON.stringify({ replies: [{ private: "malformed response detail" }] }) }
+    : undefined;
+  const logs: unknown[][] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => { logs.push(args); });
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket, retryBaseMs: 1, retryMaxMs: 4 });
+  socket.deliver(incoming("poison_response"), 71);
+  socket.deliver(incoming("valid_after_response"), 72);
+
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 72; } catch { return false; } }, "event after malformed bridge response");
+  assert.equal(f.calls.filter(({ messageId }) => messageId === "poison_response").length, 5);
+  assert.equal(f.calls.filter(({ messageId }) => messageId === "valid_after_response").length, 1);
+  assert.deepEqual(f.sent.map((value) => value.headers["idempotency-key"]), ["smile:valid_after_response:room:0"]);
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "malformed-response journal cleanup");
+  const journal = await journalOf(f.config);
+  assert.deepEqual(journal.deadLetters.map(({ seq, messageId, stage, status }) => ({ seq, messageId, stage, status })), [{
+    seq: 71,
+    messageId: "poison_response",
+    stage: "bridge-response",
+    status: undefined,
+  }]);
+  assert.match(JSON.stringify(logs), /quarantined after bridge-response/);
+  assert.doesNotMatch(JSON.stringify(logs), /malformed response detail/);
 });
 
 test("does not checkpoint a Photon message that already reports delivery failure", async (t) => {
@@ -295,6 +542,7 @@ test("failure logs never expose SDK payloads, user messages, or private approval
   assert.match(JSON.stringify(logs), /HTTP 503/);
   assert.doesNotMatch(JSON.stringify(logs), /hidden-approval-token|sensitive user message|api-secret/);
   await until(async () => { try { return (await cursorOf(f.config)).seq === 1; } catch { return false; } }, "safe local retry");
+  await until(async () => (await journalOf(f.config)).deliveries.length === 0, "safe retry cleanup");
   assert.equal(socket.connections.length, 1);
   socket.disconnect();
 });

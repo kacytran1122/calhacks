@@ -26,14 +26,18 @@ const configure = () => {
 
 test("checks secret before attempting to parse JSON", async () => {
   delete process.env.PHOTON_BRIDGE_SECRET;
-  assert.equal((await POST(request(body()))).status, 503);
+  const missingBridge = await POST(request(body()));
+  assert.equal(missingBridge.status, 503);
+  assert.equal((await missingBridge.json()).code, "PHOTON_BRIDGE_NOT_CONFIGURED");
   configure();
   const unauthorized = new Request("http://localhost/api/chat/photon", { method: "POST", body: "not json" });
   assert.equal((await POST(unauthorized)).status, 401);
   const malformed = new Request("http://localhost/api/chat/photon", { method: "POST", headers: { "x-smile-photon-secret": "test-bridge-secret" }, body: "not json" });
   assert.equal((await POST(malformed)).status, 400);
   delete process.env.PHOTON_PROJECT_ID;
-  assert.equal((await POST(request(body()))).status, 503);
+  const missingProject = await POST(request(body()));
+  assert.equal(missingProject.status, 503);
+  assert.equal((await missingProject.json()).code, "PHOTON_PROJECT_NOT_CONFIGURED");
   configure();
 });
 
@@ -107,7 +111,9 @@ test("replays identical concurrent deliveries without duplicate transcript and r
   assert.deepEqual(results[1], results[2]);
   const roomId = `photon:${hash([value.projectId, value.spaceId])}`;
   assert.equal(view(roomId).messages.length, 2);
-  assert.equal((await POST(request({ ...value, text: "different @smile text" }))).status, 409);
+  const conflict = await POST(request({ ...value, text: "different @smile text" }));
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).code, "CHAT_REPLAY_CONFLICT");
   assert.equal((await POST(request({ ...value, senderId: "different-person" }))).status, 409);
   assert.equal(view(roomId).messages.length, 2);
 });

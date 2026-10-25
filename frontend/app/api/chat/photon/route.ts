@@ -21,11 +21,11 @@ const same = (a: string, b: string) => {
 export async function POST(req: Request) {
   const expected = process.env.PHOTON_BRIDGE_SECRET;
   const supplied = req.headers.get("x-smile-photon-secret") ?? "";
-  if (!expected) return NextResponse.json({ error: "Photon bridge is not configured" }, { status: 503 });
+  if (!expected) return NextResponse.json({ error: "Photon bridge is not configured", code: "PHOTON_BRIDGE_NOT_CONFIGURED" }, { status: 503 });
   if (!same(supplied, expected)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const configuredProject = process.env.PHOTON_PROJECT_ID;
   if (!configuredProject || !/^pho_prj_[A-Za-z0-9_-]+$/.test(configuredProject))
-    return NextResponse.json({ error: "Photon project is not configured" }, { status: 503 });
+    return NextResponse.json({ error: "Photon project is not configured", code: "PHOTON_PROJECT_NOT_CONFIGURED" }, { status: 503 });
 
   let raw: unknown;
   try { raw = await req.json(); } catch { return NextResponse.json({ error: "A valid JSON message is required" }, { status: 400 }); }
@@ -70,9 +70,9 @@ export async function POST(req: Request) {
     }
   } catch (error) {
     if (error instanceof PhotonHandoffStorageUnavailable) {
-      return NextResponse.json({ error: error.message }, { status: 503, headers: { "Retry-After": String(error.retryAfter ?? 5) } });
+      return NextResponse.json({ error: error.message, code: "PHOTON_HANDOFF_STORAGE_UNAVAILABLE" }, { status: 503, headers: { "Retry-After": String(error.retryAfter ?? 5) } });
     }
-    return NextResponse.json({ error: "The secure route handoff is temporarily unavailable." }, { status: 503, headers: { "Retry-After": "5" } });
+    return NextResponse.json({ error: "The secure route handoff is temporarily unavailable.", code: "PHOTON_HANDOFF_UNAVAILABLE" }, { status: 503, headers: { "Retry-After": "5" } });
   }
 
   const sender = `Traveler ${hash([projectId, senderId]).slice(0, 24).toUpperCase()}`;
@@ -86,9 +86,11 @@ export async function POST(req: Request) {
       replies: result.posted.filter((m) => m.bot).map((m) => ({ id: m.id, text: m.text, approvalPath: result.approvals[m.id] })),
     });
   } catch (error) {
-    if (error instanceof ChatReplayConflict) return NextResponse.json({ error: error.message }, { status: 409 });
-    if (error instanceof ChatBusy || error instanceof ChatStorageUnavailable)
-      return NextResponse.json({ error: error.message }, { status: 503, headers: { "Retry-After": "5" } });
-    return NextResponse.json({ error: "Photon could not process this message. Please retry the same message." }, { status: 500 });
+    if (error instanceof ChatReplayConflict) return NextResponse.json({ error: error.message, code: "CHAT_REPLAY_CONFLICT" }, { status: 409 });
+    if (error instanceof ChatBusy)
+      return NextResponse.json({ error: error.message, code: "CHAT_BUSY" }, { status: 503, headers: { "Retry-After": "5" } });
+    if (error instanceof ChatStorageUnavailable)
+      return NextResponse.json({ error: error.message, code: "CHAT_STORAGE_UNAVAILABLE" }, { status: 503, headers: { "Retry-After": "5" } });
+    return NextResponse.json({ error: "Photon could not process this message. Please retry the same message.", code: "PHOTON_PROCESSING_FAILED" }, { status: 500 });
   }
 }
