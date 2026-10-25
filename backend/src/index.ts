@@ -36,3 +36,4 @@ export { runAgent, runAgentIn, type AgentCall } from "./agents/run";
 export { converse, amountsGrounded, prepareChatTravel, updateChatTravelMemory, TOOLS as CONCIERGE_TOOLS, type ChatTravelMemory, type ConciergeInput, type ConciergeOutput, type ConciergePlan, type ConciergeDeps } from "./agents/concierge";
 export { runDue, runJob, dueJobs, priceWatchTargets, JOBS, type JobId, type JobResult, type SchedulerDeps } from "./scheduler";
 export { compareCarbon, estimateCarbon, organizerCarbon, tripCarbon, FACTORS as EMISSION_FACTORS, CARBON_SOURCES, CARBON_METHOD, type CarbonEstimate, type CarbonComparison, type OrganizerCarbon } from "./carbon";
+export * from "./tourContributions";

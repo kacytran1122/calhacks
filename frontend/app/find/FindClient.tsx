@@ -5,6 +5,7 @@ import { SmileWord } from "@/components/landing/Smile";
 import { stateCodeFrom } from "@/lib/usState";
 import { CarbonCompare, CarpoolCard, type CarbonComparison, type Carpool } from "./CarbonCompare";
 import { TripInsights } from "./TripInsights";
+import { VenueTourAction } from "./VenueTourAction";
 
 type Listing = {
   key: string;
@@ -441,6 +442,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
                       event page ↗
                     </a>
                   </div>
+                  <VenueTourAction event={e} />
                 </div>
               </article>
             );

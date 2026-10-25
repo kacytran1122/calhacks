@@ -129,6 +129,14 @@ Keep the Photon worker's cursor on its own persistent volume using `PHOTON_CURSO
 
 Automated tests exercise group routing, mention filtering, private approvals, restart recovery, concurrent delivery, replay conflicts, and remembered travel preferences without sending real iMessages. Live verification still requires adding the assigned dedicated agent number to an actual iMessage group, sending a message without the mention, then sending `@smile` and a follow-up from two group members. Confirm one reply to each mention in that group and no reply to ordinary conversation before calling the deployment live-tested.
 
+## Venue tours and photo contributions
+
+LA Hacks opens the James West Alumni Center concept at `/tour`. Cal Hacks opens the Palace of Fine Arts concept at `/venue`. These are approximate visualizations, not verified current floor plans, event assignments, or accessible-navigation instructions. Other event cards link to `/tours/contribute` with the selected event prefilled instead of implying a tour is available.
+
+The contribution form accepts one to six JPEG, PNG, or WebP photos, with a combined input limit of 3 MiB. `/api/tours/contributions` validates and decodes the images, removes embedded metadata, and saves them privately on the persistent Railway volume under `SMILE_DATA_DIR`. The response confirms a submission reference, not a generated model. Material needs manual review and a separate modelling workflow before a tour can be published. Requests require explicit consent, pass an origin check, and are subject to storage and rate limits. This endpoint must not run on an ephemeral Vercel filesystem.
+
+`npm run dev --prefix frontend` and `npm run build --prefix frontend` build the local Three.js viewer automatically. The LA Hacks model is a checked-in GLB; the Cal Hacks walkthrough generates its scene in code. Runtime scripts and model files are served locally rather than loaded from a third-party script CDN.
+
 ## Price prediction and heat map
 
 Two planning aids in the trip pane: **a model produces evidence, plain code decides**.

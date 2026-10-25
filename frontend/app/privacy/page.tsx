@@ -41,6 +41,12 @@ export default function PrivacyPage() {
         </section>
 
         <section style={sectionStyle}>
+          <h2 style={headingStyle}>Optional venue photo contributions</h2>
+          <p>If you choose to contribute venue photos, S’mile uploads the selected images, event name, public event website, and any venue location you enter to its persistent server. We remove embedded image metadata before saving the images privately for review and possible venue modelling. We do not automatically publish the photos or create a 3D tour from an upload, and these contributions are not automatically sent to a model-training service.</p>
+          <p>Please share only photos you own or have permission to use, without faces, private information, or restricted areas. Photos and submission records remain until removed by an administrator. Keep the submission reference and contact us below if you want your contribution deleted. For abuse prevention, a short-lived hash of the connection identifier is used to limit uploads; we do not store the raw identifier in contribution records.</p>
+        </section>
+
+        <section style={sectionStyle}>
           <h2 style={headingStyle}>Limited use</h2>
           <p>Location and public page data are used only to provide and improve the trip-planning feature described above. They are not sold, used for advertising, transferred for credit decisions, or used for an unrelated purpose. S’mile’s use of information received through Chrome follows the Chrome Web Store User Data Policy, including its Limited Use requirements.</p>
         </section>
