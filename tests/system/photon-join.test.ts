@@ -43,7 +43,7 @@ test("Photon QR requires a trip token and never asks for contact information", (
     assert.match(first.body.messageUrl, /^sms:\\+14155550199\\?&body=/);
     assert.equal(decodeURIComponent(first.body.messageUrl.split("body=")[1]), first.body.starterMessage);
     assert.equal(JSON.stringify(first.body).includes(tripToken), false);
-    assert.equal(JSON.stringify(first.body).includes(trip.travelerId), false);
+    assert.equal(JSON.stringify(first.body).includes(JSON.stringify(trip.travelerId)), false);
     assert.equal(externalFetches, 0);
     assert.match(first.response.headers.get("cache-control"), /no-store/);
 
@@ -59,7 +59,7 @@ test("Photon QR requires a trip token and never asks for contact information", (
     assert.equal(bootstrap.origin.query, traveler.homeZip);
     assert.equal(bootstrap.destination.label, event.name);
     assert.equal(bootstrap.destination.query, [event.venue, event.city].filter(Boolean).join(", "));
-    assert.equal(JSON.stringify(bootstrap).includes(trip.travelerId), false);
+    assert.equal(JSON.stringify(bootstrap).includes(JSON.stringify(trip.travelerId)), false);
     assert.match(bootstrapResponse.headers.get("cache-control"), /no-store/);
     assert.equal(bootstrapResponse.headers.get("referrer-policy"), "no-referrer");
     delete trip.includeSelfDrive;
