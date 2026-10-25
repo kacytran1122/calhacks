@@ -1,13 +1,20 @@
 import { createServer } from "node:http";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
+import { transitResponse } from "./frontend/api/transit.mjs";
 
 const root = join(process.cwd(), "dist");
 const port = Number(process.env.PORT || 4173);
 const types = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".webmanifest": "application/manifest+json" };
 
-createServer((request, response) => {
+createServer(async (request, response) => {
   const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
+  if (pathname === "/api/transit") {
+    const result = await transitResponse(request.url, request.method);
+    response.writeHead(result.status, result.headers);
+    response.end(result.body);
+    return;
+  }
   const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
   let file = join(root, safe);
   if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");

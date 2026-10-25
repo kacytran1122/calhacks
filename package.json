@@ -2,7 +2,7 @@
   "private": true,
   "scripts": {
     "start": "node server.mjs",
-    "test": "node tests/validate.mjs"
+    "test": "node tests/validate.mjs && node --test tests/route-utils.test.mjs"
   },
   "engines": { "node": ">=20" }
 }

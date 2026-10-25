@@ -1,16 +1,21 @@
 import { readFileSync, existsSync } from "node:fs";
 import assert from "node:assert/strict";
 
-const required = ["dist/index.html", "dist/map/index.html", "dist/assets/map.css", "dist/assets/map.js", "dist/manifest.webmanifest", "dist/service-worker.js"];
+const required = ["dist/index.html", "dist/map/index.html", "dist/assets/map.css", "dist/assets/map.js", "dist/assets/route-utils.js", "dist/manifest.webmanifest", "dist/service-worker.js", "frontend/api/transit.mjs"];
 for (const file of required) assert.ok(existsSync(file), `${file} must exist`);
 const html = readFileSync("dist/map/index.html", "utf8");
 const script = readFileSync("dist/assets/map.js", "utf8");
 assert.match(html, /id="map"/, "map canvas exists");
 assert.match(html, /id="navigation-panel"/, "navigation UI exists");
+assert.match(html, /id="start-input"/, "explicit starting point exists");
+assert.match(html, /id="destination-input"/, "explicit ending point exists");
+assert.match(html, /id="add-stop"/, "intermediate stops can be added");
 assert.match(script, /watchPosition/, "continuous GPS is used");
 assert.match(script, /router\.project-osrm\.org/, "road routing is configured");
 assert.match(script, /nominatim\.openstreetmap\.org/, "OpenStreetMap place search is configured");
-assert.match(script, /alternatives=3/, "alternative routes are requested");
-assert.match(script, /nearestRoutePoint/, "route progress follows GPS position");
+assert.match(script, /alternatives \? 3/, "alternative routes are requested");
+assert.match(script, /projectOnPath/, "route progress follows GPS position along segments");
+assert.match(script, /OpenStreetMap walking fallback/, "OpenStreetMap fallback is configured");
+assert.match(script, /TRANSIT_ENDPOINTS/, "multimodal transit routing with a direct fallback is configured");
 assert.doesNotMatch(`${html}\n${script}`, /S[’']?mile|calhacks|James West|UCLA/i, "no inherited project branding is visible");
 console.log("Static navigation checks passed.");

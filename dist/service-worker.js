@@ -1,5 +1,5 @@
-const CACHE = "directions-shell-v2";
-const SHELL = ["/map/", "/assets/map.css?v=2", "/assets/map.js?v=2", "/manifest.webmanifest"];
+const CACHE = "directions-shell-v3";
+const SHELL = ["/map/", "/assets/map.css?v=3", "/assets/map.js?v=3", "/assets/route-utils.js?v=3", "/manifest.webmanifest"];
 self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener("fetch", (event) => {

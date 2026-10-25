@@ -1,39 +1,94 @@
+import { decodePolyline, distanceMeters, greatCirclePoints, partialPath, prepareSegment, projectOnPath } from "./route-utils.js?v=3";
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const TRANSIT_ENDPOINTS = location.hostname.endsWith("chatgpt.site")
+  ? ["https://api.transitous.org/api/v6/plan"]
+  : ["/api/transit", "https://api.transitous.org/api/v6/plan"];
 
 const ui = {
-  form: $("#search-form"), input: $("#destination-input"), results: $("#search-results"), hint: $("#search-hint"),
-  clear: $("#clear-search"), back: $("#back-button"), permission: $("#permission-card"), permissionButton: $("#location-permission"),
+  planner: $("#planner-form"), plannerBody: $("#planner-body"), plannerSummary: $("#planner-summary"),
+  plannerTitle: $("#planner-title"), summaryText: $("#summary-text"), togglePlanner: $("#toggle-planner"), editRoute: $("#edit-route"),
+  startInput: $("#start-input"), destinationInput: $("#destination-input"), waypointFields: $("#waypoint-fields"),
+  addStop: $("#add-stop"), useLiveStart: $("#use-live-start"), departure: $("#departure-time"), plan: $("#plan-route"),
+  results: $("#search-results"), hint: $("#search-hint"), permission: $("#permission-card"), permissionButton: $("#location-permission"),
   recenter: $("#recenter"), orientation: $("#orientation"), setup: $("#route-setup"), closeRoute: $("#close-route"),
-  destinationName: $("#destination-name"), destinationAddress: $("#destination-address"), status: $("#route-status"),
-  options: $("#route-options"), start: $("#start-navigation"), navigation: $("#navigation-panel"), end: $("#end-navigation"),
+  routeKicker: $("#route-kicker"), destinationName: $("#destination-name"), destinationAddress: $("#destination-address"),
+  status: $("#route-status"), options: $("#route-options"), legList: $("#leg-list"), start: $("#start-navigation"),
+  routeSource: $("#route-source"), navigation: $("#navigation-panel"), end: $("#end-navigation"),
   stepDistance: $("#step-distance"), stepInstruction: $("#step-instruction"), maneuver: $("#maneuver-icon"),
-  remaining: $("#remaining-distance"), arrival: $("#arrival-time"), accuracy: $("#gps-accuracy"), currentStreet: $("#current-street"),
-  progressPercent: $("#progress-percent"), destinationLabel: $("#route-destination"), roadProgress: $("#road-progress"), progressDot: $("#progress-dot"),
-  toast: $("#toast"),
+  remaining: $("#remaining-distance"), arrival: $("#arrival-time"), accuracy: $("#gps-accuracy"),
+  currentStreet: $("#current-street"), progressPercent: $("#progress-percent"), destinationLabel: $("#route-destination"),
+  overallProgress: $("#overall-progress-fill"), activeLegSummary: $("#active-leg-summary"),
+  previousLeg: $("#previous-leg"), nextLeg: $("#next-leg"), toast: $("#toast"),
 };
 
 const state = {
-  user: null, destination: null, watchId: null, mode: "drive", routes: [], selectedRoute: 0,
-  routeLayers: [], userMarker: null, accuracyCircle: null, destinationMarker: null, progressLayer: null,
-  navigating: false, follow: true, followHeading: false, lastHeading: null, searchAbort: null, routeAbort: null,
-  lastRerouteAt: 0, lastReverseAt: 0,
+  user: null,
+  watchId: null,
+  startLive: true,
+  start: null,
+  destination: null,
+  waypoints: [],
+  activeField: { type: "destination" },
+  nextWaypointId: 1,
+  mode: "transit",
+  routes: [],
+  selectedRoute: 0,
+  routeLayers: [],
+  progressLayers: [],
+  pointMarkers: [],
+  transferMarkers: [],
+  userMarker: null,
+  accuracyCircle: null,
+  navigating: false,
+  activeLeg: 0,
+  legProgress: 0,
+  legProjection: null,
+  offRouteUpdates: 0,
+  rerouting: false,
+  follow: true,
+  followHeading: false,
+  lastHeading: null,
+  searchAbort: null,
+  routeAbort: null,
 };
 
-const map = L.map("map", { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([34.0522, -118.2437], 11);
+const map = L.map("map", { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([37.7749, -122.4194], 11);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
 
-const userIcon = L.divIcon({ className: "", html: '<div class="user-marker"></div>', iconSize: [26, 26], iconAnchor: [13, 13] });
+const userIcon = L.divIcon({ className: "", html: '<div class="user-marker"></div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+const startIcon = L.divIcon({ className: "", html: '<div class="start-marker"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
 const destinationIcon = L.divIcon({ className: "", html: '<div class="destination-marker">●</div>', iconSize: [28, 36], iconAnchor: [14, 36] });
+const waypointIcon = (number) => L.divIcon({ className: "", html: `<div class="waypoint-marker">${number}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+const transferIcon = (text) => L.divIcon({ className: "", html: `<div class="transfer-marker">${text}</div>`, iconSize: [34, 30], iconAnchor: [17, 15] });
+
+const AIRPORTS = [
+  ["ATL", "Hartsfield–Jackson Atlanta", 33.6407, -84.4277], ["AUS", "Austin–Bergstrom", 30.1975, -97.6664],
+  ["BOS", "Boston Logan", 42.3656, -71.0096], ["BWI", "Baltimore/Washington", 39.1774, -76.6684],
+  ["CLT", "Charlotte Douglas", 35.2144, -80.9473], ["DCA", "Reagan National", 38.8512, -77.0402],
+  ["DEN", "Denver International", 39.8561, -104.6737], ["DFW", "Dallas/Fort Worth", 32.8998, -97.0403],
+  ["EWR", "Newark Liberty", 40.6895, -74.1745], ["HNL", "Daniel K. Inouye", 21.3187, -157.9225],
+  ["IAD", "Washington Dulles", 38.9531, -77.4565], ["IAH", "George Bush Intercontinental", 29.9902, -95.3368],
+  ["JFK", "John F. Kennedy", 40.6413, -73.7781], ["LAS", "Harry Reid", 36.084, -115.1537],
+  ["LAX", "Los Angeles International", 33.9416, -118.4085], ["MCO", "Orlando International", 28.4312, -81.3081],
+  ["MDW", "Chicago Midway", 41.7868, -87.7522], ["MIA", "Miami International", 25.7959, -80.287],
+  ["MSP", "Minneapolis–Saint Paul", 44.8848, -93.2223], ["OAK", "Oakland International", 37.7126, -122.2197],
+  ["ORD", "Chicago O'Hare", 41.9742, -87.9073], ["PDX", "Portland International", 45.5898, -122.5951],
+  ["PHL", "Philadelphia International", 39.8744, -75.2424], ["PHX", "Phoenix Sky Harbor", 33.4352, -112.0101],
+  ["SAN", "San Diego International", 32.7338, -117.1933], ["SEA", "Seattle–Tacoma", 47.4502, -122.3088],
+  ["SFO", "San Francisco International", 37.6213, -122.379], ["SJC", "San José Mineta", 37.3639, -121.9289],
+  ["SLC", "Salt Lake City International", 40.7899, -111.9791], ["STL", "St. Louis Lambert", 38.7487, -90.37],
+];
 
 function escapeHtml(value = "") {
-  return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+  return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 }
 
-function showToast(message, timeout = 3500) {
+function showToast(message, timeout = 3600) {
   ui.toast.textContent = message;
   ui.toast.classList.remove("hidden");
   clearTimeout(showToast.timer);
@@ -48,30 +103,110 @@ function metersText(meters) {
 
 function durationText(seconds) {
   if (!Number.isFinite(seconds)) return "—";
-  const mins = Math.max(1, Math.round(seconds / 60));
-  if (mins < 60) return `${mins} min`;
-  return `${Math.floor(mins / 60)} hr ${mins % 60 ? `${mins % 60} min` : ""}`.trim();
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} hr${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
 }
 
-function arrivalText(seconds) {
-  const when = new Date(Date.now() + Math.max(0, seconds) * 1000);
+function arrivalText(seconds, absolute) {
+  const when = absolute ? new Date(absolute) : new Date(Date.now() + Math.max(0, seconds) * 1000);
   return when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function distanceMeters(a, b) {
-  const rad = Math.PI / 180;
-  const p1 = a.lat * rad;
-  const p2 = b.lat * rad;
-  const dp = (b.lat - a.lat) * rad;
-  const dl = (b.lng - a.lng) * rad;
-  const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
-  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+function localDateTime(date = new Date(Date.now() + 10 * 60_000)) {
+  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return shifted.toISOString().slice(0, 16);
 }
 
-function routeEndpoint(mode) {
-  if (mode === "walk") return "https://routing.openstreetmap.de/routed-foot/route/v1/driving";
-  if (mode === "bike") return "https://routing.openstreetmap.de/routed-bike/route/v1/driving";
-  return "https://router.project-osrm.org/route/v1/driving";
+function collapsePlanner(collapsed = true) {
+  ui.planner.classList.toggle("collapsed", collapsed);
+  ui.togglePlanner.setAttribute("aria-expanded", String(!collapsed));
+  ui.plannerSummary.classList.toggle("hidden", !collapsed || !state.destination);
+}
+
+function effectiveStart() {
+  if (state.startLive && state.user) return { lat: state.user.lat, lng: state.user.lng, name: "My live location", address: "Current GPS position" };
+  return state.start;
+}
+
+function tripPoints() {
+  const start = effectiveStart();
+  const stops = state.waypoints.map((item) => item.place).filter(Boolean);
+  return start && state.destination ? [start, ...stops, state.destination] : [];
+}
+
+function updatePlannerState() {
+  const start = effectiveStart();
+  const ready = Boolean(start && state.destination && state.waypoints.every((item) => item.place));
+  ui.plan.disabled = !ready;
+  ui.plannerTitle.textContent = state.destination ? `${start?.name || "Choose start"} → ${state.destination.name}` : "Choose start and destination";
+  ui.summaryText.textContent = state.destination
+    ? `${start?.name || "Start"} → ${state.destination.name}${state.waypoints.length ? ` · ${state.waypoints.length} stop${state.waypoints.length > 1 ? "s" : ""}` : ""}`
+    : "";
+}
+
+function fieldInput(field = state.activeField) {
+  if (field.type === "start") return ui.startInput;
+  if (field.type === "destination") return ui.destinationInput;
+  return document.querySelector(`[data-waypoint-id="${field.id}"] input`);
+}
+
+function setActiveField(field) {
+  state.activeField = field;
+  $$(".point-row").forEach((row) => row.classList.toggle("active-field",
+    row.dataset.field === field.type || (field.type === "waypoint" && row.dataset.waypointId === String(field.id))));
+}
+
+function renderWaypoints() {
+  ui.waypointFields.innerHTML = state.waypoints.map((waypoint, index) => `
+    <div class="point-row" data-field="waypoint" data-waypoint-id="${waypoint.id}">
+      <span class="point-node waypoint-node" aria-hidden="true"></span>
+      <label><small>Stop ${index + 1}</small><input autocomplete="off" enterkeyhint="search" value="${escapeHtml(waypoint.place?.name || "")}" placeholder="Search stop" aria-label="Stop ${index + 1}" /></label>
+      <span class="waypoint-actions">
+        <button type="button" data-action="up" aria-label="Move stop ${index + 1} up">↑</button>
+        <button type="button" data-action="remove" aria-label="Remove stop ${index + 1}">×</button>
+      </span>
+    </div>`).join("");
+  ui.waypointFields.querySelectorAll(".point-row").forEach((row) => {
+    const id = Number(row.dataset.waypointId);
+    const input = row.querySelector("input");
+    input.addEventListener("focus", () => setActiveField({ type: "waypoint", id }));
+    input.addEventListener("input", () => {
+      const waypoint = state.waypoints.find((item) => item.id === id);
+      if (waypoint && input.value !== waypoint.place?.name) waypoint.place = null;
+      updatePlannerState();
+    });
+    row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+      state.waypoints = state.waypoints.filter((item) => item.id !== id);
+      renderWaypoints();
+      updatePointMarkers();
+      updatePlannerState();
+    });
+    row.querySelector('[data-action="up"]').addEventListener("click", () => {
+      const index = state.waypoints.findIndex((item) => item.id === id);
+      if (index > 0) [state.waypoints[index - 1], state.waypoints[index]] = [state.waypoints[index], state.waypoints[index - 1]];
+      renderWaypoints();
+      updatePointMarkers();
+    });
+  });
+}
+
+function clearRouteLayers() {
+  [...state.routeLayers, ...state.progressLayers, ...state.transferMarkers].forEach((layer) => layer.remove());
+  state.routeLayers = [];
+  state.progressLayers = [];
+  state.transferMarkers = [];
+}
+
+function updatePointMarkers() {
+  state.pointMarkers.forEach((marker) => marker.remove());
+  state.pointMarkers = [];
+  const start = effectiveStart();
+  if (start) state.pointMarkers.push(L.marker([start.lat, start.lng], { icon: startIcon, zIndexOffset: 700, title: "Start" }).addTo(map));
+  state.waypoints.forEach((waypoint, index) => {
+    if (waypoint.place) state.pointMarkers.push(L.marker([waypoint.place.lat, waypoint.place.lng], { icon: waypointIcon(index + 1), zIndexOffset: 750, title: `Stop ${index + 1}: ${waypoint.place.name}` }).addTo(map));
+  });
+  if (state.destination) state.pointMarkers.push(L.marker([state.destination.lat, state.destination.lng], { icon: destinationIcon, zIndexOffset: 800, title: state.destination.name }).addTo(map));
 }
 
 function requestLocation() {
@@ -84,7 +219,7 @@ function requestLocation() {
   ui.permissionButton.textContent = "Finding you…";
   state.watchId = navigator.geolocation.watchPosition(onPosition, onLocationError, {
     enableHighAccuracy: true,
-    maximumAge: 1500,
+    maximumAge: 1200,
     timeout: 15000,
   });
 }
@@ -100,10 +235,11 @@ function onPosition(position) {
   };
   state.user = next;
   ui.permission.classList.add("hidden");
+  ui.useLiveStart.classList.add("active");
   ui.accuracy.textContent = `±${Math.round(next.accuracy)} m`;
   if (!state.userMarker) {
-    state.userMarker = L.marker([next.lat, next.lng], { icon: userIcon, zIndexOffset: 1000 }).addTo(map);
-    state.accuracyCircle = L.circle([next.lat, next.lng], { radius: next.accuracy, color: "#75a9ff", fillColor: "#5f9dff", fillOpacity: 0.12, weight: 1 }).addTo(map);
+    state.userMarker = L.marker([next.lat, next.lng], { icon: userIcon, zIndexOffset: 1200, title: "Live location" }).addTo(map);
+    state.accuracyCircle = L.circle([next.lat, next.lng], { radius: next.accuracy, color: "#dfff82", fillColor: "#dfff82", fillOpacity: 0.09, weight: 1 }).addTo(map);
     map.setView([next.lat, next.lng], 16);
   } else {
     state.userMarker.setLatLng([next.lat, next.lng]);
@@ -111,9 +247,13 @@ function onPosition(position) {
   }
   if (next.heading !== null) state.lastHeading = next.heading;
   const marker = state.userMarker.getElement()?.querySelector(".user-marker");
-  if (marker) marker.style.transform = `rotate(${state.followHeading && state.lastHeading !== null ? state.lastHeading - 45 : -45}deg)`;
-  if (state.follow) map.panTo([next.lat, next.lng], { animate: true, duration: 0.45 });
-  if (state.destination && !state.routes.length) loadRoutes();
+  if (marker) marker.style.transform = `rotate(${state.followHeading && state.lastHeading !== null ? state.lastHeading : 0}deg)`;
+  if (state.startLive) {
+    ui.startInput.value = "My live location";
+    updatePlannerState();
+    updatePointMarkers();
+  }
+  if (state.follow && state.navigating) map.panTo([next.lat, next.lng], { animate: true, duration: 0.35 });
   if (state.navigating) updateNavigation(next);
 }
 
@@ -122,42 +262,53 @@ function onLocationError(error) {
   ui.permissionButton.disabled = false;
   ui.permissionButton.textContent = "Try GPS again";
   const messages = {
-    1: "Location access is blocked. Allow it in your browser settings, then try again.",
-    2: "Your device could not determine its position. Move near a window or enable device location.",
-    3: "Location took too long. Try again in an area with a clearer GPS signal.",
+    1: "Location access is blocked. Allow it in browser settings, then try again.",
+    2: "Your device could not determine its position. Enable device location and try again.",
+    3: "Location took too long. Try again with a clearer GPS signal.",
   };
   ui.permission.querySelector("span").textContent = messages[error.code] || "Your live position is currently unavailable.";
 }
 
 async function searchPlaces(query) {
+  if (!query || query.length < 2) return;
   state.searchAbort?.abort();
   state.searchAbort = new AbortController();
   ui.results.classList.remove("hidden");
   ui.results.innerHTML = '<div class="route-status">Searching OpenStreetMap…</div>';
   try {
-    const viewbox = map.getBounds();
+    const bounds = map.getBounds();
     const params = new URLSearchParams({
-      format: "jsonv2", q: query, limit: "5", addressdetails: "1",
-      viewbox: `${viewbox.getWest()},${viewbox.getNorth()},${viewbox.getEast()},${viewbox.getSouth()}`,
+      format: "jsonv2",
+      q: query,
+      limit: "5",
+      addressdetails: "1",
+      viewbox: `${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()},${bounds.getSouth()}`,
     });
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { signal: state.searchAbort.signal, headers: { "Accept-Language": navigator.language || "en" } });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      signal: state.searchAbort.signal,
+      headers: { "Accept-Language": navigator.language || "en" },
+    });
     if (!response.ok) throw new Error(`Search returned ${response.status}`);
     const places = await response.json();
     if (!places.length) {
-      ui.results.innerHTML = '<div class="route-status">No matching places. Try a full street address.</div>';
+      ui.results.innerHTML = '<div class="route-status">No matching place. Try a full street address.</div>';
       return;
     }
     ui.results.innerHTML = places.map((place, index) => {
-      const shortName = place.name || place.display_name.split(",")[0];
-      return `<button class="search-result" type="button" data-index="${index}"><span class="result-pin">↗</span><div><b>${escapeHtml(shortName)}</b><span>${escapeHtml(place.display_name)}</span></div></button>`;
+      const name = place.name || place.display_name.split(",")[0];
+      return `<button class="search-result" type="button" data-index="${index}"><span class="result-pin">↗</span><div><b>${escapeHtml(name)}</b><span>${escapeHtml(place.display_name)}</span></div></button>`;
     }).join("");
-    $$(".search-result").forEach((button) => button.addEventListener("click", () => chooseDestination({
-      lat: Number(places[Number(button.dataset.index)].lat), lng: Number(places[Number(button.dataset.index)].lon),
-      name: places[Number(button.dataset.index)].name || places[Number(button.dataset.index)].display_name.split(",")[0],
-      address: places[Number(button.dataset.index)].display_name,
-    })));
+    $$(".search-result").forEach((button) => button.addEventListener("click", () => {
+      const result = places[Number(button.dataset.index)];
+      setPoint(state.activeField, {
+        lat: Number(result.lat),
+        lng: Number(result.lon),
+        name: result.name || result.display_name.split(",")[0],
+        address: result.display_name,
+      });
+    }));
   } catch (error) {
-    if (error.name !== "AbortError") ui.results.innerHTML = '<div class="route-status">Search is temporarily unavailable. You can press and hold the map to set the destination.</div>';
+    if (error.name !== "AbortError") ui.results.innerHTML = '<div class="route-status">Search is temporarily unavailable. Press and hold the map to place this point.</div>';
   }
 }
 
@@ -173,229 +324,570 @@ async function reversePlace(lat, lng) {
   }
 }
 
-async function chooseDestination(destination) {
-  state.destination = destination;
+function setPoint(field, place) {
+  if (field.type === "start") {
+    state.startLive = false;
+    state.start = place;
+    ui.startInput.value = place.name;
+    ui.useLiveStart.classList.remove("active");
+  } else if (field.type === "destination") {
+    state.destination = place;
+    ui.destinationInput.value = place.name;
+  } else {
+    const waypoint = state.waypoints.find((item) => item.id === field.id);
+    if (waypoint) waypoint.place = place;
+    renderWaypoints();
+  }
+  ui.results.classList.add("hidden");
+  updatePointMarkers();
+  updatePlannerState();
+  ui.hint.textContent = "Add another stop or show route options";
+  const points = tripPoints();
+  if (points.length > 1) map.fitBounds(L.latLngBounds(points.map((point) => [point.lat, point.lng])), { padding: [70, 70], maxZoom: 16 });
+}
+
+function routeEndpoints(mode) {
+  if (mode === "walk") return ["https://routing.openstreetmap.de/routed-foot/route/v1/driving"];
+  if (mode === "bike") return ["https://routing.openstreetmap.de/routed-bike/route/v1/driving"];
+  return ["https://router.project-osrm.org/route/v1/driving", "https://routing.openstreetmap.de/routed-car/route/v1/driving"];
+}
+
+function modeMeta(rawMode, agency, line) {
+  const raw = String(rawMode || "").toUpperCase();
+  if (raw === "WALK") return { mode: "walk", icon: "●", name: "Walk" };
+  if (raw === "BIKE") return { mode: "bike", icon: "◆", name: "Bike" };
+  if (raw === "CAR") return { mode: "drive", icon: "↗", name: "Drive" };
+  if (raw === "BUS" || raw === "COACH") return { mode: "bus", icon: "▣", name: line ? `Bus ${line}` : "Bus" };
+  if (raw === "SUBWAY" && /Bay Area Rapid Transit/i.test(agency || "")) return { mode: "rail", icon: "B", name: line ? `BART ${line}` : "BART" };
+  if (/SUBWAY|RAIL|TRAIN/.test(raw)) return { mode: "rail", icon: "▤", name: line || "Train" };
+  if (raw === "TRAM") return { mode: "rail", icon: "▤", name: line ? `Tram ${line}` : "Tram" };
+  if (raw === "FERRY") return { mode: "ferry", icon: "≈", name: line || "Ferry" };
+  if (raw === "FLIGHT" || raw === "AIRPLANE") return { mode: "flight", icon: "✈", name: line || "Flight" };
+  if (raw === "AIRPORT") return { mode: "airport", icon: "⌂", name: line || "Airport" };
+  return { mode: "transit", icon: "▣", name: line || "Transit" };
+}
+
+async function fetchRoadRoutes(points, mode, alternatives = true) {
+  const coordinates = points.map((point) => `${point.lng},${point.lat}`).join(";");
+  let body;
+  let lastError;
+  for (const endpoint of routeEndpoints(mode)) {
+    const url = `${endpoint}/${coordinates}?alternatives=${alternatives ? 3 : "false"}&steps=true&geometries=geojson&overview=full`;
+    try {
+      const response = await fetch(url, { signal: state.routeAbort?.signal });
+      if (!response.ok) throw new Error(`Road routing returned ${response.status}`);
+      body = await response.json();
+      if (body.code === "Ok" && body.routes?.length) break;
+      throw new Error(body.message || "No route found");
+    } catch (error) {
+      if (error.name === "AbortError") throw error;
+      lastError = error;
+    }
+  }
+  if (!body?.routes?.length) throw lastError || new Error("OpenStreetMap routing is unavailable");
+  if (body.code !== "Ok" || !body.routes?.length) throw new Error(body.message || "No route found");
+  return body.routes.map((route, routeIndex) => {
+    const segments = route.legs.map((leg, index) => {
+      const coordinates = [];
+      (leg.steps || []).forEach((step) => (step.geometry?.coordinates || []).forEach(([lng, lat]) => {
+        const last = coordinates.at(-1);
+        if (!last || last.lat !== lat || last.lng !== lng) coordinates.push({ lat, lng });
+      }));
+      if (!coordinates.length) coordinates.push(points[index], points[index + 1]);
+      const meta = modeMeta(mode === "walk" ? "WALK" : mode === "bike" ? "BIKE" : "CAR");
+      return prepareSegment({
+        ...meta,
+        label: meta.name,
+        from: points[index],
+        to: points[index + 1],
+        points: coordinates,
+        duration: leg.duration,
+        distance: leg.distance,
+        instruction: `${meta.name} to ${points[index + 1].name}`,
+        live: true,
+      });
+    });
+    return prepareItinerary({
+      title: routeIndex === 0 ? "Fastest route" : `Alternative ${routeIndex}`,
+      segments,
+      source: "OpenStreetMap road data · OSRM routing",
+      sourceUrl: "https://www.openstreetmap.org/copyright",
+    });
+  });
+}
+
+async function fetchTransitRoutes(from, to, time) {
+  let body;
+  let lastError;
+  for (const endpoint of TRANSIT_ENDPOINTS) {
+    const direct = endpoint.startsWith("https://api.transitous.org");
+    const params = new URLSearchParams(direct ? {
+      fromPlace: `${from.lat},${from.lng}`, toPlace: `${to.lat},${to.lng}`, time: time.toISOString(),
+      arriveBy: "false", withFares: "true", numItineraries: "4", maxTransfers: "5", detailedTransfers: "true", realtimeMode: "REALTIME",
+    } : { from: `${from.lat},${from.lng}`, to: `${to.lat},${to.lng}`, time: time.toISOString() });
+    try {
+      const response = await fetch(`${endpoint}?${params}`, { signal: state.routeAbort?.signal, headers: { Accept: "application/json" } });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `Transit routing returned ${response.status}`);
+      body = payload;
+      break;
+    } catch (error) {
+      if (error.name === "AbortError") throw error;
+      lastError = error;
+    }
+  }
+  if (!body) throw lastError || new Error("Transit routing failed");
+  return (body.itineraries || []).slice().sort((a, b) => (a.duration || Infinity) - (b.duration || Infinity)).map((itinerary, itineraryIndex) => {
+    const segments = itinerary.legs.map((leg) => {
+      const line = leg.displayName || leg.routeShortName || leg.routeLongName;
+      const meta = modeMeta(leg.mode, leg.agencyName, line);
+      const geometry = leg.geometry || leg.legGeometry;
+      const points = decodePolyline(geometry?.points, geometry?.precision || 6);
+      if (!points.length && Number.isFinite(leg.from?.lat) && Number.isFinite(leg.to?.lat)) {
+        points.push({ lat: leg.from.lat, lng: leg.from.lon }, { lat: leg.to.lat, lng: leg.to.lon });
+      }
+      const fromPlace = { lat: leg.from?.lat ?? from.lat, lng: leg.from?.lon ?? from.lng, name: leg.from?.name === "START" ? from.name : (leg.from?.name || from.name) };
+      const toPlace = { lat: leg.to?.lat ?? to.lat, lng: leg.to?.lon ?? to.lng, name: leg.to?.name === "END" ? to.name : (leg.to?.name || to.name) };
+      const toward = leg.headsign ? ` toward ${leg.headsign}` : "";
+      const instruction = meta.mode === "walk" ? `Walk to ${toPlace.name}` : `Take ${meta.name}${toward} to ${toPlace.name}`;
+      return prepareSegment({
+        ...meta,
+        label: meta.name,
+        from: fromPlace,
+        to: toPlace,
+        points,
+        duration: leg.duration,
+        distance: leg.distance,
+        instruction,
+        live: leg.realTime,
+        agency: leg.agencyName,
+        headsign: leg.headsign,
+        startTime: leg.startTime,
+        endTime: leg.endTime,
+      });
+    });
+    return prepareItinerary({
+      title: itineraryIndex === 0 ? "Fastest transit" : itineraryIndex === 1 ? "Transit alternative" : `Option ${itineraryIndex + 1}`,
+      segments,
+      transfers: itinerary.transfers,
+      startTime: itinerary.startTime,
+      endTime: itinerary.endTime,
+      source: "Transitous public GTFS and GTFS-Realtime",
+      sourceUrl: "https://transitous.org/sources/",
+    });
+  }).filter((route) => route.segments.length);
+}
+
+function nearestAirport(point) {
+  return AIRPORTS.map(([code, name, lat, lng]) => ({ code, name, lat, lng, miles: distanceMeters(point, { lat, lng }) / 1609.344 }))
+    .sort((a, b) => a.miles - b.miles)[0];
+}
+
+async function groundTransfer(from, to, time) {
+  try {
+    const transit = await fetchTransitRoutes(from, to, time);
+    if (transit.length) return transit[0].segments;
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+  }
+  return (await fetchRoadRoutes([from, to], "drive", false))[0].segments;
+}
+
+async function flightRoute(from, to, time) {
+  const departure = nearestAirport(from);
+  const arrival = nearestAirport(to);
+  const airDistance = distanceMeters(departure, arrival);
+  if (!departure || !arrival || departure.code === arrival.code || airDistance < 160000) {
+    throw new Error("These locations are too close for a useful flight itinerary. Choose Transit or Drive.");
+  }
+  const groundOut = await groundTransfer(from, { ...departure, address: departure.name }, time);
+  const groundInTime = new Date(time.getTime() + groundOut.reduce((sum, leg) => sum + (leg.duration || 0), 0) * 1000 + 4 * 60 * 60_000);
+  const groundIn = await groundTransfer({ ...arrival, address: arrival.name }, to, groundInTime);
+  const airport = prepareSegment({
+    ...modeMeta("AIRPORT", null, `Check in at ${departure.code}`),
+    label: `Check in · ${departure.code}`,
+    from: departure,
+    to: departure,
+    points: [{ lat: departure.lat, lng: departure.lng }],
+    duration: 90 * 60,
+    distance: 0,
+    instruction: `Check in and go to your gate at ${departure.name}. Follow terminal signs; indoor turn-by-turn guidance is not available.`,
+    live: false,
+  });
+  const flight = prepareSegment({
+    ...modeMeta("FLIGHT", null, `${departure.code} → ${arrival.code}`),
+    label: `Flight ${departure.code} → ${arrival.code}`,
+    from: departure,
+    to: arrival,
+    points: greatCirclePoints(departure, arrival),
+    duration: Math.max(45 * 60, Math.round(airDistance / 225)),
+    distance: airDistance,
+    instruction: `Fly from ${departure.code} to ${arrival.code}. Verify the actual terminal and schedule with your airline.`,
+    live: false,
+  });
+  const date = (ui.departure.value || new Date().toISOString()).slice(0, 10);
+  return prepareItinerary({
+    title: `Fly ${departure.code} → ${arrival.code}`,
+    segments: [...groundOut, airport, flight, ...groundIn],
+    source: "Ground routes: live transit with OpenStreetMap fallback · Flight path and duration: great-circle estimate",
+    sourceUrl: `https://www.google.com/travel/flights?hl=en&curr=USD&q=Flights%20from%20${departure.code}%20to%20${arrival.code}%20on%20${date}`,
+  });
+}
+
+function prepareItinerary(route) {
+  const duration = route.segments.reduce((sum, segment) => sum + (segment.duration || 0), 0);
+  const distance = route.segments.reduce((sum, segment) => sum + (segment.distance || 0), 0);
+  const summary = route.segments.map((segment) => segment.label).filter((label, index, labels) => index === 0 || label !== labels[index - 1]).join(" → ");
+  const liveLegs = route.segments.filter((segment) => segment.live).length;
+  return { ...route, duration, distance, summary, liveLegs };
+}
+
+async function sequentialTransit(points, time) {
+  const groups = [];
+  let cursorTime = new Date(time);
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const routes = await fetchTransitRoutes(points[index], points[index + 1], cursorTime);
+    if (!routes.length) throw new Error(`No transit itinerary was found from ${points[index].name} to ${points[index + 1].name}.`);
+    groups.push(routes);
+    cursorTime = new Date(cursorTime.getTime() + routes[0].duration * 1000 + 5 * 60_000);
+  }
+  const count = points.length > 2 ? 1 : Math.min(3, ...groups.map((group) => group.length));
+  return Array.from({ length: Math.max(1, count) }, (_, index) => {
+    const picked = groups.map((group) => group[index] || group[0]);
+    return prepareItinerary({
+      title: index === 0 ? "Fastest transit" : `Transit alternative ${index}`,
+      segments: picked.flatMap((route) => route.segments),
+      transfers: picked.reduce((sum, route) => sum + (route.transfers || 0), 0),
+      startTime: picked[0].startTime,
+      endTime: picked.at(-1).endTime,
+      source: "Transitous public GTFS and GTFS-Realtime",
+      sourceUrl: "https://transitous.org/sources/",
+    });
+  });
+}
+
+async function loadRoutes() {
+  const points = tripPoints();
+  if (points.length < 2) return;
+  state.routeAbort?.abort();
+  state.routeAbort = new AbortController();
   state.routes = [];
   state.selectedRoute = 0;
   state.navigating = false;
   clearRouteLayers();
-  if (state.destinationMarker) state.destinationMarker.remove();
-  state.destinationMarker = L.marker([destination.lat, destination.lng], { icon: destinationIcon, zIndexOffset: 900 }).addTo(map);
-  ui.destinationName.textContent = destination.name;
-  ui.destinationAddress.textContent = destination.address;
-  ui.destinationLabel.textContent = destination.name;
-  ui.input.value = destination.name;
-  ui.clear.classList.remove("hidden");
-  ui.back.classList.remove("hidden");
-  ui.results.classList.add("hidden");
-  ui.hint.classList.add("hidden");
-  ui.navigation.classList.add("hidden");
   ui.setup.classList.remove("hidden");
-  ui.start.disabled = true;
-  if (state.user) loadRoutes();
-  else ui.status.textContent = "Enable GPS to calculate routes from your live position.";
-}
-
-function clearRouteLayers() {
-  state.routeLayers.forEach((layer) => layer.remove());
-  state.routeLayers = [];
-  if (state.progressLayer) state.progressLayer.remove();
-  state.progressLayer = null;
-}
-
-async function loadRoutes() {
-  if (!state.user || !state.destination) return;
-  state.routeAbort?.abort();
-  state.routeAbort = new AbortController();
-  ui.status.textContent = "Calculating live routes…";
+  ui.navigation.classList.add("hidden");
+  ui.status.textContent = state.mode === "transit" ? "Checking public schedules and live feeds…" : state.mode === "flight" ? "Building airport transfers and flight path…" : "Calculating street routes…";
   ui.options.innerHTML = "";
+  ui.legList.innerHTML = "";
   ui.start.disabled = true;
-  clearRouteLayers();
-  const from = `${state.user.lng},${state.user.lat}`;
-  const to = `${state.destination.lng},${state.destination.lat}`;
-  const url = `${routeEndpoint(state.mode)}/${from};${to}?alternatives=3&steps=true&geometries=geojson&overview=full&annotations=false`;
+  ui.destinationName.textContent = `${points[0].name} → ${points.at(-1).name}`;
+  ui.destinationAddress.textContent = state.waypoints.length ? `${state.waypoints.length} planned stop${state.waypoints.length > 1 ? "s" : ""}` : points.at(-1).address || "";
+  ui.destinationLabel.textContent = points.at(-1).name;
+  ui.routeKicker.textContent = state.mode === "transit" ? "Multimodal transit" : state.mode === "flight" ? "Airport journey" : "Route options";
   try {
-    const response = await fetch(url, { signal: state.routeAbort.signal });
-    if (!response.ok) throw new Error(`Routing returned ${response.status}`);
-    const body = await response.json();
-    if (body.code !== "Ok" || !body.routes?.length) throw new Error(body.message || "No route found");
-    state.routes = body.routes.map(prepareRoute);
-    state.selectedRoute = 0;
+    const requestedTime = ui.departure.value ? new Date(ui.departure.value) : new Date();
+    if (state.mode === "transit") state.routes = await sequentialTransit(points, requestedTime);
+    else if (state.mode === "flight") {
+      const routes = [];
+      for (let index = 0; index < points.length - 1; index += 1) routes.push(await flightRoute(points[index], points[index + 1], requestedTime));
+      state.routes = [prepareItinerary({ title: routes.length > 1 ? "Multi-flight journey" : routes[0].title, segments: routes.flatMap((route) => route.segments), source: routes[0].source, sourceUrl: routes[0].sourceUrl })];
+    } else state.routes = await fetchRoadRoutes(points, state.mode, true);
+    if (!state.routes.length) throw new Error("No route was returned for these locations and departure time.");
+    state.routes.sort((a, b) => a.duration - b.duration);
     renderRoutes();
+    collapsePlanner(true);
   } catch (error) {
     if (error.name === "AbortError") return;
-    ui.status.textContent = "A route could not be calculated. Try another mode or move the destination pin closer to a mapped road.";
-    showToast(error.message || "Route unavailable");
+    if (state.mode === "transit") {
+      ui.status.textContent = "Live transit is unavailable. Loading an OpenStreetMap walking fallback…";
+      try {
+        state.routes = (await fetchRoadRoutes(points, "walk", true)).map((route, index) => ({
+          ...route,
+          title: index === 0 ? "OpenStreetMap fallback" : `Walking fallback ${index + 1}`,
+          fallback: true,
+        }));
+        renderRoutes();
+        collapsePlanner(true);
+        showToast("Live transit was unavailable, so an OpenStreetMap walking route is shown.");
+        return;
+      } catch (fallbackError) {
+        if (fallbackError.name === "AbortError") return;
+      }
+    }
+    ui.status.textContent = error.message || "Route planning is temporarily unavailable.";
+    ui.routeSource.textContent = "OpenStreetMap routing is also unavailable. Try again or place a nearby point.";
+    showToast(ui.status.textContent);
   }
 }
 
-function prepareRoute(route) {
-  const points = route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
-  const cumulative = [0];
-  for (let i = 1; i < points.length; i += 1) cumulative.push(cumulative[i - 1] + distanceMeters(points[i - 1], points[i]));
-  const steps = route.legs.flatMap((leg) => leg.steps).map((step) => ({
-    ...step,
-    point: { lat: step.maneuver.location[1], lng: step.maneuver.location[0] },
-  }));
-  return { ...route, points, cumulative, steps };
+function lineStyle(segment, selected, alternative = false) {
+  const dashed = segment.mode === "flight" ? "10 12" : segment.mode === "walk" ? "3 8" : undefined;
+  return {
+    color: alternative ? "#727971" : selected ? "#587da8" : "#727971",
+    weight: alternative ? 5 : 9,
+    opacity: alternative ? 0.48 : 0.96,
+    dashArray: dashed,
+    lineCap: "round",
+    lineJoin: "round",
+  };
+}
+
+function clearProgressLayers() {
+  state.progressLayers.forEach((layer) => layer.remove());
+  state.progressLayers = [];
+}
+
+function markerForSegment(segment) {
+  return segment.icon || modeMeta(segment.mode).icon;
 }
 
 function renderRoutes() {
   clearRouteLayers();
   const selected = state.routes[state.selectedRoute];
   state.routes.slice().reverse().forEach((route) => {
-    const originalIndex = state.routes.indexOf(route);
-    const layer = L.geoJSON(route.geometry, {
-      style: { color: originalIndex === state.selectedRoute ? "#dfff82" : "#788078", weight: originalIndex === state.selectedRoute ? 7 : 5, opacity: originalIndex === state.selectedRoute ? 1 : .75 },
-    }).addTo(map);
-    layer.on("click", () => selectRoute(originalIndex));
-    state.routeLayers.push(layer);
+    const active = route === selected;
+    route.segments.forEach((segment) => {
+      if (segment.points.length < 2) return;
+      const casing = L.polyline(segment.points.map((point) => [point.lat, point.lng]), { color: "#121711", weight: active ? 13 : 8, opacity: active ? .85 : .4, lineCap: "round" }).addTo(map);
+      const line = L.polyline(segment.points.map((point) => [point.lat, point.lng]), lineStyle(segment, active, !active)).addTo(map);
+      line.on("click", () => selectRoute(state.routes.indexOf(route)));
+      state.routeLayers.push(casing, line);
+    });
   });
-  ui.status.textContent = `${state.routes.length} ${state.routes.length === 1 ? "route" : "routes"} available · tap a line or option to compare`;
+  selected.segments.slice(1).forEach((segment, index) => {
+    const point = segment.points[0] || segment.from;
+    if (!point) return;
+    const marker = L.marker([point.lat, point.lng], { icon: transferIcon(markerForSegment(segment)), zIndexOffset: 900, title: segment.label }).addTo(map);
+    marker.on("click", () => focusLeg(index + 1));
+    state.transferMarkers.push(marker);
+  });
+  ui.status.textContent = `${state.routes.length} route${state.routes.length > 1 ? "s" : ""} · tap a route or journey leg to focus it`;
   ui.options.innerHTML = state.routes.map((route, index) => {
-    const difference = index === 0 ? "Recommended" : `${Math.max(1, Math.round((route.duration - state.routes[0].duration) / 60))} min slower`;
-    return `<button class="route-option ${index === state.selectedRoute ? "selected" : ""}" data-route="${index}" type="button"><b>${index === 0 ? "Fastest route" : `Alternative ${index}`}</b><strong>${durationText(route.duration)}</strong><span>${metersText(route.distance)} · ${difference}</span></button>`;
+    const end = route.endTime ? arrivalText(0, route.endTime) : arrivalText(route.duration);
+    const detail = state.mode === "transit" ? `${route.transfers || 0} transfer${route.transfers === 1 ? "" : "s"} · ${route.liveLegs} live leg${route.liveLegs === 1 ? "" : "s"}` : metersText(route.distance);
+    return `<button class="route-option ${index === state.selectedRoute ? "selected" : ""}" data-route="${index}" type="button"><b>${escapeHtml(route.title)}</b><strong>${durationText(route.duration)}</strong><span>Arrive ${end} · ${detail}</span><em>${escapeHtml(route.summary)}</em></button>`;
   }).join("");
   $$(".route-option").forEach((button) => button.addEventListener("click", () => selectRoute(Number(button.dataset.route))));
+  renderLegList();
+  ui.routeSource.innerHTML = `${escapeHtml(selected.source)} · <a href="${escapeHtml(selected.sourceUrl)}" target="_blank" rel="noreferrer">source ↗</a>`;
   ui.start.disabled = false;
-  ui.start.textContent = `Start · ${durationText(selected.duration)}`;
-  if (!state.navigating) {
-    const bounds = L.latLngBounds(selected.points.map((point) => [point.lat, point.lng]));
-    map.fitBounds(bounds, { paddingTopLeft: [40, 100], paddingBottomRight: [40, window.innerWidth < 760 ? 360 : 80], maxZoom: 17 });
-  }
+  ui.start.textContent = `Start guidance · ${durationText(selected.duration)}`;
+  const allPoints = selected.segments.flatMap((segment) => segment.points);
+  if (allPoints.length) map.fitBounds(L.latLngBounds(allPoints.map((point) => [point.lat, point.lng])), { paddingTopLeft: [50, 90], paddingBottomRight: [50, window.innerWidth < 760 ? 420 : 90], maxZoom: 17 });
+}
+
+function renderLegList(activeIndex = -1) {
+  const route = state.routes[state.selectedRoute];
+  if (!route) return;
+  ui.legList.innerHTML = route.segments.map((segment, index) => `
+    <button class="leg-chip ${index === activeIndex ? "active" : ""}" data-leg="${index}" type="button">
+      <span>${segment.icon} ${escapeHtml(segment.label)}</span>
+      <b>${escapeHtml(segment.to?.name || "Next point")}</b>
+      <small>${durationText(segment.duration)} · ${segment.live ? "live" : "scheduled/estimated"}</small>
+    </button>`).join("");
+  $$(".leg-chip").forEach((button) => button.addEventListener("click", () => focusLeg(Number(button.dataset.leg))));
 }
 
 function selectRoute(index) {
   state.selectedRoute = index;
+  state.activeLeg = 0;
+  state.legProgress = 0;
+  state.legProjection = null;
   renderRoutes();
 }
 
-function nearestRoutePoint(route, position) {
-  let index = 0;
-  let distance = Infinity;
-  route.points.forEach((point, pointIndex) => {
-    const candidate = distanceMeters(position, point);
-    if (candidate < distance) { distance = candidate; index = pointIndex; }
+function focusLeg(index) {
+  const segment = state.routes[state.selectedRoute]?.segments[index];
+  if (!segment) return;
+  renderLegList(index);
+  if (segment.points.length > 1) map.fitBounds(L.latLngBounds(segment.points.map((point) => [point.lat, point.lng])), { padding: [90, 90], maxZoom: 17 });
+  else if (segment.from) map.setView([segment.from.lat, segment.from.lng], 17);
+}
+
+function instructionFor(segment) {
+  if (!segment) return { icon: "●", text: "You have arrived" };
+  return { icon: segment.icon || "↑", text: segment.instruction || `${segment.label} to ${segment.to?.name || "the next stop"}` };
+}
+
+function routeProgress(route) {
+  const total = route.segments.reduce((sum, segment) => sum + Math.max(1, segment.duration || 0), 0);
+  const complete = route.segments.slice(0, state.activeLeg).reduce((sum, segment) => sum + Math.max(1, segment.duration || 0), 0);
+  const active = route.segments[state.activeLeg];
+  return total ? Math.min(1, (complete + Math.max(1, active?.duration || 0) * state.legProgress) / total) : 0;
+}
+
+function renderProgressOnMap(projection) {
+  clearProgressLayers();
+  const route = state.routes[state.selectedRoute];
+  route.segments.forEach((segment, index) => {
+    if (segment.points.length < 2 || index > state.activeLeg) return;
+    const points = index < state.activeLeg ? segment.points : partialPath(segment.points, projection);
+    if (points.length < 2) return;
+    const casing = L.polyline(points.map((point) => [point.lat, point.lng]), { color: "#15200f", weight: 10, opacity: .96, lineCap: "round" }).addTo(map);
+    const line = L.polyline(points.map((point) => [point.lat, point.lng]), { color: "#dfff82", weight: 6, opacity: 1, lineCap: "round", dashArray: segment.mode === "flight" ? "10 12" : undefined }).addTo(map);
+    state.progressLayers.push(casing, line);
   });
-  return { index, distance, traveled: route.cumulative[index], progress: Math.min(1, route.cumulative[index] / route.cumulative.at(-1)) };
 }
 
-function nearestStep(route, traveled) {
-  let selected = route.steps.at(-1);
-  for (const step of route.steps) {
-    const near = nearestRoutePoint(route, step.point);
-    if (route.cumulative[near.index] + 18 >= traveled) { selected = step; break; }
-  }
-  return selected;
-}
-
-function instructionFor(step) {
-  if (!step) return { icon: "↑", text: "Continue to the destination" };
-  const type = step.maneuver.type;
-  const modifier = step.maneuver.modifier || "straight";
-  const icons = { left: "←", right: "→", "sharp left": "↙", "sharp right": "↘", "slight left": "↖", "slight right": "↗", straight: "↑", uturn: "↶" };
-  if (type === "arrive") return { icon: "●", text: "Arrive at the destination" };
-  if (type === "roundabout" || type === "rotary") return { icon: "↻", text: `Enter the roundabout${step.maneuver.exit ? ` and take exit ${step.maneuver.exit}` : ""}` };
-  const action = type === "depart" ? "Head" : type === "merge" ? "Merge" : type === "fork" ? "Keep" : "Turn";
-  const street = step.name ? ` onto ${step.name}` : "";
-  return { icon: icons[modifier] || "↑", text: `${action} ${modifier}${street}`.replace("Head straight", "Continue straight") };
-}
-
-function updateProgressGraphic(progress) {
-  const percentage = Math.round(progress * 100);
-  ui.roadProgress.style.strokeDashoffset = String(100 - percentage);
-  ui.progressPercent.textContent = `${percentage}%`;
-  const path = ui.roadProgress;
-  const point = path.getPointAtLength(path.getTotalLength() * progress);
-  ui.progressDot.setAttribute("cx", point.x);
-  ui.progressDot.setAttribute("cy", point.y);
+function setActiveLeg(index, progress = 0) {
+  const route = state.routes[state.selectedRoute];
+  if (!route) return;
+  state.activeLeg = Math.max(0, Math.min(route.segments.length - 1, index));
+  state.legProgress = Math.max(0, Math.min(1, progress));
+  state.legProjection = null;
+  state.offRouteUpdates = 0;
+  renderLegList(state.activeLeg);
+  updateNavigation(state.user);
 }
 
 function updateNavigation(position) {
   const route = state.routes[state.selectedRoute];
-  if (!route) return;
-  const nearest = nearestRoutePoint(route, position);
-  const remainingDistance = Math.max(0, route.distance * (1 - nearest.progress));
-  const remainingSeconds = Math.max(0, route.duration * (1 - nearest.progress));
-  const step = nearestStep(route, nearest.traveled);
-  const instruction = instructionFor(step);
-  const stepDistance = step ? distanceMeters(position, step.point) : remainingDistance;
-  ui.stepDistance.textContent = step?.maneuver.type === "arrive" ? "Destination ahead" : `In ${metersText(stepDistance)}`;
+  const segment = route?.segments[state.activeLeg];
+  if (!route || !segment) return;
+  let projection = { index: 0, t: 0, projected: segment.points[0] || segment.from, distance: Infinity, progress: state.legProgress };
+  if (position && segment.points.length > 1) {
+    const candidate = projectOnPath(segment.points, segment.cumulative, position);
+    projection = candidate;
+    const threshold = Math.max(80, (position.accuracy || 25) * 1.5);
+    if (candidate.distance <= threshold && candidate.progress >= state.legProgress) {
+      state.legProgress = candidate.progress;
+      state.legProjection = candidate;
+    } else if (state.legProjection) projection = state.legProjection;
+    if (candidate.distance > Math.max(120, (position.accuracy || 25) * 2)) state.offRouteUpdates += 1;
+    else state.offRouteUpdates = 0;
+    if (state.offRouteUpdates >= 4 && state.startLive && !state.rerouting) {
+      state.rerouting = true;
+      state.offRouteUpdates = 0;
+      showToast("You are off route. Recalculating from your live position…");
+      loadRoutes().finally(() => { state.rerouting = false; });
+      return;
+    }
+    if (state.legProgress > .985 && state.activeLeg < route.segments.length - 1) {
+      state.activeLeg += 1;
+      state.legProgress = 0;
+      return updateNavigation(position);
+    }
+    if (projection.distance > threshold) ui.stepDistance.textContent = `${metersText(projection.distance)} from route`;
+  }
+  projection.progress = state.legProgress;
+  if (segment.points.length > 1) {
+    const targetDistance = segment.distance * (1 - state.legProgress);
+    ui.stepDistance.textContent = projection.distance > Math.max(80, (position?.accuracy || 25) * 1.5) ? `${metersText(projection.distance)} from route` : `${metersText(targetDistance)} on this leg`;
+  } else ui.stepDistance.textContent = "Advance when complete";
+  const instruction = instructionFor(segment);
   ui.stepInstruction.textContent = instruction.text;
   ui.maneuver.textContent = instruction.icon;
+  const remainingDistance = route.segments.slice(state.activeLeg).reduce((sum, item, index) => sum + (item.distance || 0) * (index ? 1 : 1 - state.legProgress), 0);
+  const remainingSeconds = route.segments.slice(state.activeLeg).reduce((sum, item, index) => sum + (item.duration || 0) * (index ? 1 : 1 - state.legProgress), 0);
+  const overall = routeProgress(route);
   ui.remaining.textContent = metersText(remainingDistance);
   ui.arrival.textContent = arrivalText(remainingSeconds);
-  ui.currentStreet.textContent = step?.name || "Current position";
-  updateProgressGraphic(nearest.progress);
-  if (state.progressLayer) state.progressLayer.remove();
-  const traveledPoints = route.points.slice(0, Math.max(2, nearest.index + 1));
-  state.progressLayer = L.polyline(traveledPoints.map((point) => [point.lat, point.lng]), { color: "#ffffff", weight: 7, opacity: .85 }).addTo(map);
-  if (nearest.distance > Math.max(65, position.accuracy * 1.4) && Date.now() - state.lastRerouteAt > 15000) {
-    state.lastRerouteAt = Date.now();
-    ui.stepDistance.textContent = "Updating route";
-    loadRoutes().then(() => { if (state.routes.length) startNavigation(false); });
-  }
-  if (remainingDistance < 25) {
-    ui.stepDistance.textContent = "You have arrived";
-    ui.stepInstruction.textContent = state.destination.name;
-    ui.maneuver.textContent = "●";
-  }
+  ui.currentStreet.textContent = segment.label;
+  ui.progressPercent.textContent = `${Math.round(overall * 100)}%`;
+  ui.overallProgress.style.width = `${Math.round(overall * 100)}%`;
+  ui.activeLegSummary.textContent = `Leg ${state.activeLeg + 1} of ${route.segments.length} · ${segment.live ? "Live timing" : "Scheduled or estimated timing"} · ${segment.from?.name || "Start"} → ${segment.to?.name || "Next point"}`;
+  ui.previousLeg.disabled = state.activeLeg === 0;
+  ui.nextLeg.textContent = state.activeLeg === route.segments.length - 1 ? "Finish journey" : "Next leg";
+  renderLegList(state.activeLeg);
+  renderProgressOnMap(projection);
 }
 
-function startNavigation(fit = true) {
+function startNavigation() {
   const route = state.routes[state.selectedRoute];
-  if (!route || !state.user) return;
+  if (!route) return;
   state.navigating = true;
+  state.activeLeg = 0;
+  state.legProgress = 0;
+  state.legProjection = null;
+  state.offRouteUpdates = 0;
   state.follow = true;
   ui.setup.classList.add("hidden");
   ui.navigation.classList.remove("hidden");
   ui.recenter.classList.add("active");
-  if (fit) map.setView([state.user.lat, state.user.lng], 17, { animate: true });
+  collapsePlanner(true);
+  if (state.user) map.setView([state.user.lat, state.user.lng], 17, { animate: true });
+  else showToast("Guidance is in preview mode. Enable GPS for live on-map progress.");
   updateNavigation(state.user);
 }
 
 function endNavigation() {
   state.navigating = false;
-  if (state.progressLayer) state.progressLayer.remove();
-  state.progressLayer = null;
+  clearProgressLayers();
   ui.navigation.classList.add("hidden");
   ui.setup.classList.remove("hidden");
   ui.recenter.classList.remove("active");
-  updateProgressGraphic(0);
+  state.activeLeg = 0;
+  state.legProgress = 0;
+  state.legProjection = null;
+  state.offRouteUpdates = 0;
   renderRoutes();
 }
 
-function resetDestination() {
-  state.destination = null;
+function resetRoutes() {
+  state.routeAbort?.abort();
   state.routes = [];
   state.navigating = false;
   clearRouteLayers();
-  state.destinationMarker?.remove();
-  state.destinationMarker = null;
   ui.setup.classList.add("hidden");
   ui.navigation.classList.add("hidden");
-  ui.results.classList.add("hidden");
-  ui.input.value = "";
-  ui.clear.classList.add("hidden");
-  ui.back.classList.add("hidden");
-  ui.hint.classList.remove("hidden");
-  if (state.user) map.setView([state.user.lat, state.user.lng], 16);
+  collapsePlanner(false);
 }
 
+ui.departure.value = localDateTime();
 ui.permissionButton.addEventListener("click", requestLocation);
-ui.form.addEventListener("submit", (event) => { event.preventDefault(); const query = ui.input.value.trim(); if (query) searchPlaces(query); });
-ui.input.addEventListener("input", () => {
-  ui.clear.classList.toggle("hidden", !ui.input.value);
-  clearTimeout(ui.input.searchTimer);
-  if (ui.input.value.trim().length >= 3) ui.input.searchTimer = setTimeout(() => searchPlaces(ui.input.value.trim()), 450);
-  else ui.results.classList.add("hidden");
+ui.useLiveStart.addEventListener("click", () => {
+  state.startLive = true;
+  state.start = null;
+  ui.startInput.value = "My live location";
+  ui.useLiveStart.classList.add("active");
+  setActiveField({ type: "destination" });
+  if (!state.user) requestLocation();
+  updatePlannerState();
+  updatePointMarkers();
 });
-ui.input.addEventListener("focus", () => { if (ui.input.value.trim().length >= 3 && !state.destination) searchPlaces(ui.input.value.trim()); });
-ui.clear.addEventListener("click", () => { ui.input.value = ""; ui.clear.classList.add("hidden"); ui.results.classList.add("hidden"); ui.input.focus(); });
-ui.back.addEventListener("click", resetDestination);
-ui.closeRoute.addEventListener("click", resetDestination);
-ui.start.addEventListener("click", () => startNavigation());
+ui.startInput.addEventListener("focus", () => setActiveField({ type: "start" }));
+ui.startInput.addEventListener("input", () => {
+  if (ui.startInput.value !== "My live location") {
+    state.startLive = false;
+    state.start = null;
+    ui.useLiveStart.classList.remove("active");
+  }
+  updatePlannerState();
+});
+ui.destinationInput.addEventListener("focus", () => setActiveField({ type: "destination" }));
+ui.destinationInput.addEventListener("input", () => {
+  if (ui.destinationInput.value !== state.destination?.name) state.destination = null;
+  updatePlannerState();
+});
+ui.planner.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = fieldInput();
+  const query = input?.value.trim();
+  if (query && !(state.activeField.type === "start" && state.startLive)) searchPlaces(query);
+});
+ui.addStop.addEventListener("click", () => {
+  if (state.waypoints.length >= 4) return showToast("Up to four intermediate stops are supported.");
+  const waypoint = { id: state.nextWaypointId++, place: null };
+  state.waypoints.push(waypoint);
+  renderWaypoints();
+  setActiveField({ type: "waypoint", id: waypoint.id });
+  fieldInput()?.focus();
+  updatePlannerState();
+});
+ui.plan.addEventListener("click", loadRoutes);
+ui.togglePlanner.addEventListener("click", () => collapsePlanner(!ui.planner.classList.contains("collapsed")));
+ui.editRoute.addEventListener("click", () => collapsePlanner(false));
+ui.closeRoute.addEventListener("click", resetRoutes);
+ui.start.addEventListener("click", startNavigation);
 ui.end.addEventListener("click", endNavigation);
+ui.previousLeg.addEventListener("click", () => setActiveLeg(state.activeLeg - 1, 0));
+ui.nextLeg.addEventListener("click", () => {
+  const route = state.routes[state.selectedRoute];
+  if (state.activeLeg >= route.segments.length - 1) return endNavigation();
+  setActiveLeg(state.activeLeg + 1, 0);
+  focusLeg(state.activeLeg);
+});
 ui.recenter.addEventListener("click", () => {
   if (!state.user) return requestLocation();
   state.follow = true;
@@ -405,29 +897,40 @@ ui.recenter.addEventListener("click", () => {
 ui.orientation.addEventListener("click", () => {
   state.followHeading = !state.followHeading;
   ui.orientation.classList.toggle("active", state.followHeading);
-  const marker = state.userMarker?.getElement()?.querySelector(".user-marker");
-  if (marker) marker.style.transform = `rotate(${state.followHeading && state.lastHeading !== null ? state.lastHeading - 45 : -45}deg)`;
-  if (state.followHeading && state.lastHeading === null) showToast("Move a short distance so your device can determine travel direction.");
+  if (state.followHeading && state.lastHeading === null) showToast("Move a short distance so the device can determine your direction.");
 });
-$$('.mode-tab').forEach((button) => button.addEventListener("click", () => {
+$$(".mode-tab").forEach((button) => button.addEventListener("click", () => {
   state.mode = button.dataset.mode;
-  $$('.mode-tab').forEach((item) => { item.classList.toggle("active", item === button); item.setAttribute("aria-selected", String(item === button)); });
-  loadRoutes();
+  $$(".mode-tab").forEach((item) => {
+    item.classList.toggle("active", item === button);
+    item.setAttribute("aria-selected", String(item === button));
+  });
+  if (tripPoints().length > 1) loadRoutes();
 }));
 
-map.on("dragstart zoomstart", () => { state.follow = false; ui.recenter.classList.remove("active"); });
+map.on("dragstart zoomstart", () => {
+  state.follow = false;
+  ui.recenter.classList.remove("active");
+});
 let pressTimer;
-map.on("mousedown touchstart", (event) => { pressTimer = setTimeout(async () => { const place = await reversePlace(event.latlng.lat, event.latlng.lng); chooseDestination({ lat: event.latlng.lat, lng: event.latlng.lng, ...place }); }, 650); });
+map.on("mousedown touchstart", (event) => {
+  pressTimer = setTimeout(async () => {
+    const place = await reversePlace(event.latlng.lat, event.latlng.lng);
+    setPoint(state.activeField, { lat: event.latlng.lat, lng: event.latlng.lng, ...place });
+  }, 650);
+});
 map.on("mouseup touchend mousemove", () => clearTimeout(pressTimer));
 
 const params = new URLSearchParams(location.search);
 const destinationLat = params.has("lat") ? Number(params.get("lat")) : NaN;
 const destinationLng = params.has("lng") ? Number(params.get("lng")) : NaN;
 if (Number.isFinite(destinationLat) && Number.isFinite(destinationLng)) {
-  reversePlace(destinationLat, destinationLng).then((place) => chooseDestination({ lat: destinationLat, lng: destinationLng, ...place }));
+  reversePlace(destinationLat, destinationLng).then((place) => setPoint({ type: "destination" }, { lat: destinationLat, lng: destinationLng, ...place }));
 } else if (params.get("to")) {
-  ui.input.value = params.get("to");
-  searchPlaces(params.get("to"));
+  ui.destinationInput.value = params.get("to");
+  setActiveField({ type: "destination" });
 }
 
+renderWaypoints();
+updatePlannerState();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js").catch(() => {});
