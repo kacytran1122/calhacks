@@ -51,7 +51,7 @@ test("multipart API validates real uploaded bytes, permission, origins, duplicat
         assert.equal(fs.existsSync(path.join(process.env.SMILE_DATA_DIR, "tour-contributions", body.receiptId)), false);
       }
     }
-    for (const [kind, status] of [["valid", 201], ["local-bind", 201], ["foreign", 403], ["no-origin", 403], ["empty", 400], ["disguised", 415], ["no-consent", 400], ["duplicate", 400], ["unknown", 400], ["oversize", 413], ["oversize-body", 413]]) await send(kind, status);
+    for (const [kind, status] of [["valid", 201], ["local-bind", 403], ["foreign", 403], ["no-origin", 403], ["empty", 400], ["disguised", 415], ["no-consent", 400], ["duplicate", 400], ["unknown", 400], ["oversize", 413], ["oversize-body", 413]]) await send(kind, status);
   `;
   execFileSync(process.execPath, ["--conditions=react-server", "--import", path.join(root, "backend/node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], {
     cwd: root,

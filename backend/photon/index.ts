@@ -37,6 +37,8 @@ const MAX_DEAD_LETTERS = 256;
 const PAUSE_AT_PENDING_DELIVERIES = 128;
 const RESUME_AT_PENDING_DELIVERIES = 64;
 const MAX_INVALID_RESPONSE_ATTEMPTS = 5;
+const CANONICAL_WEB_ORIGIN = "https://smilefromhereto.work";
+const PHOTON_API_ORIGIN = "https://api.photon.codes";
 const BRIDGE_DIAGNOSTIC_CODES = new Set([
   "PHOTON_BRIDGE_NOT_CONFIGURED",
   "PHOTON_PROJECT_NOT_CONFIGURED",
@@ -88,9 +90,10 @@ export function assertPhoton2Credentials(projectId: string, apiKey: string) {
 }
 
 export function configuration(): Config {
-  const webUrl = required("SMILE_WEB_URL").replace(/\/$/, "");
-  const parsed = new URL(webUrl);
-  if (!/^https?:$/.test(parsed.protocol)) throw new Error("SMILE_WEB_URL must be an http(s) origin.");
+  const webUrl = required("SMILE_WEB_URL");
+  if (webUrl !== CANONICAL_WEB_ORIGIN) throw new Error(`SMILE_WEB_URL must be exactly ${CANONICAL_WEB_ORIGIN}.`);
+  const configuredApiOrigin = process.env.PHOTON_API_ORIGIN?.trim() || PHOTON_API_ORIGIN;
+  if (configuredApiOrigin !== PHOTON_API_ORIGIN) throw new Error(`PHOTON_API_ORIGIN must be exactly ${PHOTON_API_ORIGIN}.`);
   const apiKey = required("PHOTON_API_KEY");
   const projectId = required("PHOTON_PROJECT_ID");
   assertPhoton2Credentials(projectId, apiKey);
@@ -100,7 +103,7 @@ export function configuration(): Config {
     webUrl,
     bridgeSecret: required("PHOTON_BRIDGE_SECRET"),
     cursorFile: resolve(process.env.PHOTON_CURSOR_FILE?.trim() || resolve(process.env.SMILE_DATA_DIR?.trim() || process.env.DATA_DIR?.trim() || ".data", "photon-cursor.json")),
-    apiOrigin: (process.env.PHOTON_API_ORIGIN?.trim() || "https://api.photon.codes").replace(/\/$/, ""),
+    apiOrigin: configuredApiOrigin,
   };
 }
 

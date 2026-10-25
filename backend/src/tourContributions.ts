@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
+import { BlockList, isIP } from "node:net";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
@@ -17,6 +18,22 @@ export const TOUR_UPLOAD_LIMITS = {
   maxStoredBytes: 1024 * 1024 * 1024,
   maxContributions: 500,
 } as const;
+
+const loopbackAddresses = new BlockList();
+loopbackAddresses.addSubnet("127.0.0.0", 8, "ipv4");
+loopbackAddresses.addAddress("0.0.0.0", "ipv4");
+loopbackAddresses.addAddress("::", "ipv6");
+loopbackAddresses.addAddress("::1", "ipv6");
+loopbackAddresses.addAddress("::ffff:0.0.0.0", "ipv6");
+loopbackAddresses.addSubnet("::ffff:127.0.0.0", 104, "ipv6");
+
+function localHostname(value: string): boolean {
+  const dotted = value.toLowerCase().replace(/\.+$/u, "");
+  const hostname = dotted.startsWith("[") && dotted.endsWith("]") ? dotted.slice(1, -1) : dotted;
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) return true;
+  const family = isIP(hostname);
+  return family === 4 ? loopbackAddresses.check(hostname, "ipv4") : family === 6 ? loopbackAddresses.check(hostname, "ipv6") : false;
+}
 
 export class TourContributionError extends Error {
   constructor(message: string, readonly status: number, readonly retryAfter?: number) {
@@ -92,17 +109,24 @@ export function tourContributionOriginAllowed(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin || request.headers.get("sec-fetch-site") === "cross-site") return false;
   const destination = new URL(request.url);
-  const allowed = new Set([destination.origin]);
+  const allowed = new Set<string>();
+  if (!localHostname(destination.hostname)) allowed.add(destination.origin);
   try {
     const source = new URL(origin);
-    const local = new Set(["localhost", "127.0.0.1", "[::1]"]);
     const host = request.headers.get("host")?.toLowerCase() ?? "";
-    const localBind = destination.hostname === "0.0.0.0" && /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host) && new URL(`${destination.protocol}//${host}`).port === source.port;
-    if (local.has(source.hostname) && (local.has(destination.hostname) || localBind) && source.protocol === destination.protocol && source.port === destination.port) allowed.add(source.origin);
+    let localBind = false;
+    if (host) {
+      const requestHost = new URL(`${destination.protocol}//${host}`);
+      localBind = localHostname(destination.hostname) && localHostname(requestHost.hostname) && requestHost.port === source.port;
+    }
+    if (process.env.NODE_ENV !== "production" && localHostname(source.hostname) && (localHostname(destination.hostname) || localBind) && source.protocol === destination.protocol && source.port === destination.port) allowed.add(source.origin);
   } catch {}
   for (const value of [process.env.SMILE_PUBLIC_ORIGIN, process.env.SMILE_PUBLIC_URL, process.env.SMILE_WEB_URL, process.env.NEXT_PUBLIC_APP_URL, "https://smilefromhereto.work", "https://www.smilefromhereto.work"]) {
     if (!value) continue;
-    try { allowed.add(new URL(value).origin); } catch {}
+    try {
+      const configured = new URL(value);
+      if (!localHostname(configured.hostname)) allowed.add(configured.origin);
+    } catch {}
   }
   return allowed.has(origin);
 }

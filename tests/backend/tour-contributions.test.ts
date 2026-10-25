@@ -608,19 +608,21 @@ test("allows the real production origin through the backend proxy and rejects fo
   assert.equal(tourContributionOriginAllowed(new Request(backend, { headers: { origin: "https://smilefromhereto.work", "sec-fetch-site": "cross-site" } })), false);
 });
 
-test("allows equivalent loopback origins in a production local preview without opening public or different-port origins", () => {
+test("rejects every loopback origin in production", () => {
   const before = process.env.NODE_ENV;
   process.env.NODE_ENV = "production";
   try {
     const local = "http://localhost:3000/api/tours/contributions";
-    assert.equal(tourContributionOriginAllowed(new Request(local, { headers: { origin: "http://127.0.0.1:3000" } })), true);
-    assert.equal(tourContributionOriginAllowed(new Request(local, { headers: { origin: "http://[::1]:3000" } })), true);
+    assert.equal(tourContributionOriginAllowed(new Request(local, { headers: { origin: "http://127.0.0.1:3000" } })), false);
+    assert.equal(tourContributionOriginAllowed(new Request(local, { headers: { origin: "http://[::1]:3000" } })), false);
     assert.equal(tourContributionOriginAllowed(new Request(local, { headers: { origin: "http://127.0.0.1:3001" } })), false);
     assert.equal(tourContributionOriginAllowed(new Request(local, { headers: { origin: "https://127.0.0.1:3000" } })), false);
+    assert.equal(tourContributionOriginAllowed(new Request("https://localhost.:3000/api/tours/contributions", { headers: { origin: "https://localhost.:3000" } })), false);
+    assert.equal(tourContributionOriginAllowed(new Request("https://[::ffff:127.0.0.1]:3000/api/tours/contributions", { headers: { origin: "https://[::ffff:127.0.0.1]:3000" } })), false);
     assert.equal(tourContributionOriginAllowed(new Request("https://calhacks-production-5fe6.up.railway.app/api/tours/contributions", { headers: { origin: "http://127.0.0.1:3000" } })), false);
     const bound = "http://0.0.0.0:3000/api/tours/contributions";
-    assert.equal(tourContributionOriginAllowed(new Request(bound, { headers: { origin: "http://127.0.0.1:3000", host: "127.0.0.1:3000", "sec-fetch-site": "same-origin" } })), true);
-    assert.equal(tourContributionOriginAllowed(new Request(bound, { headers: { origin: "http://localhost:3000", host: "localhost:3000" } })), true);
+    assert.equal(tourContributionOriginAllowed(new Request(bound, { headers: { origin: "http://127.0.0.1:3000", host: "127.0.0.1:3000", "sec-fetch-site": "same-origin" } })), false);
+    assert.equal(tourContributionOriginAllowed(new Request(bound, { headers: { origin: "http://localhost:3000", host: "localhost:3000" } })), false);
     assert.equal(tourContributionOriginAllowed(new Request(bound, { headers: { origin: "http://127.0.0.1:3001", host: "127.0.0.1:3001" } })), false);
     assert.equal(tourContributionOriginAllowed(new Request(bound, { headers: { origin: "http://127.0.0.1:3000", host: "public.example.com:3000", "x-forwarded-host": "127.0.0.1:3000" } })), false);
     assert.equal(tourContributionOriginAllowed(new Request(bound, { headers: { origin: "http://127.0.0.1:3000" } })), false);

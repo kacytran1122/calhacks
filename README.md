@@ -67,7 +67,7 @@ npm run seed --prefix backend
 npm run dev --prefix frontend
 ```
 
-Open `http://127.0.0.1:3000`.
+Open the development URL printed by Next.js. The shared production experience is always available at `https://smilefromhereto.work/landing`.
 
 To let S’mile act on its own, run the scheduler next to the app (or have a cron call `GET /api/scheduler/run` with `Authorization: Bearer $CRON_SECRET`):
 

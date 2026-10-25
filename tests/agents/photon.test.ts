@@ -49,7 +49,7 @@ test("bounds nested group content", () => {
 });
 
 test("stores the Photon cursor on the configured persistent data volume", () => {
-  const values = { SMILE_WEB_URL: "https://smile.example", PHOTON_PROJECT_ID: "pho_prj_test", PHOTON_API_KEY: "pho_sk_test", PHOTON_BRIDGE_SECRET: "test-secret", SMILE_DATA_DIR: "/persistent/smile", DATA_DIR: "/persistent/fallback", PHOTON_CURSOR_FILE: undefined };
+  const values = { SMILE_WEB_URL: "https://smilefromhereto.work", PHOTON_PROJECT_ID: "pho_prj_test", PHOTON_API_KEY: "pho_sk_test", PHOTON_BRIDGE_SECRET: "test-secret", SMILE_DATA_DIR: "/persistent/smile", DATA_DIR: "/persistent/fallback", PHOTON_CURSOR_FILE: undefined };
   const previous = new Map(Object.keys(values).map((key) => [key, process.env[key]]));
   try {
     for (const [key, value] of Object.entries(values)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
@@ -61,6 +61,27 @@ test("stores the Photon cursor on the configured persistent data volume", () => 
     delete process.env.PHOTON_CURSOR_FILE;
     delete process.env.DATA_DIR;
     assert.equal(configuration().cursorFile, resolve(".data/photon-cursor.json"));
+  } finally {
+    for (const [key, value] of previous) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+});
+
+test("refuses to start Photon with any non-canonical website or API origin", () => {
+  const values = { SMILE_WEB_URL: "https://smilefromhereto.work", PHOTON_API_ORIGIN: undefined as string | undefined, PHOTON_PROJECT_ID: "pho_prj_test", PHOTON_API_KEY: "pho_sk_test", PHOTON_BRIDGE_SECRET: "test-secret" };
+  const previous = new Map(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    assert.equal(configuration().webUrl, "https://smilefromhereto.work");
+    assert.equal(configuration().apiOrigin, "https://api.photon.codes");
+    for (const value of ["http://localhost:3000", "http://127.0.0.1:3000", "http://0.0.0.0:3000", "http://[::1]:3000", "https://smilefromhereto.work/", "https://smilefromhereto.work//", "https://smilefromhereto.work/landing", "https://www.smilefromhereto.work"] ) {
+      process.env.SMILE_WEB_URL = value;
+      assert.throws(() => configuration(), /SMILE_WEB_URL must be exactly/);
+    }
+    process.env.SMILE_WEB_URL = "https://smilefromhereto.work";
+    for (const value of ["http://localhost:4000", "https://api.photon.codes/", "https://api.photon.codes//"]) {
+      process.env.PHOTON_API_ORIGIN = value;
+      assert.throws(() => configuration(), /PHOTON_API_ORIGIN must be exactly/);
+    }
   } finally {
     for (const [key, value] of previous) if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
