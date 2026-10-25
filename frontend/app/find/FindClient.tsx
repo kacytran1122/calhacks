@@ -612,10 +612,10 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
             <div className="fd-constraint-question" role="status">
               <b>One detail before S’mile plans</b>
               <p>{constraintReview.followUpQuestion ?? "What exact place, date, time, and time zone should S’mile use?"}</p>
-              <textarea key={constraintReview.followUpQuestion} className="dk-in" rows={2} maxLength={500} value={constraintAnswer} onChange={(e) => setConstraintAnswer(e.target.value)} placeholder="Type your answer" aria-label="Answer Claude’s travel requirement question" />
+              <textarea key={constraintReview.followUpQuestion} className="dk-in" rows={2} maxLength={500} value={constraintAnswer} onChange={(e) => setConstraintAnswer(e.target.value)} placeholder="Type your answer" aria-label="Answer the travel requirement question" />
             </div>
           )}
-          {constraintReview?.status === "ready" && <div className="fd-constraint-ready"><b>Claude understood</b><span>{constraintReview.summary}</span></div>}
+          {constraintReview?.status === "ready" && <div className="fd-constraint-ready"><b>Travel requirements confirmed</b><span>{constraintReview.summary}</span></div>}
           <label className="fd-drive">
             <span>Include self-drive</span>
             <input type="checkbox" checked={includeSelfDrive} onChange={(e) => setIncludeSelfDrive(e.target.checked)} />

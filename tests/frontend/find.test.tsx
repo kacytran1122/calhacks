@@ -162,7 +162,7 @@ test("shows each event thumbnail and asks for travel requirements below the budg
   expect(requirements).toHaveAttribute("placeholder", expect.stringContaining("UCI"));
 });
 
-test("Claude constraint step asks one follow-up when a requirement is unclear", async () => {
+test("constraint review asks one follow-up when a requirement is unclear", async () => {
   const event = {
     key: "knox",
     source: "luma",
@@ -235,20 +235,20 @@ test("keeps earlier clarification answers and opens an empty field for each new 
   await user.type(screen.getByLabelText("Travel timing and destination requirements"), "I need to be at UCI by 10");
   await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
 
-  const answer = await screen.findByLabelText("Answer Claude’s travel requirement question");
+  const answer = await screen.findByLabelText("Answer the travel requirement question");
   await user.type(answer, "Donald Bren Hall");
   await user.click(screen.getByRole("button", { name: "Answer and compare routes" }));
 
   expect(await screen.findByText("What date should you arrive?")).toBeVisible();
   expect(screen.getByText("Donald Bren Hall")).toBeVisible();
-  expect(screen.getByLabelText("Answer Claude’s travel requirement question")).toHaveValue("");
-  await user.type(screen.getByLabelText("Answer Claude’s travel requirement question"), "October 25 at 10 AM");
+  expect(screen.getByLabelText("Answer the travel requirement question")).toHaveValue("");
+  await user.type(screen.getByLabelText("Answer the travel requirement question"), "October 25 at 10 AM");
   await user.click(screen.getByRole("button", { name: "Answer and compare routes" }));
 
   expect(await screen.findByText("Which time zone should S’mile use?")).toBeVisible();
   expect(screen.getByText("Donald Bren Hall")).toBeVisible();
   expect(screen.getByText("October 25 at 10 AM")).toBeVisible();
-  expect(screen.getByLabelText("Answer Claude’s travel requirement question")).toHaveValue("");
+  expect(screen.getByLabelText("Answer the travel requirement question")).toHaveValue("");
   expect(constraintBodies[1]).toContain("Which UCI building should S’mile use?");
   expect(constraintBodies[1]).toContain("Donald Bren Hall");
   expect(constraintBodies[2]).toContain("Donald Bren Hall");
