@@ -302,19 +302,6 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
               </tbody>
             </table>
           </div>
-
-          <div className="dk-panel">
-            <div className="dk-ph">
-              <h2>The agents and what they can’t do</h2>
-            </div>
-            {snap.agents.map((a) => (
-              <div key={a.id} className="dk-agent">
-                <b>{a.id}</b>
-                <span className="dk-caps">{a.caps.join(" · ") || "—"}</span>
-                <span className="dk-never">{a.never}</span>
-              </div>
-            ))}
-          </div>
         </div>
         )}
       </div>
