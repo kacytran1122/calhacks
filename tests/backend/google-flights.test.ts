@@ -51,3 +51,12 @@ test("non-Google source URLs are never fetched", async (t) => {
   assert.match(quote.sourceUrl, /^https:\/\/www\.google\.com\/travel\/flights\?/);
   assert.match(requested, /^https:\/\/api\.brightdata\.com\/datasets\/v3\/scrape/);
 });
+
+test("opaque booking URLs cannot silently replace the route being checked", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify([{ pricing: { price: "$144" } }]), { status: 200 }));
+  const quote = await liveGoogleFlightQuote({ fromAirport: "SFO", toAirport: "DEN", departDate: "2027-01-16", sourceUrl: "https://www.google.com/travel/flights/booking?tfs=opaque-other-trip" });
+  const url = new URL(quote.sourceUrl);
+  assert.equal(url.pathname, "/travel/flights");
+  assert.match(url.searchParams.get("q") ?? "", /SFO to DEN on 2027-01-16/);
+});

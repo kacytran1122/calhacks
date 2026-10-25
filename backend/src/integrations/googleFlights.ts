@@ -53,6 +53,13 @@ function googleFlightUrl(value: unknown): string | undefined {
   }
 }
 
+function matchingSearchUrl(value: unknown, fromAirport: string, toAirport: string, departDate: string) {
+  const safe = googleFlightUrl(value);
+  if (!safe) return undefined;
+  const query = new URL(safe).searchParams.get("q")?.toUpperCase() ?? "";
+  return query.includes(fromAirport) && query.includes(toAirport) && query.includes(departDate) ? safe : undefined;
+}
+
 function amount(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return undefined;
@@ -113,7 +120,7 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
   const toAirport = args.toAirport.trim().toUpperCase();
   const departDate = args.departDate;
   const observedAt = new Date().toISOString();
-  const sourceUrl = googleFlightUrl(args.sourceUrl) ?? googleFlightsUrl(fromAirport, toAirport, departDate);
+  const sourceUrl = matchingSearchUrl(args.sourceUrl, fromAirport, toAirport, departDate) ?? googleFlightsUrl(fromAirport, toAirport, departDate);
   const base = { currency: "USD" as const, fromAirport, toAirport, departDate, observedAt, sourceUrl };
   if (!/^[A-Z]{3}$/.test(fromAirport) || !/^[A-Z]{3}$/.test(toAirport) || !isoDate(departDate)) return { ...base, status: "error", via: "validation", ms: 0, note: "A valid airport pair and travel date are required." };
 
