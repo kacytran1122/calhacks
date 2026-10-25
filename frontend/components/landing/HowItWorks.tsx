@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { EventThumb } from "./EventThumb";
 import { Smile } from "./Smile";
 
@@ -94,19 +94,6 @@ const STEPS: { title: string; body: ReactNode; panel: ReactNode }[] = [
 
 export function HowItWorks() {
   const [cur, setCur] = useState(0);
-  const auto = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    auto.current = setInterval(() => setCur((c) => (c + 1) % STEPS.length), 3200);
-    return () => {
-      if (auto.current) clearInterval(auto.current);
-    };
-  }, []);
-
-  const go = (i: number) => {
-    if (auto.current) clearInterval(auto.current);
-    setCur(i);
-  };
   const s = STEPS[cur]!;
 
   return (
@@ -120,23 +107,31 @@ export function HowItWorks() {
             We’ll help you <em>get there.</em>
           </h2>
         </div>
-        <div className="line reveal">
-          <div className="track">
-            <div className="fill" style={{ width: `${(cur / (STEPS.length - 1)) * 94}%` }} />
+        <div className="how-experience reveal">
+          <div className="how-steps" role="tablist" aria-label="Trip journey steps">
             {STEPS.map((st, i) => (
-              <button key={st.title} className={`stn${i <= cur ? " on" : ""}${i === cur ? " cur" : ""}`} onClick={() => go(i)}>
-                <i className="num">{i + 1}</i>
-                <span>{st.title}</span>
+              <button key={st.title} role="tab" aria-selected={i === cur} className={`how-step${i === cur ? " active" : ""}`} onClick={() => setCur(i)}>
+                <span className={`how-thumb how-thumb-${i + 1}`} aria-hidden="true"><i>{String(i + 1).padStart(2, "0")}</i></span>
+                <span><small>Step {String(i + 1).padStart(2, "0")}</small><b>{st.title}</b></span>
               </button>
             ))}
           </div>
-          <div className="detail">
-            <div>
-              <div className="kick num">Stop 0{cur + 1}</div>
-              <h3 style={{ marginTop: 14 }}>{s.title}</h3>
-              <p className="lede">{s.body}</p>
+          <div className="how-feature" role="tabpanel" aria-live="polite">
+            <div className={`how-picture how-picture-${cur + 1}`} aria-hidden="true">
+              <span className="how-photo-light" />
+              <span className="how-photo-route" />
+              <span className="how-photo-point p1" />
+              <span className="how-photo-point p2" />
+              <span className="how-photo-point p3" />
+              <div className="how-photo-caption"><small>Trip stage</small><b>{s.title}</b></div>
             </div>
-            <div className="panel">{s.panel}</div>
+            <div className="how-feature-copy">
+              <div className="kick num">Step {String(cur + 1).padStart(2, "0")} of {String(STEPS.length).padStart(2, "0")}</div>
+              <h3>{s.title}</h3>
+              <p className="lede">{s.body}</p>
+              <div className="how-data-card">{s.panel}</div>
+              <div className="how-progress" aria-label={`Step ${cur + 1} of ${STEPS.length}`}><i style={{ width: `${((cur + 1) / STEPS.length) * 100}%` }} /></div>
+            </div>
           </div>
         </div>
       </div>
