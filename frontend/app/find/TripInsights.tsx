@@ -2,12 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
+import { HourChart } from "./HourChart";
 
 type Point = { lat: number; lon: number };
 type Range = { p10: number; p50: number; p90: number };
+type HourPrice = { hour: number; period: string; uber: Range; lyft: Range };
+type FlightHour = { hour: number; period: string; factor: number; range: Range };
 type PriceOut = {
-  rideshare: { uber: Range; lyft: Range; miles: number; minutes: number; departAt: string; caveat: string } | null;
-  airfare: { from: { code: string; city: string }; to: { code: string; city: string }; miles: number; range: Range; caveat: string } | null;
+  rideshare: { uber: Range; lyft: Range; miles: number; minutes: number; departAt: string; departHour: number; period: string; byHour: HourPrice[]; cheapestOnTime: HourPrice | null; caveat: string } | null;
+  airfare: { from: { code: string; city: string }; to: { code: string; city: string }; miles: number; range: Range; byHour: FlightHour[]; cheapestHour: FlightHour | null; caveat: string } | null;
   drive: { status: string; source: string; miles: number; minutes: number };
   models: { rideshare: { metrics: Record<string, number>; data: Record<string, unknown> }; airfare: { metrics: Record<string, number>; data: Record<string, unknown> } };
 };
@@ -99,6 +102,7 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
   const [price, setPrice] = useState<PriceOut | null>(null);
   const [heat, setHeat] = useState<Heat | null>(null);
   const [err, setErr] = useState<{ price?: string; heat?: string }>({});
+  const [brand, setBrand] = useState<"uber" | "lyft">("uber");
 
   useEffect(() => {
     if (!from || !to || !startsAt) return;
@@ -145,6 +149,39 @@ export function TripInsights({ from, to, startsAt, timeZone }: { from?: Point; t
             ))}
           </tbody>
         </table>
+      )}
+      {price?.rideshare && price.rideshare.byHour.length > 0 && (
+        <>
+          <div className="dk-row" style={{ marginTop: 10 }}>
+            <div className="dk-seg">
+              <button className={brand === "uber" ? "on" : ""} onClick={() => setBrand("uber")}>
+                Uber
+              </button>
+              <button className={brand === "lyft" ? "on" : ""} onClick={() => setBrand("lyft")}>
+                Lyft
+              </button>
+            </div>
+            <span className="dk-mut ti-small">
+              You’d leave in the <b>{price.rideshare.period}</b>.
+              {price.rideshare.cheapestOnTime && price.rideshare.cheapestOnTime.hour !== price.rideshare.departHour
+                ? ` Leaving in the ${price.rideshare.cheapestOnTime.period} instead would be about ${usd(price.rideshare.cheapestOnTime[brand].p50)}.`
+                : " That’s already the cheapest time that still gets you there on time."}
+            </span>
+          </div>
+          <HourChart
+            title={`${brand === "uber" ? "Uber" : "Lyft"} price by departure hour (same trip, same day)`}
+            bars={price.rideshare.byHour.map((h) => ({ hour: h.hour, period: h.period, ...h[brand] }))}
+            mine={price.rideshare.departHour}
+            best={price.rideshare.cheapestOnTime?.hour}
+          />
+        </>
+      )}
+      {price?.airfare && price.airfare.byHour.length > 0 && (
+        <HourChart
+          title={`Flight ${price.airfare.from.code} → ${price.airfare.to.code} by departure hour (nonstop)`}
+          bars={price.airfare.byHour.map((h) => ({ hour: h.hour, period: h.period, ...h.range }))}
+          best={price.airfare.cheapestHour?.hour}
+        />
       )}
       {price?.rideshare && <p className="dk-mut ti-small">{price.rideshare.caveat} Leaving {new Date(price.rideshare.departAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })} · road distance from {price.drive.source}.</p>}
       {price?.airfare && <p className="dk-mut ti-small">{price.airfare.caveat}</p>}

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { predictTrees } from "../../backend/src/ml/gbdt";
-import { AIRFARE, RIDESHARE, airportsNear, estimateAirfare, estimateRideshare, predictRange, type PriceModelFile } from "../../backend/src/ml/price";
+import { AIRFARE, FLIGHT_TIME, PERIODS, RIDESHARE, airportsNear, estimateAirfare, estimateRideshare, flightFactor, periodOf, predictRange, type PriceModelFile } from "../../backend/src/ml/price";
 
-for (const model of [RIDESHARE, AIRFARE] as PriceModelFile[]) {
+for (const model of [RIDESHARE, AIRFARE, FLIGHT_TIME] as PriceModelFile[]) {
   test(`${model.name}: TypeScript trees reproduce the notebook's XGBoost predictions`, () => {
     for (const key of ["p10", "p50", "p90"] as const) {
       model.golden.X.forEach((row, i) => {
@@ -47,4 +47,40 @@ test("flights: none for short hops, a real airport pair for long trips", () => {
   assert.ok(airportsNear(davis).some((a) => a.code === trip.from.code));
   assert.equal(trip.to.code, "AUS"); // nearest real airport wins once ground travel is counted
   assert.ok(trip.groundMiles < 60);
+});
+
+test("every hour of the day belongs to exactly one named period", () => {
+  assert.equal(PERIODS.length, 7);
+  for (let h = 0; h < 24; h++) assert.ok(periodOf(h).index >= 0, `hour ${h}`);
+  assert.equal(periodOf(8).name, "morning rush");
+  assert.equal(periodOf(17).name, "evening rush");
+});
+
+test("rideshare: the same trip is priced differently at different times of day", () => {
+  const est = estimateRideshare({ miles: 8, minutes: 25, arriveBy: "2026-11-11T17:00:00Z" }); // Wednesday, 9:00 am Pacific
+  assert.equal(est.byHour.length, 24);
+  const p50s = est.byHour.map((h) => h.uber.p50);
+  assert.ok(Math.max(...p50s) - Math.min(...p50s) > 1, "time of day should move the price by more than $1");
+  assert.equal(est.departHour, 8);
+  assert.equal(est.period, "morning rush");
+  assert.ok(est.cheapestOnTime && est.cheapestOnTime.hour <= est.departHour, "the cheapest suggestion must still arrive on time");
+  assert.ok(est.cheapestOnTime.hour >= est.departHour - 3, "and not ask anyone to leave hours early");
+});
+
+test("the model card shows time of day lowers error", () => {
+  assert.ok(RIDESHARE.metrics.mae_p50! < RIDESHARE.metrics.mae_without_time_features!);
+  assert.ok(RIDESHARE.by_period && Object.keys(RIDESHARE.by_period).length === 7);
+  assert.ok(FLIGHT_TIME.metrics.mae_fare_nzd! < FLIGHT_TIME.metrics.mae_fare_nzd_no_time!);
+});
+
+test("flights: price by departure hour around the route-level fare", () => {
+  const trip = estimateAirfare({ from: { lat: 38.5449, lon: -121.7405 }, to: { lat: 30.2672, lon: -97.7431 }, when: "2026-11-14T17:00:00Z" })!;
+  assert.equal(trip.byHour.length, 18); // 5 am .. 10 pm departures
+  const factors = trip.byHour.map((h) => h.factor);
+  assert.ok(Math.max(...factors) > Math.min(...factors), "departure hour should change the factor");
+  assert.ok(factors.every((f) => f > 0.3 && f < 3));
+  const avg = factors.reduce((a, b) => a + b, 0) / factors.length;
+  assert.ok(Math.abs(avg - 1) < 0.01, "factors describe the shape of the day around the route fare");
+  assert.ok(trip.cheapestHour && trip.byHour.every((h) => h.range.p50 >= trip.cheapestHour!.range.p50));
+  assert.equal(flightFactor(9, 2), flightFactor(9, 2));
 });
