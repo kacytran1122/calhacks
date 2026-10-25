@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { Smile } from "./Smile";
+import { useState } from "react";
 
-const QA: { q: ReactNode; a: ReactNode }[] = [
-  { q: "Do I need a new app?", a: <>No. <Smile /> lives in a Chrome extension and your group chat. Open an event page or type @smile. That’s it.</> },
-  { q: "Where do the facts come from?", a: "Official transit, weather and location feeds, plus permitted public event pages. Every answer shows its source and how fresh it is." },
-  { q: <>Can <Smile /> spend more than we agreed?</>, a: "Never. Trip funds stay locked until you approve the exact quote you saw. If the price changes, it asks again." },
-  { q: "Who can see my profile?", a: "Only your trip group. Buddies are matched by route and schedule. Your details aren’t shared to make a match." },
-  { q: "What if my train is late?", a: <><Smile /> watches live delays, reroutes when your transfer is at risk, and pings the whole group with a new plan.</> },
+const QA = [
+  { q: "How do I find an event and plan my trip?", a: "Enter a ZIP code, city, state, or address, then choose your travel radius and budget. Update nearby events, select an MLH or tech event, and add any arrival deadlines or other travel needs. If a detail is unclear, S’mile asks a follow-up question before using it in your plan." },
+  { q: "Do I have to share my current location?", a: "You can plan from the place you enter. If you choose current location, your browser asks for permission and S’mile uses the coordinates it returns as the starting point. You can decline location access and continue with a typed location." },
+  { q: "Can I plan a trip without driving?", a: "Yes. Leave self-drive off to request public-transit options. Include self-drive if you also want to compare a road route. Available routes depend on the event’s location, the travel date, and the schedules covered by our route providers." },
+  { q: "Are the prices live or predicted?", a: "A verified fare is a price found on a current public source for the route and date shown. A prediction is a planning estimate from historical data and is labelled separately, with a range rather than a guaranteed price. Flight pricing is currently available for eligible trips between different U.S. states. If a live fare cannot be verified, S’mile says so instead of presenting the forecast as a quote." },
+  { q: "Will S’mile book travel or charge me automatically?", a: "Planning a route does not purchase a ticket. The web app can request your approval for an exact verified amount and pass the trip’s evidence to an organizer’s reimbursement workflow. Payment and booking demonstrations use a sandbox or simulation; a forecast is never a payment authorization. Use the linked travel provider to confirm availability and complete a real purchase." },
+  { q: "What does the Chrome extension do?", a: "On the MLH season schedule, choose Plan trip with S’mile on an event card. On a collegiate hackathon website, open S’mile from the Chrome toolbar. Confirm the destination, choose your starting point and self-drive preference, then compare the fastest available route with alternatives and step-by-step directions. The extension shows routes without fares or checkout." },
+  { q: "What if a schedule or fare changes?", a: "Check the source links before you leave and request a fresh plan when your travel details change. For eligible saved trips, scheduled checks can flag a significant fare change, venue heat, or a change to the event’s date or venue. Transit disruptions still need to be checked with the operator before you travel." },
 ];
 
 export function Faq() {
@@ -21,12 +22,12 @@ export function Faq() {
         </h2>
         <div className="faq-list reveal">
           {QA.map((x, i) => (
-            <div key={i} className={`qa${open === i ? " open" : ""}`}>
-              <button className="qa-q" aria-expanded={open === i} onClick={() => setOpen(open === i ? -1 : i)}>
+            <div key={x.q} className={`qa${open === i ? " open" : ""}`}>
+              <button id={`faq-question-${i}`} className="qa-q" aria-expanded={open === i} aria-controls={`faq-answer-${i}`} onClick={() => setOpen(open === i ? -1 : i)}>
                 <span>{x.q}</span>
                 <i aria-hidden="true" />
               </button>
-              <div className="qa-a">
+              <div id={`faq-answer-${i}`} className="qa-a" role="region" aria-labelledby={`faq-question-${i}`} inert={open !== i}>
                 <div>
                   <p>{x.a}</p>
                 </div>
