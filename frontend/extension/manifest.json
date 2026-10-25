@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "S’mile Trip Planner",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Plan the fastest route and clear alternatives to the collegiate hackathon page you are viewing.",
+  "homepage_url": "https://calhacks-beta.vercel.app",
   "icons": {
     "16": "images/icon-16.png",
     "32": "images/icon-32.png",
