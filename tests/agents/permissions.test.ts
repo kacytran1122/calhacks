@@ -32,9 +32,14 @@ test("the chat concierge and the scheduler hold no money capabilities", () => {
 });
 
 test("discovery, heat and pricing are registered with only what their work needs", () => {
-  assert.deepEqual([...AGENT_CAPS.discover].sort(), ["events.snapshot", "feeds.read", "web.read"]);
-  assert.deepEqual([...AGENT_CAPS.heat], ["feeds.read"]);
-  assert.deepEqual([...AGENT_CAPS.pricing].sort(), ["feeds.read", "model.predict", "web.read"]);
+  assert.deepEqual([...AGENT_CAPS.discover].sort(), ["agent.message", "events.snapshot", "feeds.read", "web.read"]);
+  assert.deepEqual([...AGENT_CAPS.heat], ["feeds.read", "agent.message"]);
+  assert.deepEqual([...AGENT_CAPS.pricing].sort(), ["agent.message", "feeds.read", "model.predict", "web.read"]);
+  // Talking to other agents gives no one money: charging and posting stay with payments and the reconciler.
+  for (const [id, caps] of Object.entries(AGENT_CAPS)) {
+    if (id !== "payments") assert.ok(!caps.includes("mandate.charge"), id);
+    if (id !== "reconciler") assert.ok(!caps.includes("ledger.post"), id);
+  }
   for (const id of ["discover", "heat", "pricing", "scheduler", "concierge"] as const) assert.ok(AGENT_NEVER[id].length > 0);
 });
 

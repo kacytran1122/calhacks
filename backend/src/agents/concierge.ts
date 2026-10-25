@@ -4,7 +4,9 @@ import { appendAudit } from "../../hyphenate/audit";
 import type { EventListing } from "../eventStore";
 import { stateCodeFromLabel, zipToPoint } from "../integrations/geo";
 import { MODELS } from "../llm";
-import { fmt } from "../money";
+import { amountsGrounded, amountsIn, fmt } from "../money";
+
+export { amountsGrounded, amountsIn };
 import { buddiesFor, planTrip } from "../orchestrator";
 import { authorize } from "../permissions";
 import { withState } from "../store";
@@ -182,17 +184,6 @@ const hourLabel = (h: number) => (h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h ===
 class ToolError extends Error {}
 
 /** Dollar amounts in a text, as cents. */
-export function amountsIn(text: string): number[] {
-  return [...text.matchAll(/\$\s?(\d[\d,]*(?:\.\d{1,2})?)/g)].map((m) => Math.round(Number(m[1]!.replace(/,/g, "")) * 100));
-}
-
-/** True when every dollar amount in the reply appears in some tool result. */
-export function amountsGrounded(reply: string, toolText: string[]): { ok: boolean; stray: number[] } {
-  const allowed = new Set(toolText.flatMap(amountsIn));
-  const stray = amountsIn(reply).filter((c) => !allowed.has(c));
-  return { ok: stray.length === 0, stray };
-}
-
 export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}): Promise<ConciergeOutput> {
   const plans: ConciergePlan[] = [];
   const toolText: string[] = [];
@@ -265,6 +256,8 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
           event: picked && { key: picked.key, name: picked.name, startsAt: picked.startsAt, venue: picked.venue, city: picked.city, lat: picked.lat, lon: picked.lon, url: picked.url },
         });
         const pick = p.routes?.pick;
+        const planned = s.trips.find((t) => t.id === p.trip.id);
+        if (planned) planned.chatRoom = input.room;
         appendAudit(s, { actor: concierge, action: "concierge.planned", subject: p.trip.id, reason: `Planned from chat for ${me}: ${pick ? `${pick.mode} ${fmt(pick.costCents)} waiting for the traveler's approval` : "no approvable route"}`, refs: [p.trip.id, `chat:${input.room}`] });
         return { ...p, buddies: buddiesFor(s, p.trip.id) };
       });

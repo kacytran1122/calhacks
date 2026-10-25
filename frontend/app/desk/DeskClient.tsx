@@ -153,6 +153,7 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
           )}
 
           {staff && snap.scheduler && <SchedulerPanel jobs={snap.scheduler} busy={busy} run={run} />}
+          {staff && snap.team && <TeamBoard team={snap.team} busy={busy} run={run} />}
 
           <div className="dk-panel">
             <div className="dk-ph">
@@ -309,9 +310,13 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
             </div>
             {snap.agents.map((a) => (
               <div key={a.id} className="dk-agent">
-                <b>{a.id}</b>
+                <b>
+                  {a.id}
+                  <i className={`dk-mind ${a.thinks ? "on" : ""}`}>{a.thinks ? "thinks with Claude" : "code only"}</i>
+                </b>
                 <span className="dk-caps">{a.caps.join(" · ") || "—"}</span>
                 <span className="dk-never">{a.never}</span>
+                {a.talksTo.length > 0 && <span className="dk-mut dk-talks">Can message: {a.talksTo.join(", ")}</span>}
               </div>
             ))}
           </div>
@@ -342,7 +347,7 @@ function SchedulerPanel({ jobs, busy, run }: { jobs: NonNullable<Snap["scheduler
         <span className="dk-mut">{jobs.filter((j) => j.due).length} job(s) due</span>
       </div>
       <p className="dk-mut">
-        Wakes the agents on its own (<code>npm run scheduler</code>, or a cron calling <code>/api/scheduler/run</code>) and sends notices. It can’t approve, charge or change an amount.
+        Wakes the team on its own (<code>npm run scheduler</code>, or a cron calling <code>/api/scheduler/run</code>). Each job re-checks something and leaves what changed on the team board for the agent who owns it. It can’t approve, charge or change an amount.
       </p>
       <table className="dk-table tight">
         <tbody>
@@ -364,6 +369,49 @@ function SchedulerPanel({ jobs, busy, run }: { jobs: NonNullable<Snap["scheduler
       </table>
       <button className="dk-btn primary" disabled={!!busy} onClick={() => run("scheduler", () => api<JobRun>("/api/scheduler/run", {}), jobsDone)}>
         {busy === "scheduler" ? "Waking the agents…" : "Run everything due"}
+      </button>
+    </div>
+  );
+}
+
+/** Notes the agents left each other: who asked whom, about what, and what each did with it. */
+function TeamBoard({ team, busy, run }: { team: NonNullable<Snap["team"]>; busy: string | null; run: (l: string, fn: () => Promise<unknown>, ok?: (r: unknown) => string) => Promise<void> }) {
+  const open = team.board.filter((m) => m.status === "open" || m.status === "working").length;
+  return (
+    <div className="dk-panel">
+      <div className="dk-ph">
+        <h2>Team board</h2>
+        <span className="dk-mut">{team.claude ? "Agents think with Claude" : "Claude is off: agents pass findings along in code"} · {open} open</span>
+      </div>
+      <p className="dk-mut">How the agents coordinate. Findings flow to the orchestrator, which decides what reaches a person; the auditor questions the reconciler’s decisions. Every note is in the audit trail.</p>
+      {team.board.length === 0 ? (
+        <p className="dk-mut">No notes yet. Run a job above to give the team something to do.</p>
+      ) : (
+        <ol className="dk-notes">
+          {team.board.map((m) => (
+            <li key={m.id} className={m.status}>
+              <div className="dk-note-h">
+                <b>
+                  {m.from} → {m.to}
+                </b>
+                <code>{m.topic}</code>
+                <span className="dk-mut">
+                  {m.subject} · {ago(m.at)}
+                </span>
+              </div>
+              <p>{m.text}</p>
+              {m.result && (
+                <p className="dk-note-r">
+                  <span className={`dk-by ${m.handledBy ?? ""}`}>{m.handledBy === "claude" ? "Claude" : "code"}</span> {m.result}
+                </p>
+              )}
+              {!m.result && <p className="dk-mut">{m.status === "working" ? "Being handled…" : "Waiting for the next wake-up."}</p>}
+            </li>
+          ))}
+        </ol>
+      )}
+      <button className="dk-btn ghost" disabled={!!busy || open === 0} onClick={() => run("team", () => api<JobRun>("/api/scheduler/run", { board: true }), jobsDone)}>
+        {busy === "team" ? "Agents working…" : "Work open notes now"}
       </button>
     </div>
   );

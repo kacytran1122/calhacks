@@ -4,7 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AuditEvent } from "../hyphenate/audit";
 import { openDb, tx } from "./db";
 import { LedgerError, type JournalEntry } from "../hyphenate/ledger";
-import type { Evidence, HackEvent, InboxItem, Mandate, Person, Traveler, Trip } from "./types";
+import type { BoardMessage, Evidence, HackEvent, InboxItem, Mandate, Person, Traveler, Trip } from "./types";
 
 export interface State {
   version: 1;
@@ -26,6 +26,7 @@ export interface State {
   inbox: InboxItem[];
   noShows: { travelerId: string; eventId: string; date: string; tripId: string }[];
   scheduler?: { lastRun: Partial<Record<string, string>> }; // job id -> last run (scheduler.ts)
+  board?: BoardMessage[]; // agents' notes to each other (agents/board.ts)
   planningReceipts?: Record<string, { fingerprint: string; createdAt: string; result: import("./orchestrator").PlanTripResult }>;
 }
 

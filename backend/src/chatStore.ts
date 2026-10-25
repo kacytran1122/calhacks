@@ -206,3 +206,15 @@ export function chatStore(): DurableChatStore {
   if (process.env.VERCEL) throw new ChatStorageUnavailable("Durable chat must run on the persistent chat service, not a serverless filesystem.");
   return sharedStore ??= new DurableChatStore({ file: path.join(DATA_DIR, "chat.db") });
 }
+
+/**
+ * Post a message from S'mile into a group chat outside anyone's turn, for team updates (a price
+ * moved, an event changed). Same message shape the chat writes for its own replies.
+ */
+export async function postBotMessage(roomId: string, text: string, store = chatStore()): Promise<void> {
+  type Msg = { id: string; from: string; initials: string; text: string; at: string; bot?: boolean };
+  await store.transact(roomId, () => ({ messages: [] as Msg[], plans: [], memory: [], listings: [] }), async (room: { messages: Msg[] }) => {
+    room.messages.push({ id: `m-${randomUUID()}`, from: "S’mile", initials: "S", text, at: new Date().toISOString(), bot: true });
+    if (room.messages.length > 200) room.messages.splice(0, room.messages.length - 200);
+  });
+}

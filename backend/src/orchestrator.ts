@@ -17,6 +17,8 @@ import type { State } from "./store";
 import { newId } from "./store";
 import type { Actor, Cents, Decision, HumanRole, InboxItem, Trip } from "./types";
 import { bindApproval } from "../hyphenate/financeControls";
+import { post as postNote } from "./agents/board";
+import { brainsOn } from "./agents/brain";
 
 const recon: Actor = { kind: "agent", id: "reconciler" };
 const orch: Actor = { kind: "agent", id: "orchestrator" };
@@ -315,6 +317,8 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
     }
     if (routes.blockReason === "NO_VERIFIED_FARE") {
       appendAudit(state, { actor: orch, action: "plan.awaiting_fare", subject: trip.id, reason: "Live routes were found without an auditable total fare; no payment mandate was created", refs: g.evidence.map((e) => e.id) });
+      // With Claude on, the evidence agent follows up on its own and reports back.
+      if (brainsOn()) postNote(state, { from: "orchestrator", to: "evidence", topic: "fare.recheck", subject: trip.id, text: `Routes to ${event.name} were found but no source stated a fare that can be approved. Look for one.`, data: { tripId: trip.id }, wantsReply: true });
       return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: null };
     }
     const q = ask(state, trip, "reconcile", "controller", `No option for ${g.homeLabel ?? args.zip} → ${event.name} fits the ${fmt(routes.cap)} cap (R1). Approve an exception?`, [{ id: "approve", label: "Approve exception" }, { id: "reject", label: "Decline" }], {});
@@ -356,6 +360,7 @@ export async function bookTrip(state: State, tripId: string, fareDeltaCents = 0)
     trip.mandateId = m.id;
     trip.state = "planned";
     ask(state, trip, "mandate_approval", "traveler", `The fare changed from ${fmt(trip.quoteCents)} to ${fmt(amount)} at checkout and the card declined it. Approve exactly ${fmt(amount)}?`, [{ id: "approve", label: `Approve ${fmt(amount)}` }, { id: "reject", label: "Cancel" }], { amountCents: amount });
+    if (brainsOn()) postNote(state, { from: "payments", to: "orchestrator", topic: "charge.declined", subject: tripId, text: `The card declined ${fmt(amount)}: the fare changed from ${fmt(trip.quoteCents)} at checkout. The traveler was asked to approve exactly ${fmt(amount)}.`, data: { tripId } });
   }
   return r;
 }

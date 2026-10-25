@@ -1,7 +1,7 @@
 import { eventStore, type EventListing } from "../eventStore";
 import { cityToPoint, haversineMiles, isLikelyUsLocation, zipToPoint } from "../integrations/geo";
 import { fetchDevpost, fetchLuma, fetchMlh, type SourceResult } from "../integrations/sources";
-import type { Actor } from "../types";
+import type { Actor, HackEvent } from "../types";
 import type { AgentCall } from "./run";
 
 export interface DiscoverOptions {
@@ -220,4 +220,11 @@ export function discoverCall(subject: string, on?: { actor: Actor; cap: "events.
     summarize: (r) => `${r.events.length} event(s) within ${r.radiusMiles} mi of ${r.origin.zip}; ${r.sources.map((s) => `${s.source} ${s.status}`).join(", ")}; snapshots in ${r.store}`,
     refs: (r) => r.events.slice(0, 10).map((e) => e.key),
   };
+}
+
+const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** The same event in a fresh listing: same key, or the same name. */
+export function findListing(event: HackEvent, listings: EventListing[]): EventListing | undefined {
+  return listings.find((l) => l.key === event.id) ?? listings.find((l) => plain(l.name) === plain(event.name));
 }

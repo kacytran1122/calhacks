@@ -32,8 +32,8 @@ Only these product areas live at the repository root. Generated files, credentia
 |---|---|
 | `frontend/app` | Landing page, event search, traveler planning, chat, and organizer desk |
 | `frontend/extension` | Read-only Chrome extension for public event pages |
-| `backend/src/agents` | Scout, Evidence, Route, Discover, Heat, Pricing, and the @smile Concierge |
-| `backend/src/scheduler.ts` | Wakes the agents on a timer: backlog, price, weather, and event-date checks |
+| `backend/src/agents` | Scout, Evidence, Route, Discover, Heat, Pricing, the @smile Concierge, and the team: the board agents message each other on (`board.ts`), the Claude loop every agent thinks with (`brain.ts`), and each agent's goal and tools (`team.ts`) |
+| `backend/src/scheduler.ts` | Wakes the team on a timer: backlog, price, weather, and event-date checks become findings on the board |
 | `backend/src/carbon.ts` | CO₂e per traveler for every way to get there, from published emission factors |
 | `backend/src/integrations` | Bright Data, Google Flights live pricing, public transit, official fares, weather, and geocoding |
 | `backend/src` | Shared permissions, orchestration, authentication, persistence, and runtime model inference |
@@ -44,7 +44,7 @@ Only these product areas live at the repository root. Generated files, credentia
 | `backend/scripts` | Setup, seed, discovery, evaluation, and scheduler entry points |
 | `backend/.data` | Local SQLite books, auth, and event snapshots; never committed |
 
-The chat concierge runs a bounded reasoning loop: it chooses a specialist tool, reads the result, and decides whether another step is needed. Its tools include event discovery, trip planning, current flight prices, historical price estimates, and venue heat. Tool calls run under separate permissions and enter the audit trail. The auditor also uses model reasoning over evidence. Routing scores, finance policy, payment controls, and ledger reconciliation use deterministic code, while scheduled jobs revisit prices, weather, and event changes. This is a hybrid agent system with specialist workers; the registered worker names do not mean every worker is an independent reasoning model.
+S'mile is a multi-agent system. Eleven of its thirteen agents think with Claude: each runs its own bounded tool loop with its own goal and tools, and the agents coordinate by leaving each other notes on a shared team board. Findings flow toward the orchestrator, which decides what reaches a person and who else should look; the auditor and the reconciler argue decisions out between them. The scheduler (a clock) and payments (which moves money only on a person's approval) stay plain code by design. Prices, policy, payment controls, and ledger postings are computed by code, never by a model; agents decide what to do, not what anything costs. Without a Claude key, every agent falls back to its code, so S'mile behaves as it did before agents could think.
 
 ## Local development
 
@@ -94,7 +94,7 @@ The test pyramid lives entirely under `tests/`:
 
 - `tests/frontend`: user interaction and location-entry behavior.
 - `tests/backend`: policy boundaries, deterministic seed data, geocoding validation, ledger balance, price-model parity, heat scoring, and emission factors and the low-carbon rule.
-- `tests/agents`: least privilege, audited agent calls, scheduler jobs and notices, the @smile tool loop and its amount check, Photon event filtering, 40-case evaluation, and adversarial controls.
+- `tests/agents`: least privilege, audited agent calls, scheduler jobs and notices, the @smile tool loop and its amount check, the team board (findings passed along in code, agents judging and coordinating with Claude, the auditor–reconciler exchange, holds, refused messages, chain limits, invented amounts), Photon event filtering, 40-case evaluation, and adversarial controls.
 - `tests/system`: sign-in, role isolation, trip-token scope, approval, booking, and repository-structure checks.
 
 ## CI/CD
@@ -181,16 +181,39 @@ Every agent acts through `runAgent` (`backend/src/agents/run.ts`): the caller mu
 | Scheduler | wake agents, send notices | approve, charge, or change an amount |
 | Concierge (@smile) | find events, plan a trip, estimate prices, check heat | charge, approve, request a mandate, or post to the ledger |
 
-**Scheduler** (`backend/src/scheduler.ts`). Each job reads the books, does its network work without holding them, then writes evidence and notices in one short transaction.
+**Scheduler** (`backend/src/scheduler.ts`). Each job is a sensor: it reads the books, does its network work without holding them, records what it saw as evidence, posts what changed to the board for the agent who owns it, and then runs the board until the team is done.
 
 | Job | Every | What it does |
 |---|---|---|
-| `reconcile` | 15 min | Re-runs the reimbursement backlog |
+| `reconcile` | 15 min | Hands the reimbursement backlog to the reconciler, whose decisions then go to the auditor |
 | `price_watch` | 6 h | Re-checks live Google Flights fares and trained forecasts for trips in the next 120 days; a notice when the observed fare moves 15% or more from its prior live observation (or the trip reference on the first check) |
 | `weather_watch` | 3 h | Heat at the venue for trips in the next 3 days; a notice at NWS Caution or worse |
 | `event_watch` | 12 h | Re-reads listings; when an event’s date or venue changed, updates it, records the change, and tells each traveler |
 
 Notices are inbox items with one “Got it” button. They are sent once per topic and approve nothing. Staff can run any job from the Desk.
+
+### How the agents coordinate
+
+Agents leave each other notes on the team board (`backend/src/agents/board.ts`): a finding ("the rideshare forecast rose 50%"), a task ("read this event page"), or the reply to a task. Each agent wakes for the notes addressed to it, thinks with Claude using only its own tools, and says what it did; that answer is kept on the note, and when the sender asked for an answer it goes back to them. The Desk's **Team board** shows every note, who handled it, and whether Claude or code did.
+
+| Agent | Thinks about | Can message |
+|---|---|---|
+| Orchestrator | what reaches the traveler, the controller, or the group chat, and who else should look | route, evidence, policy, scout, pricing, concierge |
+| Pricing | whether a price move matters (booked yet? how close is the event?), re-checking a live fare | orchestrator |
+| Heat | who to warn and what to suggest for how they travel | orchestrator |
+| Discover | confirming an event change before anyone is told, with scout's help | orchestrator, scout |
+| Scout | what an event page itself says | discover, orchestrator |
+| Route | whether the planned route still makes sense after a change | orchestrator, evidence |
+| Evidence | its own fare searches when a plan has no verified fare | orchestrator, route |
+| Policy | exceptions and over-cap prices, put to the controller with the rule and amounts | orchestrator |
+| Reconciler | working the backlog; holding a payout for a person when something looks off; defending decisions | auditor, orchestrator |
+| Auditor | which decisions to question, and whether the answer holds up | reconciler, orchestrator |
+| Concierge (@smile) | chat replies (its own tool loop); posts team updates in the group chat a trip was planned in | orchestrator |
+| Scheduler, Payments | nothing: a clock and a money mover, both code | the agents that own their findings |
+
+A typical chain: the price watch sees a 50% rise → pricing judges it matters two days out → the orchestrator sends the traveler one notice and posts a heads-up in their group chat. Or: the reconciler decides a pass → the auditor challenges one decision → the reconciler defends it → the auditor isn't convinced and escalates → the orchestrator puts it in front of the controller.
+
+The limits are code, not prompts. Who may message whom is fixed (`TALKS_TO` in `permissions.ts`) and checked on every post, which is audited. A chain stops after four hand-offs; a note being handled is claimed so no two wake-ups take it; each agent gets at most eight turns. Anything an agent writes for a person or another agent, including its final answer, may only repeat dollar amounts from its task or a tool result, so a figure can't be invented and passed along. Watchers think on Claude Haiku 5.5; the orchestrator, policy, reconciler, and auditor on Claude Opus 5.5. Set `SMILE_AGENTS=off` to keep every agent on code.
 
 **@smile** (`backend/src/agents/concierge.ts`). When Claude is configured, each message that mentions @smile goes to a Claude tool-use loop that decides which of four strict tools to call: `find_events`, `plan_trip`, `estimate_prices`, `heat_at_venue`. Plans are only for the sender, with a ZIP and event link the sender gave. Approval links are issued by code and never pass through the model. Every dollar amount in the reply must appear in a tool result; otherwise the reply is replaced by one written in code. Without a key, the rule-based planner answers as before.
 
@@ -213,6 +236,8 @@ Environmental impact changes the recommendation, and every number shows how it w
 - Agent capabilities are enforced in code, not prompts; every agent call is audited.
 - The @smile concierge holds no money capabilities, and every dollar amount it writes must come from a tool result.
 - Scheduler notices never change an amount or approve anything.
+- Agents message each other only along fixed lines, every message is audited, and nothing an agent writes may carry a dollar amount that code didn't compute.
+- An agent may make an outcome more cautious (hold a payout for a person, escalate), never less; questions it puts to people are notices that approve nothing.
 - Ledger entries must balance and carry evidence or rule references.
 - Posted entries and hash-chained audit history are immutable.
 - Secrets, local databases, build output, and dependency folders are ignored.

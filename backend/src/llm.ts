@@ -6,6 +6,7 @@ export const MODELS = {
   reason: "claude-opus-5-5", // explanations, defending decisions, auditor challenges
   extract: "claude-haiku-5-5", // page / receipt extraction
   concierge: "claude-opus-5-5", // @smile in the group chat: chooses which tools to call
+  watch: "claude-haiku-5-5", // pricing, heat, discover, scout, evidence and route deciding whether a finding matters
 } as const;
 
 export function llmAvailable(): boolean {

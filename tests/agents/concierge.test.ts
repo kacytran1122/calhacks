@@ -143,6 +143,8 @@ const planRecorder = (withFare = false) => {
   const calls: Parameters<NonNullable<ConciergeDeps["plan"]>>[1][] = [];
   const plan: ConciergeDeps["plan"] = async (state, args) => {
     calls.push(args);
+    if (!state.trips.some((t) => t.id === "TR-chat-test"))
+      state.trips.push({ id: "TR-chat-test", travelerId: "T-chat-test", eventId: event.key, period: state.company.openPeriod, method: "virtual_card", mode: "train", distanceMiles: 60, quoteCents: 0, requestedBy: "agent:policy", approvals: [], state: "planned" });
     return { trip: { id: "TR-chat-test", travelerId: "T-chat-test" }, event: { id: event.key, name: event.name, startsAt: event.startsAt!, venue: event.venue!, city: event.city!, lat: event.lat, lon: event.lon, url: event.url }, evidence: [], routes: withFare ? { options: [], pick: { mode: "train", costCents: 10920, pMiss: 0, history: { trips: 0 } }, cap: 40_000, carbon: { estimates: [] } } : null, carpool: null, inbox: null } as Awaited<ReturnType<NonNullable<ConciergeDeps["plan"]>>>;
   };
   return { calls, plan };
@@ -172,6 +174,8 @@ test("the chat planner receives no-drive, budget, distance, timing, and a stable
   assert.equal((reviewed as { eventName: string }).eventName, event.name);
   assert.equal(out.memory.includeSelfDrive, false);
   assert.equal(out.memory.travelerBudgetCents, 40_000);
+  // The trip remembers its group chat, so the team can post updates there later.
+  assert.equal(core.loadState().trips.find((t) => t.id === "TR-chat-test")?.chatRoom, "test");
 });
 
 test("sender preferences and earlier follow-up answers remain present on the next mention", async () => {

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { appendAudit, JOBS, runDue, withState, type JobId } from "@smile/core";
+import { appendAudit, JOBS, runBoard, runDue, withState, type JobId } from "@smile/core";
 import { NextResponse } from "next/server";
 import { isResponse, requireUser } from "@/lib/auth";
 import { ensureState, fail } from "@/lib/server";
@@ -36,9 +36,14 @@ export async function POST(req: Request) {
   const user = cron ? null : await requireUser(["controller", "organizer"]);
   if (isResponse(user)) return user;
   ensureState();
-  const { jobs } = (await req.json().catch(() => ({}))) as { jobs?: unknown };
+  const { jobs, board } = (await req.json().catch(() => ({}))) as { jobs?: unknown; board?: unknown };
   const only = Array.isArray(jobs) ? jobs.filter((j): j is JobId => typeof j === "string" && j in JOBS) : undefined;
   try {
+    if (board === true) {
+      // Let the team work through the notes already on the board, without running any job.
+      const r = await runBoard();
+      return NextResponse.json({ results: [{ job: "team", summary: `Handled ${r.handled} note(s)${r.byClaude ? `, ${r.byClaude} by Claude` : ""}${r.failed ? `, ${r.failed} failed` : ""}` }] });
+    }
     if (user) await withState((s) => void appendAudit(s, { actor: { kind: "human", id: user.personId, role: user.role }, action: "scheduler.requested", subject: "scheduler", reason: `${user.name} woke the scheduler${only?.length ? ` for ${only.join(", ")}` : ""}` }));
     return await run(only?.length ? only : undefined);
   } catch (e) {

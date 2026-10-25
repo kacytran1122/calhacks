@@ -63,7 +63,7 @@ textarea.dk-in{width:100%;resize:vertical}
 .dk-issue-list{margin:10px 0 0;padding-left:20px;color:var(--color-accent-800);font-size:12.5px}
 @media(max-width:560px){.dk-control-totals{grid-template-columns:1fr 1fr}}
 .dk-agent{display:grid;grid-template-columns:96px minmax(0,1fr);gap:2px 12px;padding:9px 0;border-top:1px solid var(--color-divider)}
-.dk-agent b{font:800 14px var(--font-heading);grid-row:span 2}
+.dk-agent b{font:800 14px var(--font-heading);grid-row:span 3}
 .dk-caps{font:12px ui-monospace,Menlo,monospace;color:var(--plum)}
 .dk-never{font-size:12.5px;color:var(--color-accent-700);font-weight:600}
 .dk-plan{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-top:14px}
@@ -104,3 +104,17 @@ textarea.dk-in{width:100%;resize:vertical}
 .dk-signin label{display:flex;flex-direction:column;gap:6px;font:700 13px var(--font-heading)}
 .dk-method summary{cursor:pointer;font:700 13px var(--font-heading);margin-top:8px}
 .dk-carbon td.num{white-space:nowrap}
+.dk-mind{display:block;margin-top:3px;font:700 10px var(--font-heading);letter-spacing:.06em;text-transform:uppercase;color:var(--mut);font-style:normal}
+.dk-mind.on{color:#1F9E72}
+.dk-talks{font-size:12px}
+.dk-notes{list-style:none;margin:10px 0 12px;padding:0;display:flex;flex-direction:column;gap:8px;max-height:520px;overflow:auto}
+.dk-notes li{border:1.5px solid var(--color-divider);border-radius:12px;padding:9px 11px;font-size:13.5px;min-width:0}
+.dk-notes li.open,.dk-notes li.working{border-color:var(--butter);background:#FFFBEA}
+.dk-notes li.failed{border-color:#FF6B5B}
+.dk-notes p{margin:4px 0 0;overflow-wrap:anywhere}
+.dk-note-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.dk-note-h b{font:800 13.5px var(--font-heading)}
+.dk-note-h code{font-size:12px;color:var(--plum)}
+.dk-note-r{color:var(--color-neutral-700,#5A4840)}
+.dk-by{display:inline-block;padding:1px 7px;border-radius:99px;background:#EFE6F7;color:var(--plum);font:800 10.5px var(--font-heading);text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
+.dk-by.claude{background:#E3F6EE;color:#1F9E72}

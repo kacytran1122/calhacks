@@ -123,6 +123,7 @@ export interface Trip {
   arrivalMarginMin?: number;
   co2eKg?: number; // per traveler for the chosen mode, from carbon.ts
   co2eDriveAloneKg?: number; // same trip driven alone, the baseline for "avoided"
+  chatRoom?: string; // the group chat it was planned in, so @smile can post updates there
 }
 
 export type DecisionCode =
@@ -203,4 +204,30 @@ export interface Person {
   name: string;
   role: HumanRole;
   title: string;
+}
+
+/**
+ * A note from one agent to another on the team board (agents/board.ts): a finding to act on, a
+ * task to do, or a reply to a task. `data` carries facts code computed; `text` is what the sender
+ * wrote. Who may write to whom is fixed in permissions.ts.
+ */
+export interface BoardMessage {
+  id: string;
+  at: string;
+  from: AgentId;
+  to: AgentId;
+  topic: string;
+  subject: string;
+  text: string;
+  data: Record<string, unknown>;
+  /** The sender wants the receiver's answer posted back to it when the receiver is done. */
+  wantsReply?: boolean;
+  replyTo?: string;
+  /** Hand-offs since the first message in this chain. */
+  depth: number;
+  status: "open" | "working" | "done" | "failed";
+  claimedAt?: string;
+  result?: string;
+  handledBy?: "claude" | "code";
+  doneAt?: string;
 }

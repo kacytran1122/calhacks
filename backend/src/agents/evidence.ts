@@ -101,6 +101,17 @@ async function extractFares(results: SerpOrganic[], from: string, to: string, ro
   }
 }
 
+/**
+ * One more fare search with the evidence agent's own query, for a plan that found routes but no
+ * fare a source states. Same checks as planning: only quoted, linked amounts survive.
+ */
+export async function searchFares(query: string, from: string, to: string) {
+  const r = await serp(query, 1, LIVE_SEARCH_TIMEOUT_MS);
+  if (r.status !== "ok" || !r.body?.length) return { status: r.status === "ok" ? ("empty" as const) : r.status, fares: [], extractedBy: "none" };
+  const { fares, extractedBy } = await extractFares(r.body.slice(0, 8), from, to);
+  return { status: "ok" as const, fares, extractedBy };
+}
+
 function officialFareQuery(options: TransitOption[], startsAt?: string) {
   const agencies = [...new Set(options.flatMap((option) => option.agencies))];
   if (!agencies.length) return undefined;

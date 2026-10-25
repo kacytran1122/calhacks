@@ -2,6 +2,7 @@ import "server-only";
 import {
   AGENT_CAPS,
   AGENT_NEVER,
+  brainsOn,
   brightDataKey,
   buildSeed,
   dueJobs,
@@ -15,6 +16,8 @@ import {
   POLICY,
   RULES,
   saveState,
+  TALKS_TO,
+  THINKING,
   trialBalance,
   verifyChain,
   visaAcceptanceConfigured,
@@ -65,7 +68,8 @@ export function snapshot(user: User) {
       .filter((t) => (t.id.startsWith("TR-F") || t.id.startsWith("TR-L")) && mine(t.id))
       .map((t) => ({ ...t, traveler: s.travelers.find((x) => x.id === t.travelerId), event: s.events.find((e) => e.id === t.eventId)?.name })),
     audit: staff ? s.audit.slice(-60).reverse() : [],
-    agents: Object.entries(AGENT_CAPS).map(([id, caps]) => ({ id, caps, never: AGENT_NEVER[id as keyof typeof AGENT_NEVER] })),
+    agents: Object.entries(AGENT_CAPS).map(([id, caps]) => ({ id, caps, never: AGENT_NEVER[id as keyof typeof AGENT_NEVER], thinks: THINKING.includes(id as keyof typeof AGENT_CAPS), talksTo: TALKS_TO[id as keyof typeof TALKS_TO] })),
+    team: staff ? { claude: brainsOn(), board: (s.board ?? []).slice(-30).reverse() } : null,
     carbon: staff ? organizerCarbon(s) : null,
     scheduler: staff ? schedulerStatus(s) : null,
     rules: RULES,
