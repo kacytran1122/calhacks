@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { SmileWord } from "@/components/landing/Smile";
+import { CarbonCompare, CarpoolCard, type CarbonComparison, type Carpool } from "./CarbonCompare";
 import { TripInsights } from "./TripInsights";
 
 type Listing = {
@@ -41,7 +42,8 @@ type Plan = {
   trip: { id: string; mode: string; quoteCents: number; distanceMiles: number; travelerId: string; travelerBudgetCents?: number; travelerMaxDistanceMiles?: number; organizerCapCents?: number; reimbursementEligibleCents?: number };
   event: { name: string; startsAt: string };
   evidence: Ev[];
-  routes: { options: RouteOption[]; pick?: { mode: string }; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" | "NO_VERIFIED_FARE" } | null;
+  routes: { options: RouteOption[]; pick?: { mode: string }; pickReason?: string; fastest?: string; lowestCarbon?: string; carbon?: CarbonComparison; cap: number; travelerBudgetCents?: number; maxDistanceMiles?: number; blockReason?: "TRAVELER_BUDGET" | "ORGANIZER_CAP" | "MAX_DISTANCE" | "NO_VERIFIED_FARE" } | null;
+  carpool?: Carpool | null;
   inbox: { id: string; question: string; askedOf: "traveler" | "organizer" | "controller" } | null;
   buddies: { initials: string; mode: string; sameMode: boolean; milesApart: number }[];
 };
@@ -55,7 +57,7 @@ type ConstraintReview = {
   followUpQuestion: string | null;
   parsedBy: "claude" | "rules";
 };
-type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean };
+type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string; minutes?: number; minutesSource?: string };
 type RouteGuide = { mode: string; title: string; durationText: string | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
 type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string; provider?: string; priceScope?: "route_total" | "published_ticket" | "day_pass"; fees?: "included" | "not_applicable" | "not_stated" };
 
@@ -106,7 +108,7 @@ function liveDirectionsUrl(origin: string, event: Listing, mode: string) {
   return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${travelmode}`;
 }
 
-function RouteInstructions({ option, guide, fare, origin, event, best = false }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; best?: boolean }) {
+function RouteInstructions({ option, guide, fare, origin, event, best = false, tags = [], why }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; best?: boolean; tags?: string[]; why?: string }) {
   const destination = event.venue || event.city || event.name;
   const directionsUrl = liveDirectionsUrl(origin, event, option.mode);
   const steps = guide?.steps?.length ? guide.steps : [
@@ -124,7 +126,10 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false }:
         {guide?.durationText && <span>{guide.durationText}</span>}
         <span>{option.history.trips ? `${Math.round(option.pMiss * 100)}% historical late risk` : "new route · no history yet"}</span>
         <span>{option.mode === "drive" ? "IRS mileage estimate" : fare ? "exact published fare" : "fare not verified"}</span>
+        {option.co2eKg !== undefined && <span title={option.co2eFormula}>≈ {option.co2eKg} kg CO₂e per traveler</span>}
+        {tags.map((t) => <span key={t} className="fd-tag">{t}</span>)}
       </div>
+      {why && <p className="fd-why"><b>Why this route:</b> {why}</p>}
       <ol className="fd-route-steps">
         {steps.map((step, index) => <li key={`${option.mode}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
       </ol>
@@ -143,7 +148,7 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false }:
     </>
   );
   if (best) return <section className="fd-route-card best">{content}</section>;
-  return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
+  return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}{option.co2eKg !== undefined && <small> · {option.co2eKg} kg CO₂e</small>}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
 }
 
 function UnpricedRouteGuide({ guide, origin, event, best = false }: { guide: RouteGuide; origin: string; event: Listing; best?: boolean }) {
@@ -496,6 +501,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
   const pickedRoute = plan?.routes?.options.find((option) => option.mode === plan.routes?.pick?.mode);
   const alternativeRoutes = plan?.routes?.options.filter((option) => option.mode !== plan.routes?.pick?.mode) ?? [];
   const fareFor = (option: RouteOption) => fareItems.find((item) => item.mode === option.mode);
+  const tagsFor = (option: RouteOption) => [...(option.mode === plan?.routes?.lowestCarbon ? ["Lowest carbon of these"] : []), ...(option.mode === plan?.routes?.fastest ? ["Fastest"] : [])];
   const guideFor = (option: RouteOption) => {
     const matchedFare = fareFor(option);
     return matchedFare?.routeTitle
@@ -580,9 +586,10 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
       {plan?.routes && (
         <>
           {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
-          {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} best />}
+          {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} best tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
           {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best />}
-          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
+          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
+          {plan.routes.carbon && <CarbonCompare carbon={plan.routes.carbon} pick={plan.routes.pick?.mode} fastest={plan.routes.fastest} priced={plan.routes.options.map((o) => o.mode)} carpool={plan.carpool ?? null} />}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
             <i aria-hidden="true">→</i>
@@ -641,6 +648,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
           ) : (
             <p className="dk-mut">No one else nearby has planned this event yet. You’ll be matched as others plan it.</p>
           )}
+          {plan.carpool && <CarpoolCard carpool={plan.carpool} />}
           <p className="dk-mut">
             Going with friends? <a href="/chat">Plan it together in the @smile group chat →</a>
           </p>

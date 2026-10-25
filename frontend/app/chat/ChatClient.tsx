@@ -124,6 +124,14 @@ export function ChatClient() {
                       <dd>{m.card.eventName}</dd>
                       <dt>P(miss kickoff)</dt>
                       <dd>{m.card.pMiss === null ? "no history yet" : `${Math.round(m.card.pMiss * 100)}% · ${m.card.historyTrips} past trips`}</dd>
+                      {m.card.co2eKg != null && (
+                        <>
+                          <dt>CO₂e</dt>
+                          <dd>
+                            about {m.card.co2eKg} kg per traveler <span className="ch-mut">(EPA emission factors × distance)</span>
+                          </dd>
+                        </>
+                      )}
                       <dt>Buddies</dt>
                       <dd>
                         {m.card.buddies.length ? (

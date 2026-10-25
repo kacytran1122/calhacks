@@ -13,6 +13,7 @@ export const RULES = {
   R10: "Foreign-currency receipts are reimbursed at the bank's settled USD amount, not the receipt's FX rate.",
   R11: "A refund that arrives after reimbursement becomes a receivable from the traveler (or a card credit).",
   R12: "A traveler who never checked in (no-show) is not reimbursed; the no-show is recorded for R4.",
+  R13: "Low-carbon preference: a train or bus is recommended over the cheapest option when it costs at most $10 or 25% more, takes at most 30 minutes or 25% longer, is about as reliable, and emits less CO₂e.",
 } as const;
 
 export type RuleId = keyof typeof RULES;
@@ -24,6 +25,7 @@ export const POLICY = {
   materialityPct: 0.03,
   noShowLookbackDays: 365,
   irsMileageCentsPerMile: 70, // 2025 IRS standard mileage rate, used for drive estimates
+  lowCarbon: { extraCents: 1_000, extraPct: 0.25, extraMinutes: 30, extraTimePct: 0.25, extraMissRisk: 0.05 }, // R13
 };
 
 export function capFor(distanceMiles: number): Cents {

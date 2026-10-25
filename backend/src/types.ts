@@ -9,7 +9,12 @@ export type AgentId =
   | "payments"
   | "reconciler"
   | "auditor"
-  | "orchestrator";
+  | "orchestrator"
+  | "discover"
+  | "heat"
+  | "pricing"
+  | "scheduler"
+  | "concierge";
 
 export type HumanRole = "traveler" | "organizer" | "controller";
 
@@ -38,7 +43,10 @@ export type EvidenceKind =
   | "bank_line"
   | "receipt"
   | "checkin"
-  | "refund";
+  | "refund"
+  | "price_watch"
+  | "heat_watch"
+  | "event_change";
 
 export interface Evidence {
   id: string;
@@ -113,6 +121,8 @@ export interface Trip {
   submittedAt?: string;
   decision?: Decision;
   arrivalMarginMin?: number;
+  co2eKg?: number; // per traveler for the chosen mode, from carbon.ts
+  co2eDriveAloneKg?: number; // same trip driven alone, the baseline for "avoided"
 }
 
 export type DecisionCode =
@@ -159,9 +169,9 @@ export interface Mandate {
 
 export interface InboxItem {
   id: string;
-  kind: "mandate_approval" | "reconcile";
+  kind: "mandate_approval" | "reconcile" | "notice";
   tripId: string;
-  meta: { code?: DecisionCode; amountCents?: Cents };
+  meta: { code?: DecisionCode; amountCents?: Cents; topic?: string };
   createdAt: string;
   askedOf: HumanRole;
   question: string;

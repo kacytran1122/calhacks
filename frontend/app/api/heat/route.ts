@@ -1,5 +1,6 @@
-import { heatMapAround } from "@smile/core";
+import { heatCall, heatMapAround, runAgent } from "@smile/core";
 import { NextResponse, type NextRequest } from "next/server";
+import { ensureState, fail } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
@@ -12,5 +13,10 @@ export async function GET(req: NextRequest) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return NextResponse.json({ error: "lat and lon are required" }, { status: 400 });
   if (Number.isNaN(new Date(at).getTime())) return NextResponse.json({ error: "at must be a date" }, { status: 400 });
   const radius = Number(p.get("radius") ?? 3);
-  return NextResponse.json(await heatMapAround({ lat, lon, at, radiusMiles: Number.isFinite(radius) ? radius : 3 }));
+  ensureState();
+  try {
+    return NextResponse.json(await runAgent(heatCall(`venue:${lat.toFixed(3)},${lon.toFixed(3)}`), () => heatMapAround({ lat, lon, at, radiusMiles: Number.isFinite(radius) ? radius : 3 })));
+  } catch (e) {
+    return fail(e);
+  }
 }

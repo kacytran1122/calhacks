@@ -152,6 +152,8 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
           </div>
           )}
 
+          {staff && snap.scheduler && <SchedulerPanel jobs={snap.scheduler} busy={busy} run={run} />}
+
           <div className="dk-panel">
             <div className="dk-ph">
               <h2>{staff ? "Needs a person" : "Waiting for you"}</h2>
@@ -252,6 +254,8 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
             </div>
           </div>
 
+          {snap.carbon && <EmissionsPanel carbon={snap.carbon} />}
+
           <div className="dk-panel">
             <div className="dk-ph">
               <h2>Trial balance</h2>
@@ -300,12 +304,116 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
   );
 }
 
+const kg = (v: number) => `${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 1 })} kg`;
+const every = (min: number) => (min % 60 === 0 ? `${min / 60} h` : `${min} min`);
+type JobRun = { results: ({ job: string; summary: string } | { job: string; error: string })[] };
+const jobsDone = (r: unknown) => (r as JobRun).results.map((x) => `${x.job}: ${"error" in x ? `failed (${x.error})` : x.summary}`).join(" · ") || "Nothing was due.";
+
+/** The jobs that wake the agents without anyone asking, and when each last ran. */
+function SchedulerPanel({ jobs, busy, run }: { jobs: NonNullable<Snap["scheduler"]>; busy: string | null; run: (l: string, fn: () => Promise<unknown>, ok?: (r: unknown) => string) => Promise<void> }) {
+  return (
+    <div className="dk-panel">
+      <div className="dk-ph">
+        <h2>Scheduler</h2>
+        <span className="dk-mut">{jobs.filter((j) => j.due).length} job(s) due</span>
+      </div>
+      <p className="dk-mut">
+        Wakes the agents on its own (<code>npm run scheduler</code>, or a cron calling <code>/api/scheduler/run</code>) and sends notices. It can’t approve, charge or change an amount.
+      </p>
+      <table className="dk-table tight">
+        <tbody>
+          {jobs.map((j) => (
+            <tr key={j.id}>
+              <td>
+                <b>{j.what}</b>
+                <br />
+                <span className="dk-mut">every {every(j.everyMinutes)} · last run {j.lastRun ? ago(j.lastRun) : "never"}</span>
+              </td>
+              <td className="r">
+                <button className="dk-btn ghost" disabled={!!busy} onClick={() => run(`job:${j.id}`, () => api<JobRun>("/api/scheduler/run", { jobs: [j.id] }), jobsDone)}>
+                  {busy === `job:${j.id}` ? "Running…" : j.due ? "Run (due)" : "Run now"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button className="dk-btn primary" disabled={!!busy} onClick={() => run("scheduler", () => api<JobRun>("/api/scheduler/run", {}), jobsDone)}>
+        {busy === "scheduler" ? "Waking the agents…" : "Run everything due"}
+      </button>
+    </div>
+  );
+}
+
+/** Organizer totals: what the chosen routes emit against every attendee driving alone. */
+function EmissionsPanel({ carbon }: { carbon: NonNullable<Snap["carbon"]> }) {
+  const more = carbon.avoidedKg < 0;
+  return (
+    <div className="dk-panel">
+      <div className="dk-ph">
+        <h2>Emissions</h2>
+        <span className="dk-mut">{carbon.trips} approved trip(s)</span>
+      </div>
+      <div className="dk-stats">
+        <div>
+          <div className="v num">{kg(carbon.avoidedKg)}</div>
+          <div className="l">CO₂e {more ? "more than" : "avoided versus"} every attendee driving alone{more ? "" : ` (${carbon.avoidedPct}%)`}</div>
+        </div>
+        <div>
+          <div className="v num">{kg(carbon.chosenKg)}</div>
+          <div className="l">emitted by the chosen routes (estimate)</div>
+        </div>
+      </div>
+      {carbon.byEvent.length > 0 && (
+        <table className="dk-table tight dk-carbon">
+          <thead>
+            <tr>
+              <th>Event</th>
+              <th className="r">Trips</th>
+              <th className="r">Emitted</th>
+              <th className="r">Avoided</th>
+            </tr>
+          </thead>
+          <tbody>
+            {carbon.byEvent.map((e) => (
+              <tr key={e.eventId}>
+                <td>{e.name}</td>
+                <td className="r num">{e.trips}</td>
+                <td className="r num">{kg(e.chosenKg)}</td>
+                <td className="r num">{e.avoidedKg < 0 ? `−${kg(e.avoidedKg)}` : kg(e.avoidedKg)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <details className="dk-method">
+        <summary>How this is calculated</summary>
+        <ul className="dk-ul">
+          {carbon.method.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+        <p className="dk-mut">
+          {carbon.sources.map((s, i) => (
+            <span key={s.url}>
+              {i > 0 && " · "}
+              <a href={s.url} target="_blank" rel="noreferrer">
+                {s.name}
+              </a>
+            </span>
+          ))}
+        </p>
+      </details>
+    </div>
+  );
+}
+
 type PlanOut = {
   approvalToken: string;
   trip: { id: string; state: string; quoteCents: number; mode: string; distanceMiles: number; travelerId: string };
   event: { name: string; venue: string; startsAt: string };
   evidence: { id: string; kind: string; source: string; status: string; provenance: string; fetchedAt: string; url?: string; data: Record<string, unknown>; note?: string }[];
-  routes: { options: { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean }[]; pick?: { mode: string }; cap: number; travelerBudgetCents?: number; blockReason?: string } | null;
+  routes: { options: { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string }[]; pick?: { mode: string }; pickReason?: string; cap: number; travelerBudgetCents?: number; blockReason?: string } | null;
   inbox: { id: string; question: string } | null;
 };
 
@@ -387,6 +495,7 @@ export function PlanPanel({ initialZip, busy, run }: { initialZip: string; busy:
                     <th>Option</th>
                     <th className="r">Cost</th>
                     <th className="r">P(miss kickoff)</th>
+                    <th className="r">CO₂e</th>
                     <th>Source</th>
                   </tr>
                 </thead>
@@ -398,14 +507,16 @@ export function PlanPanel({ initialZip, busy, run }: { initialZip: string; busy:
                       </td>
                       <td className="r num">{fmt(o.costCents)}{!o.withinCap && " ⚠ over cap"}{!o.withinBudget && " ⚠ over traveler budget"}</td>
                       <td className="r num" title={`${o.history.late} late of ${o.history.trips} past trips`}>{Math.round(o.pMiss * 100)}%</td>
+                      <td className="r num" title={o.co2eFormula}>{o.co2eKg !== undefined ? `${o.co2eKg} kg` : "—"}</td>
                       <td className="dk-mut">{o.costSource}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <p className="dk-mut">
-                {plan.trip.distanceMiles} mi one way · cap {fmt(plan.routes.cap)} (R1) · P(miss) is learned from this program’s past trips.
+                {plan.trip.distanceMiles} mi one way · cap {fmt(plan.routes.cap)} (R1) · P(miss) is learned from this program’s past trips · CO₂e per traveler from EPA emission factors × distance (hover for the formula).
               </p>
+              {plan.routes.pickReason && <p className="dk-mut">Why the pick: {plan.routes.pickReason}</p>}
               {plan.inbox && stage === "planned" && (
                 <div className="dk-q">
                   <span className="dk-tag">for traveler</span>

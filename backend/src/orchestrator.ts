@@ -1,4 +1,5 @@
 import { appendAudit } from "./audit";
+import { ROAD_DETOUR } from "./carbon";
 import { explain } from "./agents/auditor";
 import type { TravelConstraints } from "./agents/constraints";
 import { gatherEvidence } from "./agents/evidence";
@@ -52,6 +53,15 @@ function ask(state: State, trip: Trip, kind: InboxItem["kind"], askedOf: HumanRo
   state.inbox.push(item);
   appendAudit(state, { actor: orch, action: "human.asked", subject: trip.id, reason: `Asked ${askedOf}: ${question}`, refs: [item.id] });
   return item;
+}
+
+/**
+ * An FYI for a person (price moved, heat ahead, event date changed). One per topic, so a job that
+ * wakes every hour doesn't repeat itself. Notices carry no money and answering one approves nothing.
+ */
+export function notify(state: State, trip: Trip, askedOf: HumanRole, topic: string, text: string): InboxItem | null {
+  if (state.inbox.some((i) => i.kind === "notice" && i.tripId === trip.id && i.meta.topic === topic)) return null;
+  return ask(state, trip, "notice", askedOf, text, [{ id: "ok", label: "Got it" }], { topic });
 }
 
 export function applyDecision(state: State, trip: Trip, d: ReturnType<typeof decide>) {
@@ -125,6 +135,12 @@ export function answer(state: State, itemId: string, who: Answerer, option: stri
   if (!roleOk || !travelerOk) {
     appendAudit(state, { actor, action: "permission.denied", subject: trip.id, reason: `${who.id} (${who.role}) can't answer a question for ${item.askedOf}` });
     throw new PermissionDenied(`this question is for the ${item.askedOf}`);
+  }
+  if (item.kind === "notice") {
+    item.status = "answered";
+    item.answer = { by: who.id, option, note, at: new Date().toISOString() };
+    appendAudit(state, { actor, action: "notice.acknowledged", subject: trip.id, reason: item.meta.topic ?? item.question, refs: [item.id, who.id] });
+    return { tripId: trip.id, outcome: "noted" };
   }
   assertNotSelfApproval(state, who.id, trip.requestedBy, trip.id);
   if (item.meta.code === "block_self_approval") assertNotSelfApproval(state, who.id, trip.approvals.find((a) => a.by === trip.requestedBy)?.by ?? "", trip.id);
@@ -240,34 +256,43 @@ export async function planTrip(
   const g = await gatherEvidence(state, { tripId: trip.id, homeZip: args.zip, originText: args.originText, originCoordinates: args.originCoordinates, event: { ...(facts ?? { extractedBy: picked ? "json-ld" : "lens-hints", verified: Boolean(picked) }), name: event.name, venue: event.venue, city: event.city, startsAt: event.startsAt, lat: event.lat, lon: event.lon }, travelConstraintSummary: args.travelConstraints?.summary });
   if (g.miles === undefined) {
     appendAudit(state, { actor: orch, action: "plan.blocked", subject: trip.id, reason: "Couldn't compute distance (ZIP or venue location unavailable)", refs: g.evidence.map((e) => e.id) });
-    return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes: null, inbox: null };
+    return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes: null, carpool: null, inbox: null };
   }
   trip.distanceMiles = g.miles;
   trip.organizerCapCents = capFor(g.miles);
   const fareEv = g.evidence.find((e) => e.kind === "fare");
-  const routes = compareRoutes(state, { miles: g.miles, fares: g.fares, fareEvidenceId: fareEv?.id, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, includeSelfDrive: args.includeSelfDrive, deadlineCritical: Boolean(args.travelConstraints?.arriveBy || args.travelConstraints?.departAfter) });
+  const pool = carpoolFor(state, trip.id);
+  const routes = compareRoutes(state, {
+    miles: g.miles, fares: g.fares, fareEvidenceId: fareEv?.id, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, includeSelfDrive: args.includeSelfDrive,
+    deadlineCritical: Boolean(args.travelConstraints?.arriveBy || args.travelConstraints?.departAfter),
+    context: { roadMiles: g.roadMiles, from: g.homePoint, to: g.venuePoint, minutes: g.minutes, carpool: pool },
+  });
+  const pooled = routes.carbon.estimates.find((e) => e.mode === "carpool");
+  const carpool = { ...pool, perTravelerKg: pooled?.kg ?? null, driveAloneKg: routes.carbon.driveAloneKg, savedKgPerTraveler: pooled ? Math.round((routes.carbon.driveAloneKg - pooled.kg) * 10) / 10 : null, formula: pooled?.formula ?? null };
 
   authorize(state, { kind: "agent", id: "policy" }, "mandate.request", trip.id);
   if (!routes.pick) {
     if (routes.blockReason === "TRAVELER_BUDGET") {
       appendAudit(state, { actor: orch, action: "plan.blocked", subject: trip.id, reason: `No organizer-eligible route fits the traveler's ${fmt(args.travelerBudgetCents ?? 0)} personal budget`, refs: ["R1"] });
-      return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: null };
+      return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: null };
     }
     if (routes.blockReason === "MAX_DISTANCE") {
       appendAudit(state, { actor: orch, action: "plan.blocked", subject: trip.id, reason: `${g.miles} mi exceeds the traveler's ${args.maxDistanceMiles} mi search limit` });
-      return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: null };
+      return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: null };
     }
     if (routes.blockReason === "NO_VERIFIED_FARE") {
       appendAudit(state, { actor: orch, action: "plan.awaiting_fare", subject: trip.id, reason: "Live routes were found without an auditable total fare; no payment mandate was created", refs: g.evidence.map((e) => e.id) });
-      return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: null };
+      return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: null };
     }
     const q = ask(state, trip, "reconcile", "controller", `No option for ${g.homeLabel ?? args.zip} → ${event.name} fits the ${fmt(routes.cap)} cap (R1). Approve an exception?`, [{ id: "approve", label: "Approve exception" }, { id: "reject", label: "Decline" }], {});
-    return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: q };
+    return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: q };
   }
   trip.mode = routes.pick.mode;
   trip.quoteCents = routes.pick.costCents;
   trip.reimbursementEligibleCents = Math.min(trip.quoteCents, routes.cap);
-  state.evidence.push({ id: `EV-${trip.id}-quote`, tripId: trip.id, kind: "quote", source: "S'mile Route Analyst", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: { amountCents: trip.quoteCents, mode: trip.mode, costSource: routes.pick.costSource, pMiss: routes.pick.pMiss, organizerCapCents: routes.cap, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, reimbursementEligibleCents: trip.reimbursementEligibleCents } });
+  trip.co2eKg = routes.pick.co2eKg;
+  trip.co2eDriveAloneKg = routes.carbon.driveAloneKg;
+  state.evidence.push({ id: `EV-${trip.id}-quote`, tripId: trip.id, kind: "quote", source: "S'mile Route Analyst", fetchedAt: new Date().toISOString(), status: "ok", provenance: "live", data: { amountCents: trip.quoteCents, mode: trip.mode, costSource: routes.pick.costSource, pMiss: routes.pick.pMiss, organizerCapCents: routes.cap, travelerBudgetCents: args.travelerBudgetCents, maxDistanceMiles: args.maxDistanceMiles, reimbursementEligibleCents: trip.reimbursementEligibleCents, pickReason: routes.pickReason, co2eKg: routes.pick.co2eKg, co2eFormula: routes.pick.co2eFormula, co2eDriveAloneKg: routes.carbon.driveAloneKg, fastest: routes.fastest, lowestCarbon: routes.lowestCarbon } });
   const m = createMandate({ tripId: trip.id, maxCents: trip.quoteCents, merchantCategory: trip.mode === "drive" ? "fuel" : trip.mode === "bus" ? "bus" : "rail", requestedBy: "agent:policy" });
   state.mandates.push(m);
   trip.mandateId = m.id;
@@ -277,13 +302,13 @@ export async function planTrip(
     trip,
     "mandate_approval",
     "traveler",
-    `${trip.mode} for ${fmt(trip.quoteCents)} (cap ${fmt(capFor(g.miles))}, ${routes.pick.history.trips ? `${Math.round(routes.pick.pMiss * 100)}% chance of missing kickoff from ${routes.pick.history.trips} past trips` : "no trip history for this mode yet"})${args.travelConstraints ? `. Travel requirement: ${args.travelConstraints.summary}` : ""}. Approve exactly ${fmt(trip.quoteCents)}? Nothing is charged until you do.`,
+    `${trip.mode} for ${fmt(trip.quoteCents)} (cap ${fmt(capFor(g.miles))}, ${routes.pick.history.trips ? `${Math.round(routes.pick.pMiss * 100)}% chance of missing kickoff from ${routes.pick.history.trips} past trips` : "no trip history for this mode yet"}${routes.pick.co2eKg !== undefined ? `, about ${routes.pick.co2eKg} kg CO₂e` : ""})${args.travelConstraints ? `. Travel requirement: ${args.travelConstraints.summary}` : ""}. Approve exactly ${fmt(trip.quoteCents)}? Nothing is charged until you do.`,
     [{ id: "approve", label: `Approve ${fmt(trip.quoteCents)}` }, { id: "reject", label: "Not now" }],
     { amountCents: trip.quoteCents },
   );
   appendAudit(state, { actor: { kind: "agent", id: "policy" }, action: "mandate.requested", subject: trip.id, reason: `Requested ${fmt(trip.quoteCents)} single-use mandate; season budget remaining ${fmt(remaining)}`, refs: [m.id, "R1", "R7", ...g.evidence.map((e) => e.id)] });
   if (trip.quoteCents > POLICY.controllerThresholdCents) ask(state, trip, "reconcile", "controller", `Pre-approve ${fmt(trip.quoteCents)} (over the R3 threshold)?`, [{ id: "approve", label: "Approve" }, { id: "reject", label: "Reject" }], {});
-  return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: q };
+  return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: q };
 }
 
 export async function bookTrip(state: State, tripId: string, fareDeltaCents = 0) {
@@ -299,6 +324,23 @@ export async function bookTrip(state: State, tripId: string, fareDeltaCents = 0)
     ask(state, trip, "mandate_approval", "traveler", `The fare changed from ${fmt(trip.quoteCents)} to ${fmt(amount)} at checkout and the card declined it. Approve exactly ${fmt(amount)}?`, [{ id: "approve", label: `Approve ${fmt(amount)}` }, { id: "reject", label: "Cancel" }], { amountCents: amount });
   }
   return r;
+}
+
+/** Travelers per car, driver included. */
+const CAR_SEATS = 4;
+
+/**
+ * Nearby travelers to the same event who could share one car. The car drives this trip's route
+ * plus a pickup detour of ROAD_DETOUR × the straight-line distance to each rider.
+ */
+export function carpoolFor(state: State, tripId: string) {
+  const riders = buddiesFor(state, tripId).slice(0, CAR_SEATS - 1);
+  return {
+    riders: riders.map((r) => r.initials),
+    people: riders.length + 1,
+    detourMiles: Math.round(riders.reduce((a, r) => a + r.milesApart * ROAD_DETOUR, 0) * 10) / 10,
+    hypothetical: riders.length === 0,
+  };
 }
 
 export function buddiesFor(state: State, tripId: string, withinMiles = 15) {
