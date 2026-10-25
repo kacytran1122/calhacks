@@ -250,10 +250,11 @@ function fakePostgres() {
   const client: TourContributionPgClient = {
     async query(sql, values = []) {
       calls.push({ sql, values });
+      sql = sql.replace(/smile_photos\./g, "");
       let rows: Record<string, unknown>[] = [];
       if (sql === "BEGIN") snapshot = { contributions: new Map(contributions), photos: new Map(photos), attempts: new Map([...attempts].map(([key, row]) => [key, { ...row }])) };
       else if (sql === "ROLLBACK" && snapshot) ({ contributions, photos, attempts } = snapshot);
-      else if (sql === "COMMIT" || sql.startsWith("SELECT pg_advisory") || sql.startsWith("CREATE TABLE") || sql.startsWith("INSERT INTO contribution_settings")) {}
+      else if (sql === "COMMIT" || sql.startsWith("SELECT pg_advisory") || sql.startsWith("CREATE TABLE") || sql.startsWith("CREATE SCHEMA") || sql.startsWith("ALTER TABLE") || sql.startsWith("INSERT INTO contribution_settings")) {}
       else if (sql.startsWith("SELECT value FROM contribution_settings")) rows = [{ value: "a".repeat(64) }];
       else if (sql.startsWith("DELETE FROM contribution_attempts")) { for (const [key, row] of attempts) if (Number(row.created_at) < Number(values[0])) attempts.delete(key); }
       else if (sql.includes("COUNT(*) FILTER")) { const recent = [...attempts.values()].filter((row) => Number(row.created_at) > Number(values[1])); rows = [{ total: String(recent.length), own: String(recent.filter((row) => row.source === values[0]).length) }]; }
@@ -314,6 +315,71 @@ test("rolls PostgreSQL image failures back and never silently switches to disk s
   assert.deepEqual(fs.readdirSync(directory), []);
 });
 
+test("stores Supabase bytes in a private schema with no public or signed-in Data API access", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-tour-supabase-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(directory, async () => database.pool, { kind: "supabase" });
+  const ticket = await store.reserve("one");
+  const saved = await store.receive(ticket, await input());
+  assert.equal(saved.storage, "supabase");
+  assert.equal(store.maxStoredBytes, 256 * 1024 * 1024);
+  assert.equal(database.photos().size, 1);
+  assert.ok(database.calls.some(({ sql }) => sql.includes("CREATE SCHEMA IF NOT EXISTS smile_photos; REVOKE ALL ON SCHEMA smile_photos FROM PUBLIC")));
+  for (const table of ["contribution_settings", "contribution_attempts", "tour_contributions", "tour_contribution_photos"]) {
+    assert.ok(database.calls.some(({ sql }) => sql.includes(`ALTER TABLE smile_photos.${table} ENABLE ROW LEVEL SECURITY`)));
+    assert.ok(database.calls.some(({ sql }) => sql.includes(`CREATE TABLE IF NOT EXISTS smile_photos.${table}`)));
+  }
+  assert.ok(database.calls.some(({ sql }) => sql.includes("REVOKE ALL ON SCHEMA smile_photos FROM anon") && sql.includes("REVOKE ALL ON ALL TABLES IN SCHEMA smile_photos FROM authenticated") && sql.includes("REVOKE ALL ON ALL TABLES IN SCHEMA smile_photos FROM service_role")));
+  assert.equal(database.calls.some(({ sql }) => /(?:FROM|INTO|UPDATE|REFERENCES) (?:contribution_settings|contribution_attempts|tour_contributions|tour_contribution_photos)\b/.test(sql)), false);
+  assert.deepEqual(fs.readdirSync(directory), []);
+});
+
+test("enforces a photo-specific PostgreSQL quota before reserving or committing uploads", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-tour-pg-quota-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(directory, async () => database.pool, { kind: "supabase", maxStoredBytes: 1 });
+  const ticket = await store.reserve("one");
+  await assert.rejects(store.receive(ticket, await input()), status(503));
+  assert.equal(database.photos().size, 0);
+  assert.equal(database.contributions().size, 0);
+  database.contributions().set("full", { bytes: 1 });
+  await assert.rejects(store.reserve("two"), status(503));
+  for (const maxStoredBytes of [0, -1, NaN, 1.5, 256 * 1024 * 1024 + 1]) assert.throws(() => new PostgresTourContributionStore(directory, async () => database.pool, { kind: "supabase", maxStoredBytes }), status(503));
+});
+
+test("copies existing photos into the private Supabase schema and preserves SQLite receipts and bytes", async (t) => {
+  const local = fixture(t);
+  const saved = await submit(local, await input());
+  const db = new DatabaseSync(local.database);
+  const original = db.prepare("SELECT data FROM tour_contribution_photos WHERE contribution_id = ?").get(saved.receiptId) as { data: Uint8Array };
+  db.close();
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(local.directory, async () => database.pool, { kind: "supabase" });
+  await store.release(await store.reserve("one"));
+  assert.equal(database.contributions().get(saved.receiptId)?.event_name, saved.eventName);
+  assert.deepEqual(database.photos().get(`${saved.receiptId}:0`)?.data, Buffer.from(original.data));
+  assert.equal(fs.existsSync(local.database), true);
+  const restarted = new PostgresTourContributionStore(local.directory, async () => database.pool, { kind: "supabase" });
+  await restarted.release(await restarted.reserve("two"));
+  assert.equal(database.contributions().size, 1);
+  assert.equal(database.photos().size, 1);
+});
+
+test("rolls back an oversized migration without deleting the SQLite source", async (t) => {
+  const local = fixture(t);
+  const saved = await submit(local, await input());
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(local.directory, async () => database.pool, { kind: "supabase", maxStoredBytes: 1 });
+  await assert.rejects(store.reserve("one"), status(503));
+  assert.equal(database.contributions().size, 0);
+  assert.equal(database.photos().size, 0);
+  const db = new DatabaseSync(local.database);
+  assert.ok(db.prepare("SELECT data FROM tour_contribution_photos WHERE contribution_id = ?").get(saved.receiptId));
+  db.close();
+});
+
 test("copies existing SQLite and legacy photos into PostgreSQL without deleting either backup", async (t) => {
   const local = fixture(t);
   const id = "22222222-2222-4222-8222-222222222222";
@@ -332,6 +398,85 @@ test("copies existing SQLite and legacy photos into PostgreSQL without deleting 
   assert.equal(database.photos().size, 1);
 });
 
+test("migrates one consistent SQLite snapshot while a separate writer updates a later receipt", async (t) => {
+  const local = fixture(t);
+  const firstId = "22222222-2222-4222-8222-222222222222";
+  const secondId = "33333333-3333-4333-8333-333333333333";
+  await legacyContribution(local, firstId);
+  const original = await legacyContribution(local, secondId);
+  const replacement = (await normalizeTourPhotos([{ bytes: await sharp({ create: { width: 12, height: 8, channels: 3, background: "#123456" } }).png().toBuffer() }]))[0]!.bytes;
+  const database = fakePostgres();
+  let updated = false;
+  const pool: TourContributionPgPool = {
+    async connect() {
+      const client = await database.pool.connect();
+      return {
+        async query(sql, values = []) {
+          if (!updated && sql.startsWith("SELECT * FROM tour_contributions") && values[0] === firstId) {
+            const db = new DatabaseSync(local.database);
+            try {
+              db.exec("BEGIN IMMEDIATE");
+              const row = db.prepare("SELECT photos FROM tour_contributions WHERE id = ?").get(secondId) as { photos: string };
+              const manifest = JSON.parse(row.photos);
+              manifest[0].bytes = replacement.byteLength;
+              db.prepare("UPDATE tour_contribution_photos SET bytes = ?, data = ? WHERE contribution_id = ?").run(replacement.byteLength, replacement, secondId);
+              db.prepare("UPDATE tour_contributions SET event_name = 'Updated event', bytes = ?, photos = ? WHERE id = ?").run(replacement.byteLength, JSON.stringify(manifest), secondId);
+              db.exec("COMMIT");
+              updated = true;
+            } finally { db.close(); }
+          }
+          return client.query(sql, values);
+        },
+        release() { client.release(); },
+      };
+    },
+  };
+  const store = new PostgresTourContributionStore(local.directory, async () => pool);
+  await store.release(await store.reserve("one"));
+  assert.equal(updated, true);
+  assert.equal(database.contributions().get(secondId)?.event_name, "Legacy event");
+  assert.deepEqual(database.photos().get(`${secondId}:0`)?.data, original.bytes);
+  const db = new DatabaseSync(local.database);
+  const current = db.prepare("SELECT event_name, data FROM tour_contributions JOIN tour_contribution_photos ON id = contribution_id WHERE id = ?").get(secondId) as { event_name: string; data: Uint8Array };
+  db.close();
+  assert.equal(current.event_name, "Updated event");
+  assert.deepEqual(Buffer.from(current.data), replacement);
+});
+
+test("accepts equivalent migrated manifests regardless of object key order or JSON whitespace", async (t) => {
+  const local = fixture(t);
+  const id = "22222222-2222-4222-8222-222222222222";
+  await legacyContribution(local, id);
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(local.directory, async () => database.pool);
+  await store.release(await store.reserve("one"));
+  const row = database.contributions().get(id)!;
+  const photo = (row.photos as Record<string, unknown>[])[0]!;
+  row.photos = JSON.stringify([{ bytes: photo.bytes, height: photo.height, width: photo.width, file: photo.file }], null, 2);
+  const restarted = new PostgresTourContributionStore(local.directory, async () => database.pool);
+  await restarted.release(await restarted.reserve("two"));
+  assert.equal(database.contributions().size, 1);
+  assert.equal(database.photos().size, 1);
+});
+
+test("rejects a conflicting migrated manifest even when all stored image bytes match", async (t) => {
+  const local = fixture(t);
+  const id = "22222222-2222-4222-8222-222222222222";
+  const original = await legacyContribution(local, id);
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(local.directory, async () => database.pool);
+  await store.release(await store.reserve("one"));
+  const row = database.contributions().get(id)!;
+  const photo = (row.photos as Record<string, unknown>[])[0]!;
+  row.photos = [{ ...photo, width: Number(photo.width) + 1 }];
+  const restarted = new PostgresTourContributionStore(local.directory, async () => database.pool);
+  await assert.rejects(restarted.reserve("two"), status(503));
+  assert.equal(database.calls.at(-1)?.sql, "ROLLBACK");
+  assert.equal(database.contributions().size, 1);
+  assert.deepEqual(database.photos().get(`${id}:0`)?.data, original.bytes);
+  assert.deepEqual(fs.readFileSync(original.file), original.bytes);
+});
+
 test("keeps PostgreSQL empty if any legacy contribution is incomplete", async (t) => {
   const local = fixture(t);
   const original = await legacyContribution(local, "22222222-2222-4222-8222-222222222222");
@@ -344,13 +489,6 @@ test("keeps PostgreSQL empty if any legacy contribution is incomplete", async (t
   assert.deepEqual(fs.readFileSync(original.file), original.bytes);
 });
 
-test("selects the configured TigerData database before receiving uploads", () => {
-  const before = process.env.TIGER_DATABASE_URL;
-  process.env.TIGER_DATABASE_URL = "postgresql://user:unused@database.example/test?sslmode=require";
-  try { assert.equal(tourContributionStore().kind, "tigerdata"); }
-  finally { if (before === undefined) delete process.env.TIGER_DATABASE_URL; else process.env.TIGER_DATABASE_URL = before; }
-});
-
 test("selects an explicit database without silently falling back and rejects invalid settings", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-tour-provider-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -361,25 +499,52 @@ test("selects an explicit database without silently falling back and rejects inv
     import { tourContributionStore, TourContributionError } from ${JSON.stringify(source)};
     const unavailable = (error) => error instanceof TourContributionError && error.status === 503;
     process.env.TIGER_DATABASE_URL = "postgresql://user:unused@database.example/test?sslmode=require";
+    process.env.PHOTO_DATABASE_URL = "";
     process.env.TOUR_CONTRIBUTION_STORAGE = "sqlite";
     assert.equal(tourContributionStore().kind, "sqlite");
     process.env.TOUR_CONTRIBUTION_STORAGE = "tigerdata";
     assert.equal(tourContributionStore().kind, "tigerdata");
     process.env.TOUR_CONTRIBUTION_STORAGE = "";
-    assert.equal(tourContributionStore().kind, "tigerdata");
-    process.env.TIGER_DATABASE_URL = "";
     assert.equal(tourContributionStore().kind, "sqlite");
+    process.env.PHOTO_DATABASE_URL = "postgresql://photo-user:unused@photos.example/test?sslmode=verify-full";
+    assert.equal(tourContributionStore().kind, "postgres");
+    process.env.PHOTO_DATABASE_URL = "postgresql://photo-user:unused@aws-0-region.pooler.supabase.com/postgres?sslmode=verify-full";
+    assert.equal(tourContributionStore().kind, "supabase");
+    process.env.TOUR_CONTRIBUTION_STORAGE = "supabase";
+    assert.equal(tourContributionStore().kind, "supabase");
+    process.env.TIGER_DATABASE_URL = "";
+    assert.equal(tourContributionStore().kind, "supabase");
+    process.env.PHOTO_DATABASE_URL = "";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.TOUR_CONTRIBUTION_STORAGE = "postgres";
+    process.env.TIGER_DATABASE_URL = "postgresql://user:unused@database.example/test?sslmode=require";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.TIGER_DATABASE_URL = "";
     process.env.TOUR_CONTRIBUTION_STORAGE = "tigerdata";
     assert.throws(() => tourContributionStore(), unavailable);
+    process.env.PHOTO_DATABASE_URL = "https://private-user:private-password@photos.example/test";
+    process.env.TOUR_CONTRIBUTION_STORAGE = "supabase";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.PHOTO_DATABASE_URL = "postgresql://photo-user:unused@photos.example/test?sslmode=verify-full";
+    process.env.TIGER_DATABASE_CA_PEM = "invalid TigerData certificate must not affect photos";
+    assert.equal(tourContributionStore().kind, "supabase");
+    process.env.PHOTO_DATABASE_CA_PEM = "invalid photo certificate";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.PHOTO_DATABASE_CA_PEM = "";
+    process.env.PHOTO_DATABASE_MAX_BYTES = "0";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.PHOTO_DATABASE_MAX_BYTES = "268435457";
+    assert.throws(() => tourContributionStore(), unavailable);
+    process.env.PHOTO_DATABASE_MAX_BYTES = "";
     process.env.TOUR_CONTRIBUTION_STORAGE = "unknown";
     assert.throws(() => tourContributionStore(), unavailable);
     process.env.VERCEL = "1";
-    for (const provider of ["sqlite", "tigerdata", ""]) {
+    for (const provider of ["sqlite", "tigerdata", "postgres", "supabase", ""]) {
       process.env.TOUR_CONTRIBUTION_STORAGE = provider;
       assert.throws(() => tourContributionStore(), unavailable);
     }
   `;
-  execFileSync(process.execPath, ["--import", path.join(backend, "node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], { cwd: backend, env: { ...process.env, VERCEL: "", SMILE_DATA_DIR: directory }, timeout: 30_000, stdio: "pipe" });
+  execFileSync(process.execPath, ["--import", path.join(backend, "node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], { cwd: backend, env: { ...process.env, VERCEL: "", PHOTO_DATABASE_CA_PEM: "", PHOTO_DATABASE_CA_FILE: "", PHOTO_DATABASE_MAX_BYTES: "", TIGER_DATABASE_CA_PEM: "", TIGER_DATABASE_CA_FILE: "", SMILE_DATA_DIR: directory }, timeout: 30_000, stdio: "pipe" });
 });
 
 test("keeps certificate and hostname verification for every supported PostgreSQL TLS mode", () => {

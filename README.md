@@ -113,7 +113,8 @@ No production deployment occurs without an explicitly configured hosting environ
 | Bright Data | Live logged-out event, route, fare, and stop pages |
 | Hyphenate track | Our organizer finance implementation: evidence matching, exception routing, control totals, and close readiness; not a Hyphenate API integration |
 | Photon 2.0 | Private one-to-one `@smile` iMessage conversations and trip-scoped approval links |
-| TigerData | Time-series event snapshots and private venue-photo submissions, including the image bytes |
+| TigerData | Time-series event snapshots for detecting event-date and venue changes |
+| Neon | Independent private PostgreSQL storage adapter for venue-photo submissions and actual image bytes |
 | Visa | Traveler-approved fare binding, category and expiry controls, replay protection, and signed sandbox authorization with capture disabled |
 | Open-Meteo | Live forecast and ERA5 history for the venue heat map (no key) |
 | OpenStreetMap | Map tiles for the heat map; OSRM road distance and drive time |
@@ -135,11 +136,25 @@ Automated tests exercise direct-space filtering, explicit-mention filtering, pri
 
 LA Hacks opens the James West Alumni Center concept at `/tour`. Cal Hacks opens the Palace of Fine Arts concept at `/venue`. These are approximate visualizations, not verified current floor plans, event assignments, or accessible-navigation instructions. Other event cards link to `/tours/contribute` with the selected event prefilled instead of implying a tour is available.
 
-The contribution form accepts one to six JPEG, PNG, or WebP photos, with a combined input limit of 3 MiB. `/api/tours/contributions` validates and decodes the images and removes embedded metadata. `TOUR_CONTRIBUTION_STORAGE=sqlite` explicitly stores the submission and actual image bytes together as BLOBs in a private SQLite database under `SMILE_DATA_DIR`. This is the current production photo-storage mode on Railway's mounted volume. It does not affect TigerData event snapshots.
+The contribution form accepts one to six JPEG, PNG, or WebP photos, with a combined input limit of 3 MiB. `/api/tours/contributions` validates and decodes the images and removes embedded metadata. Photo storage has its own server-side configuration and does not affect TigerData event snapshots. `TOUR_CONTRIBUTION_STORAGE=sqlite` stores the submission and actual image bytes together as BLOBs in a private SQLite database under `SMILE_DATA_DIR` when local storage is selected.
 
-`TOUR_CONTRIBUTION_STORAGE=tigerdata` selects PostgreSQL BYTEA storage and requires `TIGER_DATABASE_URL`. When the storage selector is omitted, a configured TigerData URL selects PostgreSQL; otherwise SQLite is used. A failed configured database connection fails the upload rather than silently saving somewhere else. TigerData certificate and hostname checks remain enabled. If the provider requires a private CA, supply a provider-authenticated certificate through `TIGER_DATABASE_CA_PEM` or `TIGER_DATABASE_CA_FILE`, or the connection's `sslrootcert`; never disable verification or automatically trust an unverified server certificate. Production PostgreSQL photo activation is pending that trusted certificate.
+For a separate Neon Free photo database, configure these server-only variables on the persistent Railway web service:
 
-Legacy file-based submissions are imported without deleting their originals; incomplete legacy material stops the migration instead of losing a photo. Switching from SQLite to verified TigerData imports the existing database images and records transactionally, retaining the local originals.
+```text
+TOUR_CONTRIBUTION_STORAGE=postgres
+PHOTO_DATABASE_URL=<direct PostgreSQL URL from Neon Connect, with sslmode=verify-full>
+PHOTO_DATABASE_MAX_BYTES=268435456
+```
+
+In Neon Connect, select the intended production branch, database, and role, and turn connection pooling off to obtain the direct PostgreSQL URL. Keep the provider's exact hostname and credentials, and require `sslmode=verify-full`. The backend uses a small PostgreSQL connection pool and verifies both the certificate chain and hostname using its trusted system roots. Leave `PHOTO_DATABASE_CA_PEM` and `PHOTO_DATABASE_CA_FILE` empty unless the provider supplies an official custom CA bundle. Do not use an HTTP dashboard URL or API key as the database connection string. [Neon's secure-connection documentation](https://neon.com/docs/connect/connect-securely) explains certificate verification. These credentials do not belong in frontend variables, source control, screenshots, or chat. Verify the hosted connection, migration hashes, private grants, and a new production upload before considering a deployment complete.
+
+Photos live as PostgreSQL `BYTEA` in the private `smile_photos` schema. The adapter enables row-level security and revokes schema and table access from public and API roles. No public bucket, anonymous API key, or browser-side database client is needed. Set the photo payload quota to 256 MiB with `PHOTO_DATABASE_MAX_BYTES=268435456`, or lower it to leave more space for database overhead. Monitor the provider's actual database size and free-plan usage as well; the payload quota is not a guarantee that all database storage or compute stays within the plan. Free database compute can suspend when idle, so the first connection after inactivity may take longer.
+
+Supabase remains an optional alternative. Set `TOUR_CONTRIBUTION_STORAGE=supabase`, use its exact Session pooler PostgreSQL connection string on port 5432, and place the official certificate from Database Settings → SSL Configuration in `PHOTO_DATABASE_CA_PEM` or `PHOTO_DATABASE_CA_FILE`. Keep the private `smile_photos` schema out of the Data API. Supabase mode caps photo payloads at 256 MiB, and `PHOTO_DATABASE_MAX_BYTES` can lower that limit.
+
+When the selector is omitted, `PHOTO_DATABASE_URL` selects PostgreSQL, with Supabase hosts recognized automatically; without it, photos use SQLite. `TIGER_DATABASE_URL` remains dedicated to event history and does not redirect photo storage. Explicit legacy `TOUR_CONTRIBUTION_STORAGE=tigerdata` is still supported with that URL and `TIGER_DATABASE_CA_PEM` or `TIGER_DATABASE_CA_FILE`. Every configured photo database requires certificate and hostname verification, and a failed connection fails the upload rather than silently saving somewhere else. Never disable verification or automatically trust an unverified server certificate.
+
+Legacy file-based submissions are imported without deleting their originals; incomplete legacy material stops the migration instead of losing a photo. Switching from SQLite to verified PostgreSQL imports existing image bytes and records transactionally, retaining receipt IDs and local originals. Conflicting records or an exceeded quota roll back the migration. After a rolling cutover, compare source and destination receipts and image hashes once the old SQLite-writing instance has stopped, then rerun initialization if late source uploads need copying.
 
 The response confirms a durable submission reference, not a generated model. Material needs manual review and a separate modelling workflow before a tour can be published. Requests require explicit consent, pass an origin check, and are subject to shared storage, concurrency, and rate limits. There is no public image-download endpoint. Route `/api` to the persistent Railway service rather than an ephemeral Vercel filesystem.
 

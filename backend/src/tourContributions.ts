@@ -1,9 +1,11 @@
-import { createHmac, randomBytes, randomUUID, X509Certificate } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import sharp from "sharp";
 import { DATA_DIR } from "./store";
+import { tigerDatabasePgOptions, type TigerDatabaseTrust } from "./tigerConnection";
 
 export const TOUR_UPLOAD_LIMITS = {
   maxPhotos: 6,
@@ -35,7 +37,7 @@ export interface TourContributionReceipt {
   eventName: string;
   photoCount: number;
   status: "received";
-  storage: "tigerdata" | "sqlite";
+  storage: "tigerdata" | "sqlite" | "postgres" | "supabase";
   message: string;
 }
 
@@ -44,7 +46,7 @@ type PhotoManifest = { file: string; width: number; height: number; bytes: numbe
 type ContributionRow = { id: string; event_name: string; event_url: string; location: string; received_at: string; status: string; bytes: number; photos: string };
 
 export interface TourContributionStorage {
-  readonly kind: "sqlite" | "tigerdata";
+  readonly kind: TourContributionReceipt["storage"];
   reserve(source: string): string | Promise<string>;
   release(ticket: string): void | Promise<void>;
   receive(ticket: string, input: TourContributionInput): Promise<TourContributionReceipt>;
@@ -308,12 +310,26 @@ export interface TourContributionPgPool {
   connect(): Promise<TourContributionPgClient>;
 }
 
+type PostgresPhotoOptions = { kind?: "tigerdata" | "postgres" | "supabase"; maxStoredBytes?: number };
+
 export class PostgresTourContributionStore implements TourContributionStorage {
-  readonly kind = "tigerdata" as const;
+  readonly kind: "tigerdata" | "postgres" | "supabase";
+  readonly maxStoredBytes: number;
   private ready: Promise<void> | undefined;
 
-  constructor(readonly directory: string, private readonly pool: () => Promise<TourContributionPgPool>) {
+  constructor(readonly directory: string, private readonly pool: () => Promise<TourContributionPgPool>, options: PostgresPhotoOptions = {}) {
     if (!path.isAbsolute(directory)) throw new TourContributionError("Photo storage is not available right now. Please try again later.", 503);
+    this.kind = options.kind ?? "tigerdata";
+    this.maxStoredBytes = options.maxStoredBytes ?? (this.kind === "supabase" ? 256 * 1024 * 1024 : TOUR_UPLOAD_LIMITS.maxStoredBytes);
+    if (!Number.isSafeInteger(this.maxStoredBytes) || this.maxStoredBytes < 1 || this.maxStoredBytes > (this.kind === "supabase" ? 256 * 1024 * 1024 : TOUR_UPLOAD_LIMITS.maxStoredBytes)) throw new TourContributionError("Photo storage limits are not configured safely. Please try again later.", 503);
+  }
+
+  private scoped(client: TourContributionPgClient): TourContributionPgClient {
+    if (this.kind === "tigerdata") return client;
+    return {
+      query: (sql, values) => client.query(sql.replace(/\b(contribution_settings|contribution_attempts|tour_contributions|tour_contribution_photos)\b/g, "smile_photos.$1"), values),
+      release: () => client.release(),
+    };
   }
 
   private async transaction<T>(work: (client: TourContributionPgClient) => Promise<T>): Promise<T> {
@@ -321,7 +337,7 @@ export class PostgresTourContributionStore implements TourContributionStorage {
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(1984326761)");
-      const value = await work(client);
+      const value = await work(this.scoped(client));
       await client.query("COMMIT");
       return value;
     } catch (error) {
@@ -332,11 +348,31 @@ export class PostgresTourContributionStore implements TourContributionStorage {
 
   private async initialize(): Promise<void> {
     this.ready ??= this.transaction(async (client) => {
+      if (this.kind !== "tigerdata") await client.query("CREATE SCHEMA IF NOT EXISTS smile_photos; REVOKE ALL ON SCHEMA smile_photos FROM PUBLIC;");
       await client.query(`CREATE TABLE IF NOT EXISTS contribution_settings (id TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS contribution_attempts (id TEXT PRIMARY KEY, source TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL);
         CREATE INDEX IF NOT EXISTS contribution_attempt_time ON contribution_attempts (created_at);
         CREATE TABLE IF NOT EXISTS tour_contributions (id TEXT PRIMARY KEY, event_name TEXT NOT NULL, event_url TEXT NOT NULL, location TEXT NOT NULL, received_at TEXT NOT NULL, status TEXT NOT NULL, bytes BIGINT NOT NULL, photos JSONB NOT NULL);
         CREATE TABLE IF NOT EXISTS tour_contribution_photos (contribution_id TEXT NOT NULL REFERENCES tour_contributions(id), position INTEGER NOT NULL, file TEXT NOT NULL, content_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, bytes BIGINT NOT NULL CHECK(bytes > 0), data BYTEA NOT NULL CHECK(octet_length(data) = bytes), PRIMARY KEY (contribution_id, position));`);
+      if (this.kind !== "tigerdata") await client.query(`ALTER TABLE contribution_settings ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE contribution_attempts ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE tour_contributions ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE tour_contribution_photos ENABLE ROW LEVEL SECURITY;
+        REVOKE ALL ON ALL TABLES IN SCHEMA smile_photos FROM PUBLIC;
+        DO $private_photos$ BEGIN
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            REVOKE ALL ON SCHEMA smile_photos FROM anon;
+            REVOKE ALL ON ALL TABLES IN SCHEMA smile_photos FROM anon;
+          END IF;
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            REVOKE ALL ON SCHEMA smile_photos FROM authenticated;
+            REVOKE ALL ON ALL TABLES IN SCHEMA smile_photos FROM authenticated;
+          END IF;
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+            REVOKE ALL ON SCHEMA smile_photos FROM service_role;
+            REVOKE ALL ON ALL TABLES IN SCHEMA smile_photos FROM service_role;
+          END IF;
+        END $private_photos$;`);
       await client.query("INSERT INTO contribution_settings (id, value) VALUES ('rate_salt', $1) ON CONFLICT (id) DO NOTHING", [randomBytes(32).toString("hex")]);
       await this.migrate(client);
     });
@@ -350,18 +386,30 @@ export class PostgresTourContributionStore implements TourContributionStorage {
     await local.prepare();
     const db = new DatabaseSync(local.database);
     try {
+      db.exec("BEGIN");
       const contributions = db.prepare("SELECT * FROM tour_contributions").all() as ContributionRow[];
+      const used = (await client.query("SELECT COUNT(*) AS total, COALESCE(SUM(bytes), 0) AS bytes FROM tour_contributions")).rows[0]!;
+      let total = Number(used.total);
+      let storedBytes = Number(used.bytes);
       for (const row of contributions) {
         const photos = db.prepare("SELECT * FROM tour_contribution_photos WHERE contribution_id = ? ORDER BY position").all(row.id) as { position: number; file: string; content_type: string; width: number; height: number; bytes: number; data: Uint8Array }[];
         const existing = (await client.query("SELECT * FROM tour_contributions WHERE id = $1", [row.id])).rows[0];
         if (existing) {
           const stored = (await client.query("SELECT * FROM tour_contribution_photos WHERE contribution_id = $1 ORDER BY position", [row.id])).rows;
-          if (["event_name", "event_url", "location", "received_at", "status"].some((key) => existing[key] !== row[key as keyof ContributionRow]) || Number(existing.bytes) !== Number(row.bytes) || stored.length !== photos.length || stored.some((photo, index) => Number(photo.position) !== photos[index]!.position || photo.file !== photos[index]!.file || photo.content_type !== photos[index]!.content_type || Number(photo.width) !== photos[index]!.width || Number(photo.height) !== photos[index]!.height || Number(photo.bytes) !== photos[index]!.bytes || !Buffer.from(photo.data as Uint8Array).equals(Buffer.from(photos[index]!.data)))) throw new Error("Conflicting legacy contribution");
+          const manifest = typeof existing.photos === "string" ? JSON.parse(existing.photos) : existing.photos;
+          if (!isDeepStrictEqual(manifest, JSON.parse(row.photos)) || ["event_name", "event_url", "location", "received_at", "status"].some((key) => existing[key] !== row[key as keyof ContributionRow]) || Number(existing.bytes) !== Number(row.bytes) || stored.length !== photos.length || stored.some((photo, index) => Number(photo.position) !== photos[index]!.position || photo.file !== photos[index]!.file || photo.content_type !== photos[index]!.content_type || Number(photo.width) !== photos[index]!.width || Number(photo.height) !== photos[index]!.height || Number(photo.bytes) !== photos[index]!.bytes || !Buffer.from(photo.data as Uint8Array).equals(Buffer.from(photos[index]!.data)))) throw new Error("Conflicting legacy contribution");
           continue;
         }
+        total++;
+        storedBytes += Number(row.bytes);
+        if (total > TOUR_UPLOAD_LIMITS.maxContributions || storedBytes > this.maxStoredBytes) throw new Error("Legacy photos exceed the photo database quota");
         await client.query("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)", [row.id, row.event_name, row.event_url, row.location, row.received_at, row.status, row.bytes, row.photos]);
         for (const photo of photos) await client.query("INSERT INTO tour_contribution_photos (contribution_id, position, file, content_type, width, height, bytes, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [row.id, photo.position, photo.file, photo.content_type, photo.width, photo.height, photo.bytes, Buffer.from(photo.data)]);
       }
+      db.exec("COMMIT");
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw error;
     } finally { db.close(); }
   }
 
@@ -379,7 +427,7 @@ export class PostgresTourContributionStore implements TourContributionStorage {
         if (Number(recent.own) >= 5 || Number(recent.total) >= 50) throw new TourContributionError("We have received several uploads recently. Please try again in an hour.", 429, 3600);
         if (Number(active.total) >= 3) throw new TourContributionError("Other photos are being processed. Please try again in a minute.", 429, 60);
         const used = (await client.query("SELECT COUNT(*) AS total, COALESCE(SUM(bytes), 0) AS bytes FROM tour_contributions")).rows[0]!;
-        if (Number(used.total) >= TOUR_UPLOAD_LIMITS.maxContributions || Number(used.bytes) >= TOUR_UPLOAD_LIMITS.maxStoredBytes) throw new TourContributionError("Photo contributions are temporarily full. Please try again later.", 503);
+        if (Number(used.total) >= TOUR_UPLOAD_LIMITS.maxContributions || Number(used.bytes) >= this.maxStoredBytes) throw new TourContributionError("Photo contributions are temporarily full. Please try again later.", 503);
         const id = randomUUID();
         await client.query("INSERT INTO contribution_attempts (id, source, created_at, expires_at) VALUES ($1, $2, $3, $4)", [id, key, now, now + 120_000]);
         return id;
@@ -405,7 +453,7 @@ export class PostgresTourContributionStore implements TourContributionStorage {
         if (!reservation || Number(reservation.expires_at) <= Date.now()) throw new TourContributionError("The upload session expired. Please submit your photos again.", 409);
         const bytes = photos.reduce((total, photo) => total + photo.bytes.byteLength, 0);
         const used = (await client.query("SELECT COUNT(*) AS total, COALESCE(SUM(bytes), 0) AS bytes FROM tour_contributions")).rows[0]!;
-        if (Number(used.total) >= TOUR_UPLOAD_LIMITS.maxContributions || Number(used.bytes) + bytes > TOUR_UPLOAD_LIMITS.maxStoredBytes) throw new TourContributionError("Photo contributions are temporarily full. Please try again later.", 503);
+        if (Number(used.total) >= TOUR_UPLOAD_LIMITS.maxContributions || Number(used.bytes) + bytes > this.maxStoredBytes) throw new TourContributionError("Photo contributions are temporarily full. Please try again later.", 503);
         const id = randomUUID();
         const manifest = manifestFor(photos);
         await client.query("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES ($1, $2, $3, $4, $5, 'received', $6, $7::jsonb)", [id, fields.eventName, fields.eventUrl, fields.location, new Date().toISOString(), bytes, JSON.stringify(manifest)]);
@@ -422,36 +470,9 @@ export class PostgresTourContributionStore implements TourContributionStorage {
 
 const postgresStores = new Map<string, PostgresTourContributionStore>();
 
-function certificateFile(file: string): string {
-  if (!file || fs.statSync(file).size > 1024 * 1024) throw new Error("Invalid certificate file");
-  return fs.readFileSync(file, "utf8");
-}
-
-function certificateBundle(value: string): string {
-  const pem = value.replace(/\\n/g, "\n").trim();
-  if (Buffer.byteLength(pem) > 1024 * 1024) throw new Error("Invalid certificate bundle");
-  const certificates = [...pem.matchAll(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g)];
-  if (!certificates.length || certificates.length > 64) throw new Error("Invalid certificate bundle");
-  for (const [certificate] of certificates) new X509Certificate(certificate);
-  return pem;
-}
-
-export function tourContributionPgOptions(url: string, trust: { caPem?: string; caFile?: string } = { caPem: process.env.TIGER_DATABASE_CA_PEM, caFile: process.env.TIGER_DATABASE_CA_FILE }) {
+export function tourContributionPgOptions(url: string, trust: TigerDatabaseTrust = { caPem: process.env.PHOTO_DATABASE_CA_PEM, caFile: process.env.PHOTO_DATABASE_CA_FILE }) {
   try {
-    const connection = new URL(url);
-    const mode = connection.searchParams.get("sslmode");
-    const sslValue = connection.searchParams.get("ssl");
-    if (!["postgres:", "postgresql:"].includes(connection.protocol) || (mode !== null && !["prefer", "require", "verify-ca", "verify-full"].includes(mode)) || (sslValue !== null && !["true", "1"].includes(sslValue))) throw new Error("Invalid TLS settings");
-    const ssl: { rejectUnauthorized: boolean; ca?: string; cert?: string; key?: string } = { rejectUnauthorized: true };
-    const rootFile = connection.searchParams.get("sslrootcert");
-    const customCa = rootFile ? certificateFile(rootFile) : trust.caPem?.trim() ? trust.caPem : trust.caFile?.trim() ? certificateFile(trust.caFile) : undefined;
-    if (customCa) ssl.ca = certificateBundle(customCa);
-    const certFile = connection.searchParams.get("sslcert");
-    const keyFile = connection.searchParams.get("sslkey");
-    if (certFile) ssl.cert = certificateFile(certFile);
-    if (keyFile) ssl.key = certificateFile(keyFile);
-    for (const parameter of ["sslmode", "ssl", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat"]) connection.searchParams.delete(parameter);
-    return { connectionString: connection.toString(), ssl, max: 3, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000, statement_timeout: 30_000 };
+    return tigerDatabasePgOptions(url, trust);
   } catch {
     throw new TourContributionError("Photo database connection settings require verified TLS and a valid trusted CA certificate when configured.", 503);
   }
@@ -460,19 +481,28 @@ export function tourContributionPgOptions(url: string, trust: { caPem?: string; 
 export function tourContributionStore(): TourContributionStorage {
   if (process.env.VERCEL) throw new TourContributionError("Photo uploads need the persistent application service. Please try again later.", 503);
   const storage = process.env.TOUR_CONTRIBUTION_STORAGE?.trim();
-  if (storage && !["sqlite", "tigerdata"].includes(storage)) throw new TourContributionError("Photo storage settings are not available right now. Please try again later.", 503);
+  if (storage && !["sqlite", "tigerdata", "postgres", "supabase"].includes(storage)) throw new TourContributionError("Photo storage settings are not available right now. Please try again later.", 503);
   const directory = path.join(DATA_DIR, "tour-contributions");
-  const url = process.env.TIGER_DATABASE_URL?.trim();
-  if (storage === "tigerdata" && !url) throw new TourContributionError("The photo database connection is not configured. Please try again later.", 503);
-  if (storage === "sqlite" || !url) return new TourContributionStore(directory);
-  let store = postgresStores.get(url);
+  const photoUrl = process.env.PHOTO_DATABASE_URL?.trim();
+  let kind = storage || (photoUrl ? "postgres" : "sqlite");
+  if (!storage && photoUrl) {
+    try { if (/(?:^|\.)supabase\.(?:co|com)$/.test(new URL(photoUrl).hostname)) kind = "supabase"; } catch {}
+  }
+  if (kind === "sqlite") return new TourContributionStore(directory);
+  const url = kind === "tigerdata" ? process.env.TIGER_DATABASE_URL?.trim() : photoUrl;
+  if (!url) throw new TourContributionError("The photo database connection is not configured. Please try again later.", 503);
+  const trust = kind === "tigerdata" ? { caPem: process.env.TIGER_DATABASE_CA_PEM, caFile: process.env.TIGER_DATABASE_CA_FILE } : { caPem: process.env.PHOTO_DATABASE_CA_PEM, caFile: process.env.PHOTO_DATABASE_CA_FILE };
+  const options = tourContributionPgOptions(url, trust);
+  const maxStoredBytes = process.env.PHOTO_DATABASE_MAX_BYTES?.trim() ? Number(process.env.PHOTO_DATABASE_MAX_BYTES) : undefined;
+  const key = JSON.stringify([kind, url, trust, maxStoredBytes]);
+  let store = postgresStores.get(key);
   if (!store) {
     let pool: Promise<TourContributionPgPool> | undefined;
     store = new PostgresTourContributionStore(directory, () => pool ??= (async () => {
       const { default: pg } = await import("pg");
-      return new pg.Pool(tourContributionPgOptions(url));
-    })());
-    postgresStores.set(url, store);
+      return new pg.Pool(options);
+    })(), { kind: kind as "tigerdata" | "postgres" | "supabase", maxStoredBytes });
+    postgresStores.set(key, store);
   }
   return store;
 }
