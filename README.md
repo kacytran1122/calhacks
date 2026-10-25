@@ -143,7 +143,7 @@ Legacy file-based submissions are imported without deleting their originals; inc
 
 The response confirms a durable submission reference, not a generated model. Material needs manual review and a separate modelling workflow before a tour can be published. Requests require explicit consent, pass an origin check, and are subject to shared storage, concurrency, and rate limits. There is no public image-download endpoint. Route `/api` to the persistent Railway service rather than an ephemeral Vercel filesystem.
 
-`npm run dev --prefix frontend` and `npm run build --prefix frontend` build the local Three.js viewer automatically. The LA Hacks model is a checked-in GLB; the Cal Hacks walkthrough generates its scene in code. Runtime scripts and model files are served locally rather than loaded from a third-party script CDN.
+The `/tour` experience is a native React and TypeScript client route bundled by Next.js, with its Three.js scene lifecycle contained inside the route. The LA Hacks model is a checked-in GLB; the Cal Hacks walkthrough generates its scene in code. Runtime scripts and model files are served locally rather than loaded from a third-party script CDN. The former `/3d-tour/index.html` address permanently redirects to `/tour` for existing bookmarks.
 
 ## Price prediction and heat map
 

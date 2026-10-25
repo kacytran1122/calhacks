@@ -4,15 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "npm run tour:build",
     "dev": "next dev -H 127.0.0.1 -p 3000",
-    "prebuild": "npm run tour:build",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
     "typecheck": "tsc --noEmit && tsc --noEmit -p extension/tsconfig.json",
     "test": "npm run test:frontend --prefix ../tests",
-    "extension:build": "esbuild extension/src/background.ts extension/src/content.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist",
-    "tour:build": "esbuild 3d-tour/viewer.js --bundle --format=esm --target=es2022 --outfile=public/3d-tour/viewer.js --minify"
+    "extension:build": "esbuild extension/src/background.ts extension/src/content.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist"
   },
   "dependencies": {
     "@smile/core": "file:../backend",

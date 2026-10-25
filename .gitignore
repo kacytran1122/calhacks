@@ -4,7 +4,6 @@ backend/.data/
 backend/.env
 frontend/.env.local
 frontend/extension/dist/
-frontend/public/3d-tour/viewer.js
 cache/
 *.log
 .DS_Store

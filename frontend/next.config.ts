@@ -13,6 +13,15 @@ const config: NextConfig = {
   outputFileTracingRoot: path.resolve(process.cwd(), ".."),
   turbopack: { root: path.resolve(process.cwd(), "..") },
   transpilePackages: ["@smile/core"],
+  async redirects() {
+    return [
+      {
+        source: "/3d-tour/index.html",
+        destination: "/tour",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     const apiProxy = backendOrigin
       ? [
