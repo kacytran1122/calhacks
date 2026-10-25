@@ -73,13 +73,13 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
     setLocationError(null);
     try {
       const position = await new Promise<GeolocationPosition>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5_000, maximumAge: 0 }),
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 20_000, maximumAge: 300_000 }),
       );
       const coordinates = { lat: position.coords.latitude, lon: position.coords.longitude };
       if (pendingOrigin) onNavigate(findUrl({ ...pendingOrigin, label: "Current location" }, coordinates));
     } catch (error) {
       const code = (error as GeolocationPositionError).code;
-      setLocationError(code === 1 ? "Location access is blocked in the browser. Allow it and try again, or use the location you entered." : "We couldn’t get your current location within five seconds. Try again, or use the location you entered.");
+      setLocationError(code === 1 ? "Location access is blocked in the browser. Allow it and try again, or use the location you entered." : "We couldn’t get a location from this device. Check that Location Services are on, then try again or use the location you entered.");
     } finally {
       setLocating(false);
     }
@@ -153,6 +153,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
             <h2 id="location-modal-title">Allow location access?</h2>
             <p>S’mile can use your current location once to find events closest to you.</p>
             <small>Your precise location is not saved.</small>
+            {locating && <div className="location-modal-progress" role="status">Getting your location from the browser. This can take up to 20 seconds.</div>}
             {locationError && <div className="location-modal-error" role="alert">{locationError}</div>}
             <div className="location-modal-actions">
               <button type="button" className="location-skip" onClick={continueWithEnteredLocation}>Use {pendingOrigin.label} instead</button>

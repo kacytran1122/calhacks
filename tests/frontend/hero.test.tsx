@@ -59,6 +59,7 @@ describe("landing origin picker", () => {
     expect(getCurrentPosition).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Allow location" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=60601&origin=Current%20location&gps=1&lat=40.95&lon=-90.37"));
+    expect(getCurrentPosition).toHaveBeenCalledWith(expect.any(Function), expect.any(Function), { enableHighAccuracy: true, timeout: 20_000, maximumAge: 300_000 });
   });
 
   test("falls back to the entered location when browser permission is denied", async () => {
