@@ -11,7 +11,7 @@ export default function PrivacyPage() {
       <article style={{ maxWidth: 760, margin: "0 auto", lineHeight: 1.65 }}>
         <a href="/" style={{ color: "#29163d", fontWeight: 900, textDecoration: "none", fontSize: "1.2rem" }}>s’☺mile</a>
         <h1 style={{ fontSize: "clamp(2.4rem, 8vw, 4.8rem)", lineHeight: .96, letterSpacing: "-.055em", margin: "2rem 0 1rem" }}>Trip Planner privacy</h1>
-        <p style={{ color: "#6f6075", fontSize: "1.05rem" }}>Last updated October 24, 2026</p>
+        <p style={{ color: "#6f6075", fontSize: "1.05rem" }}>Last updated October 25, 2026</p>
         <p>S’mile Trip Planner has one purpose: build the fastest route and clear alternatives from a traveler’s chosen starting point to the collegiate hackathon they are viewing.</p>
 
         <section style={sectionStyle}>
@@ -30,8 +30,14 @@ export default function PrivacyPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>What S’mile does not access</h2>
-          <p>S’mile does not read cookies, passwords, account information, private messages, browsing history, form entries, financial information, or pages that you have not opened. On sites other than the MLH season schedule, it reads the active page only after you click the extension.</p>
+          <h2 style={headingStyle}>What the extension does not access</h2>
+          <p>The extension does not read cookies, passwords, account information, private messages, browsing history, form entries, financial information, or pages that you have not opened. On sites other than the MLH season schedule, it reads the active page only after you click the extension.</p>
+        </section>
+
+        <section style={sectionStyle}>
+          <h2 style={headingStyle}>Optional iMessage conversations</h2>
+          <p>If you add S’mile’s Photon number to an iMessage conversation, the agent responds only to messages that explicitly mention @smile. Photon delivers those messages to S’mile, and the message and relevant saved conversation history may be sent to Anthropic to prepare a reply. The extension does not read your Messages app.</p>
+          <p>S’mile saves a limited conversation history, each sender’s travel preferences and follow-up answers, selected events, and message results on its persistent server so context survives restarts and retries do not create duplicate trips. Sender and group identifiers are hashed for internal chat storage, but anything you type in a message can still contain personal information. Saved message results and trip records remain until removed by an administrator; please use the contact below for a deletion request. Approval links are sent privately to the requesting traveler and should not be forwarded.</p>
         </section>
 
         <section style={sectionStyle}>

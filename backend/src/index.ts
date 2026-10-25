@@ -6,6 +6,7 @@ export * from "../hyphenate/ledger";
 export * from "./permissions";
 export * from "../hyphenate/financeControls";
 export * from "./store";
+export * from "./chatStore";
 export { login, logout, userForSession, ensureUsers, issueTripToken, travelerForTripToken, assertClaimMatches, TooManyAttempts, type User } from "./auth";
 export * from "./llm";
 export { buildSeed } from "./seed/trips";
@@ -19,7 +20,7 @@ export { reviewTravelConstraints, fallbackTravelConstraints, TravelConstraintsSc
 export { discoverEvents, discoverCall, type DiscoverResult, type DiscoverOptions, type EventGroup } from "./agents/discover";
 export { eventStore, type EventListing } from "./eventStore";
 export { chargeTrip } from "../visa/payments";
-export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, carpoolFor, notify, type PickedEvent } from "./orchestrator";
+export { tick, answer, applyDecision, planTrip, cachedTripPlan, bookTrip, buddiesFor, carpoolFor, notify, PlanRequestConflict, type PlanTripArgs, type PlanTripResult, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";
 export { liveGoogleFlightQuote, googleFlightsUrl, dayBefore, type LiveFlightQuote } from "./integrations/googleFlights";
@@ -32,6 +33,6 @@ export { estimateRideshare, estimateAirfare, airportsNear, modelCard, predictRan
 export { heatMapAround, heatCall, scoreCells, severityFor, confidenceFor, gridAround, ANOMALY_THRESHOLD_F, type HeatMap, type HeatCell } from "./agents/heat";
 export { estimatePrices, checkFlightPrice, pricingCall, flightPriceCall, type PriceEstimate, type FlightPriceCheck } from "./agents/pricing";
 export { runAgent, runAgentIn, type AgentCall } from "./agents/run";
-export { converse, amountsGrounded, TOOLS as CONCIERGE_TOOLS, type ConciergeInput, type ConciergeOutput, type ConciergePlan, type ConciergeDeps } from "./agents/concierge";
+export { converse, amountsGrounded, prepareChatTravel, updateChatTravelMemory, TOOLS as CONCIERGE_TOOLS, type ChatTravelMemory, type ConciergeInput, type ConciergeOutput, type ConciergePlan, type ConciergeDeps } from "./agents/concierge";
 export { runDue, runJob, dueJobs, priceWatchTargets, JOBS, type JobId, type JobResult, type SchedulerDeps } from "./scheduler";
 export { compareCarbon, estimateCarbon, organizerCarbon, tripCarbon, FACTORS as EMISSION_FACTORS, CARBON_SOURCES, CARBON_METHOD, type CarbonEstimate, type CarbonComparison, type OrganizerCarbon } from "./carbon";

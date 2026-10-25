@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appendAudit } from "../hyphenate/audit";
 import { ROAD_DETOUR } from "./carbon";
 import { explain } from "../hyphenate/agents/auditor";
@@ -221,10 +222,40 @@ export interface PickedEvent {
   url?: string;
 }
 
-export async function planTrip(
-  state: State,
-  args: { zip: string; originText?: string; originCoordinates?: { lat: number; lon: number }; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; travelConstraints?: TravelConstraints & { raw: string } },
-) {
+export type PlanTripArgs = { zip: string; originText?: string; originCoordinates?: { lat: number; lon: number }; eventUrl?: string; hints?: LensHints; initials?: string; event?: PickedEvent; travelerBudgetCents?: Cents; maxDistanceMiles?: number; includeSelfDrive?: boolean; travelConstraints?: TravelConstraints & { raw: string }; requestKey?: string };
+export type PlanTripResult = Awaited<ReturnType<typeof createTripPlan>>;
+
+export class PlanRequestConflict extends Error {}
+
+export function cachedTripPlan(state: State, requestKey: string) {
+  const key = createHash("sha256").update(requestKey).digest("hex");
+  const previous = state.planningReceipts?.[key];
+  return previous ? structuredClone({ result: previous.result, createdAt: previous.createdAt }) : undefined;
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)]));
+  return value;
+}
+
+export async function planTrip(state: State, args: PlanTripArgs): Promise<PlanTripResult> {
+  if (!args.requestKey) return createTripPlan(state, args);
+  if (args.requestKey.length > 500) throw new Error("The trip request identifier is too long.");
+  const { requestKey, ...details } = args;
+  const key = createHash("sha256").update(requestKey).digest("hex");
+  const fingerprint = createHash("sha256").update(JSON.stringify(canonical(details))).digest("hex");
+  const previous = state.planningReceipts?.[key];
+  if (previous) {
+    if (previous.fingerprint !== fingerprint) throw new PlanRequestConflict("This message already requested a different trip. Send a new @smile message to change the plan.");
+    return structuredClone(previous.result);
+  }
+  const result = await createTripPlan(state, details);
+  (state.planningReceipts ??= {})[key] = { fingerprint, createdAt: new Date().toISOString(), result: structuredClone(result) };
+  return result;
+}
+
+async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey">) {
   const travelerId = newId("T-live");
   state.travelers.push({ id: travelerId, initials: args.initials ?? "YOU", school: "Lens user", homeZip: args.zip });
 

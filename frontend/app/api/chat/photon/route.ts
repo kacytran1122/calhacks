@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { ChatBusy, ChatReplayConflict, ChatStorageUnavailable } from "@smile/core";
 import { handleMessage } from "@/lib/chat";
 
 export const dynamic = "force-dynamic";
@@ -16,14 +17,39 @@ export async function POST(req: Request) {
   const supplied = req.headers.get("x-smile-photon-secret") ?? "";
   if (!expected) return NextResponse.json({ error: "Photon bridge is not configured" }, { status: 503 });
   if (!same(supplied, expected)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const configuredProject = process.env.PHOTON_PROJECT_ID;
+  if (!configuredProject || !/^pho_prj_[A-Za-z0-9_-]+$/.test(configuredProject))
+    return NextResponse.json({ error: "Photon project is not configured" }, { status: 503 });
 
-  const body = (await req.json()) as { spaceId?: string; senderId?: string; text?: string };
-  if (!body.spaceId || !body.senderId || !body.text?.trim()) return NextResponse.json({ error: "spaceId, senderId and text are required" }, { status: 400 });
-  if (body.spaceId.length > 200 || body.senderId.length > 200 || body.text.length > 4_000) return NextResponse.json({ error: "Photon message is too large" }, { status: 413 });
+  let raw: unknown;
+  try { raw = await req.json(); } catch { return NextResponse.json({ error: "A valid JSON message is required" }, { status: 400 }); }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NextResponse.json({ error: "A message object is required" }, { status: 400 });
+  const body = raw as Record<string, unknown>;
+  const { projectId, messageId, spaceId, senderId, text } = body;
+  if ([projectId, messageId, spaceId, senderId, text].some((value) => typeof value !== "string") || !(text as string).trim())
+    return NextResponse.json({ error: "projectId, messageId, spaceId, senderId and text are required" }, { status: 400 });
+  if ((text as string).length > 4_000 || [projectId, messageId, spaceId, senderId].some((value) => (value as string).length > 200))
+    return NextResponse.json({ error: "Photon message is too large" }, { status: 413 });
+  if (!/^pho_prj_[A-Za-z0-9_-]+$/.test(projectId as string) || ![messageId, spaceId].every((value) => /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value as string)) || !/^[+A-Za-z0-9][A-Za-z0-9_.:+@-]*$/.test(senderId as string))
+    return NextResponse.json({ error: "Invalid Photon message identity" }, { status: 400 });
+  if (projectId !== configuredProject)
+    return NextResponse.json({ error: "Photon project does not match this bridge" }, { status: 403 });
 
-  const sender = `Traveler ${createHash("sha256").update(body.senderId).digest("hex").slice(0, 6).toUpperCase()}`;
-  const result = await handleMessage(`photon-${body.spaceId}`, sender, body.text);
-  return NextResponse.json({
-    replies: result.posted.filter((m) => m.bot).map((m) => ({ id: m.id, text: m.text, approvalPath: result.approvals[m.id] })),
-  });
+  const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const sender = `Traveler ${hash([projectId, senderId]).slice(0, 24).toUpperCase()}`;
+  const requestId = `photon:${hash([projectId, spaceId, messageId])}`;
+  try {
+    const result = await handleMessage(`photon:${hash([projectId, spaceId])}`, sender, text as string, {
+      requestId,
+      payloadHash: hash([projectId, messageId, spaceId, senderId, text]),
+    });
+    return NextResponse.json({
+      replies: result.posted.filter((m) => m.bot).map((m) => ({ id: m.id, text: m.text, approvalPath: result.approvals[m.id] })),
+    });
+  } catch (error) {
+    if (error instanceof ChatReplayConflict) return NextResponse.json({ error: error.message }, { status: 409 });
+    if (error instanceof ChatBusy || error instanceof ChatStorageUnavailable)
+      return NextResponse.json({ error: error.message }, { status: 503, headers: { "Retry-After": "5" } });
+    return NextResponse.json({ error: "Photon could not process this message. Please retry the same message." }, { status: 500 });
+  }
 }

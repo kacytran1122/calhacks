@@ -109,13 +109,25 @@ No production deployment occurs without an explicitly configured hosting environ
 |---|---|
 | Anthropic | Public-page extraction, explanations, audit defense, and the @smile concierge that chooses its tools; amounts remain deterministic |
 | Bright Data | Live logged-out event, route, fare, and stop pages |
-| Hyphenate | Organizer finance desk with evidence matching, exception routing, control totals, and close readiness |
+| Hyphenate track | Our organizer finance implementation: evidence matching, exception routing, control totals, and close readiness; not a Hyphenate API integration |
 | Photon 2.0 | `@smile` group conversation and private trip-scoped approval links |
 | TigerData | Time-series snapshots for event date and venue changes |
 | Visa | Traveler-approved fare binding, category and expiry controls, replay protection, and signed sandbox authorization with capture disabled |
 | Open-Meteo | Live forecast and ERA5 history for the venue heat map (no key) |
 | OpenStreetMap | Map tiles for the heat map; OSRM road distance and drive time |
 | U.S. EPA, CARB | Published emission factors for the CO₂e estimates (no key) |
+
+## iMessage group chats
+
+The Photon 2.0 worker responds only to an explicit `@smile` mention and sends its reply to the same conversation. Every follow-up answer must include the mention as well. Exact-price approval links go to the requesting traveler privately, never into the group reply.
+
+Photon's shared iMessage lines are one-to-one. Group chats require a dedicated iMessage line assigned to this project's account, whether provisioned through sponsored access or the appropriate Photon plan. A connected event socket does not establish that a usable iMessage number exists. Do not purchase a line or change a subscription just to run the tests.
+
+Run the web API on the persistent Railway web service with `SMILE_DATA_DIR` pointing to its mounted volume. Chat transcripts, each sender's preferences, follow-up answers, event selections, and exact message results live in `chat.db` there. Vercel must proxy `/api` to that service; chat refuses to use an ephemeral serverless filesystem. Multiple processes sharing the same database serialize each room with expiring, renewed locks. Separate machines with separate volumes are not a shared chat cluster.
+
+Keep the Photon worker's cursor on its own persistent volume using `PHOTON_CURSOR_FILE` or `SMILE_DATA_DIR`. Set the same `PHOTON_PROJECT_ID` and `PHOTON_BRIDGE_SECRET` on the worker and web API, and point `SMILE_WEB_URL` at the web API's HTTPS origin. The worker forwards the original message ID; the bridge reuses the saved response for retries, and the planner stores its trip result with the books so a repeated message does not create another trip or mandate.
+
+Automated tests exercise group routing, mention filtering, private approvals, restart recovery, concurrent delivery, replay conflicts, and remembered travel preferences without sending real iMessages. Live verification still requires adding the assigned dedicated agent number to an actual iMessage group, sending a message without the mention, then sending `@smile` and a follow-up from two group members. Confirm one reply to each mention in that group and no reply to ordinary conversation before calling the deployment live-tested.
 
 ## Price prediction and heat map
 

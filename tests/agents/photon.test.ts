@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
-import { assertPhoton2Credentials, messageFrom, textOf } from "../../backend/photon/index";
+import { assertPhoton2Credentials, configuration, mentionsSmile, messageFrom, textOf } from "../../backend/photon/index";
 
 test("requires Photon 2.0 project credentials", () => {
   assert.doesNotThrow(() => assertPhoton2Credentials("pho_prj_example", "pho_sk_example"));
@@ -21,4 +22,45 @@ test("accepts only received human-to-agent iMessages", () => {
   };
   assert.equal(messageFrom(base)?.id, "msg_1");
   assert.equal(messageFrom({ ...base, type: "message.delivered" }), undefined);
+});
+
+test("recognizes explicit mentions with punctuation and case without waking on names or email", () => {
+  for (const text of ["@smile plan our trip", "Hey, @SMILE!", "(@Smile), yes", "Please ask @smile."]) assert.equal(mentionsSmile(text), true, text);
+  for (const text of ["smile", "@smiley", "@smile_travel", "hello@smile.com", "@@smile", "@smile2"]) assert.equal(mentionsSmile(text), false, text);
+});
+
+test("rejects malformed envelopes and never mistakes agent traffic for an incoming message", () => {
+  const message = { id: "msg_1", platform: "imessage", status: "received", content: { type: "text", format: "plain", text: "@smile" }, sentBy: { id: "human", kind: "human", platform: "imessage" }, receivedBy: { id: "agent", kind: "agent", platform: "imessage" }, space: { id: "space", kind: "group", platform: "imessage" } };
+  const envelope = (object: unknown, projectId = "pho_prj_test") => ({ type: "message.received", source: "imessage.photon", data: { projectId, object } });
+  for (const invalid of [null, [], {}, { data: null }, envelope(null), envelope({}), envelope({ ...message, sentBy: null }), envelope({ ...message, receivedBy: null }), envelope({ ...message, space: null }), envelope({ ...message, id: "" }), envelope({ ...message, sentBy: { ...message.sentBy, kind: "agent" } }), envelope({ ...message, space: { ...message.space, platform: "sms" } }), envelope({ ...message, content: { type: "text", format: "plain", text: "x".repeat(4_001) } })]) {
+    assert.doesNotThrow(() => messageFrom(invalid, "pho_prj_test"));
+    assert.equal(messageFrom(invalid, "pho_prj_test"), undefined);
+  }
+  assert.equal(messageFrom(envelope(message, "pho_prj_other"), "pho_prj_test"), undefined);
+  assert.equal(messageFrom(envelope({ ...message, space: { ...message.space, projectId: "pho_prj_other" } }), "pho_prj_test"), undefined);
+  assert.equal(messageFrom(envelope(message), "pho_prj_test")?.id, "msg_1");
+});
+
+test("bounds nested group content", () => {
+  const recursive: { type: string; parts: unknown[] } = { type: "group", parts: [] };
+  recursive.parts.push(recursive);
+  assert.equal(textOf(recursive), undefined);
+});
+
+test("stores the Photon cursor on the configured persistent data volume", () => {
+  const values = { SMILE_WEB_URL: "https://smile.example", PHOTON_PROJECT_ID: "pho_prj_test", PHOTON_API_KEY: "pho_sk_test", PHOTON_BRIDGE_SECRET: "test-secret", SMILE_DATA_DIR: "/persistent/smile", DATA_DIR: "/persistent/fallback", PHOTON_CURSOR_FILE: undefined };
+  const previous = new Map(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    assert.equal(configuration().cursorFile, "/persistent/smile/photon-cursor.json");
+    delete process.env.SMILE_DATA_DIR;
+    assert.equal(configuration().cursorFile, "/persistent/fallback/photon-cursor.json");
+    process.env.PHOTON_CURSOR_FILE = "/other-volume/custom.json";
+    assert.equal(configuration().cursorFile, "/other-volume/custom.json");
+    delete process.env.PHOTON_CURSOR_FILE;
+    delete process.env.DATA_DIR;
+    assert.equal(configuration().cursorFile, resolve(".data/photon-cursor.json"));
+  } finally {
+    for (const [key, value] of previous) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
 });

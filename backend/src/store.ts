@@ -26,6 +26,7 @@ export interface State {
   inbox: InboxItem[];
   noShows: { travelerId: string; eventId: string; date: string; tripId: string }[];
   scheduler?: { lastRun: Partial<Record<string, string>> }; // job id -> last run (scheduler.ts)
+  planningReceipts?: Record<string, { fingerprint: string; createdAt: string; result: import("./orchestrator").PlanTripResult }>;
 }
 
 function backendRoot(): string {
