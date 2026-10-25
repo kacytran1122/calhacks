@@ -108,7 +108,10 @@ export function LensDemo() {
             <div className="kick">Chrome extension</div>
             <h2 className="disp">Found your event?<br /><em>Let’s get you there.</em></h2>
           </div>
-          <p className="lede">Choose a hackathon on MLH or open its website. Your trip planner stays beside the event, with clear directions and alternative routes.</p>
+          <a className="lens-install" href="https://chromewebstore.google.com/" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><path d="M12 8h9.16M8.54 14 3.96 6.07M15.46 14l-4.58 7.94" /></svg>
+            Add to Chrome <span aria-hidden="true">↗</span>
+          </a>
         </div>
         <figure className="lens-preview reveal">
           <figcaption className="lens-preview-toolbar">
@@ -181,7 +184,6 @@ export function LensDemo() {
               </div>
             )}
           </div>
-          <div className="lens-feature-line"><span>Fastest available route</span><span>Step-by-step directions</span><span>Clear alternatives</span><span>Routes only, no fares</span></div>
         </figure>
       </div>
     </section>
