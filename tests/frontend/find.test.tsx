@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
 import { FindClient } from "../../frontend/app/find/FindClient";
@@ -74,19 +74,27 @@ test("resolves a place label to precise coordinates before discovering events", 
   expect(String(fetcher.mock.calls[1]?.[0])).toContain("lon=-118.4469");
 });
 
-test("uses precise browser coordinates and labels them as the current location", async () => {
-  const fetcher = vi.fn(() => response({ ...result, origin: { zip: "61401", label: "Current location" } }));
+test("uses precise browser coordinates and replaces the placeholder with the nearby city", async () => {
+  const fetcher = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/location/resolve")) return response({ zip: "92697", label: "Irvine, CA", lat: 33.6405, lon: -117.8443 });
+    return response({ ...result, origin: { zip: "92697", label: "Irvine, CA" } });
+  });
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<FindClient initialZip="61401" initialOrigin="Current location" initialLat={33.6405} initialLon={-117.8443} />);
 
+  await waitFor(() => expect(screen.getByLabelText("Starting ZIP, city, or state")).toHaveValue("Irvine, CA"));
   await user.click(screen.getByRole("button", { name: "Update nearby events" }));
 
-  const request = String(fetcher.mock.calls[0]?.[0]);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(String(fetcher.mock.calls[0]?.[0])).toContain("/api/location/resolve?lat=33.6405&lon=-117.8443&fallbackZip=61401");
+  const request = String(fetcher.mock.calls[1]?.[0]);
+  expect(request).toContain("zip=92697");
   expect(request).toContain("lat=33.6405");
   expect(request).toContain("lon=-117.8443");
-  expect(request).toContain("originLabel=Current+location");
-  expect(await screen.findByText(/events within 200 mi of Current location/)).toBeVisible();
+  expect(request).toContain("originLabel=Irvine%2C+CA");
+  expect(await screen.findByText(/events within 200 mi of Irvine, CA/)).toBeVisible();
 });
 
 test("switches between miles and kilometers without changing the search radius", async () => {

@@ -53,22 +53,36 @@ export async function addressToPoint(address: string): Promise<GeoResult> {
 }
 
 export async function coordinatesToPoint(lat: number, lon: number): Promise<GeoResult> {
-  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=12&addressdetails=1`;
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=16&addressdetails=1`;
   const source = "OpenStreetMap reverse geocoder";
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
     return { status: "error", source, url, error: "invalid coordinates" };
   }
   const r = await getJson(url, 15_000);
-  if (!r.ok) return { status: r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? `HTTP ${r.status}` };
+  if (!r.ok) return coordinatesToPointFallback(lat, lon);
   type Address = { postcode?: string; city?: string; town?: string; village?: string; municipality?: string; county?: string; state?: string; "ISO3166-2-lvl4"?: string; country_code?: string };
   const address = (r.json as { address?: Address }).address;
   const postalCode = address?.postcode?.match(/\b\d{5}\b/)?.[0];
-  if (!address || address.country_code?.toLowerCase() !== "us" || !postalCode) {
-    return { status: "empty", source, url, error: "no U.S. ZIP found at this location" };
+  if (!address || address.country_code?.toLowerCase() !== "us") {
+    return coordinatesToPointFallback(lat, lon);
   }
   const city = address.city ?? address.town ?? address.village ?? address.municipality ?? address.county;
   const state = address["ISO3166-2-lvl4"]?.replace(/^US-/, "") ?? address.state;
-  return { status: "ok", lat, lon, postalCode, label: [city, state].filter(Boolean).join(", ") || postalCode, source, url };
+  return { status: "ok", lat, lon, postalCode, label: [city, state].filter(Boolean).join(", ") || postalCode || "GPS location", source, url };
+}
+
+async function coordinatesToPointFallback(lat: number, lon: number): Promise<GeoResult> {
+  const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}&localityLanguage=en`;
+  const source = "BigDataCloud reverse geocoder";
+  const r = await getJson(url, 5_000);
+  if (!r.ok) return { status: r.error === "timeout" ? "timeout" : "error", source, url, error: r.error ?? `HTTP ${r.status}` };
+  type Place = { locality?: string; city?: string; principalSubdivision?: string; principalSubdivisionCode?: string; postcode?: string; countryCode?: string };
+  const place = r.json as Place;
+  if (place.countryCode?.toUpperCase() !== "US") return { status: "empty", source, url, error: "no U.S. location found at these coordinates" };
+  const city = place.locality ?? place.city;
+  const state = place.principalSubdivisionCode?.replace(/^US-/, "") ?? place.principalSubdivision;
+  const postalCode = place.postcode?.match(/\b\d{5}\b/)?.[0];
+  return { status: "ok", lat, lon, postalCode, label: [city, state].filter(Boolean).join(", ") || postalCode || "GPS location", source, url };
 }
 
 export function haversineMiles(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {

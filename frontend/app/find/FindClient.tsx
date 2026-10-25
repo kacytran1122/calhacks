@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SmileWord } from "@/components/landing/Smile";
 
 type Listing = {
@@ -179,6 +179,32 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<Listing | null>(null);
+  const [resolvingGpsLabel, setResolvingGpsLabel] = useState(initialOrigin === "Current location" && initialLat !== undefined && initialLon !== undefined);
+
+  useEffect(() => {
+    if (initialOrigin !== "Current location" || initialLat === undefined || initialLon === undefined) return;
+    const controller = new AbortController();
+    const resolveGpsLabel = async () => {
+      try {
+        const response = await fetch(`/api/location/resolve?lat=${encodeURIComponent(initialLat)}&lon=${encodeURIComponent(initialLon)}&fallbackZip=${encodeURIComponent(initialZip)}`, { cache: "no-store", signal: controller.signal });
+        const location = await response.json() as { zip?: string; label?: string };
+        if (!response.ok || !location.zip || !location.label) return;
+        const coordinates = { lat: initialLat, lon: initialLon };
+        setZip(location.zip);
+        setLocationInput(location.label);
+        setResolvedInput(location.label);
+        setOriginCoordinates(coordinates);
+        setRes((current) => current ? { ...current, origin: { ...current.origin, zip: location.zip!, label: location.label } } : current);
+        history.replaceState(null, "", `/find?zip=${location.zip}&origin=${encodeURIComponent(location.label)}&gps=1&lat=${initialLat}&lon=${initialLon}`);
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") setErr("Your GPS coordinates are available, but the nearby city name could not be loaded. You can still search from this location.");
+      } finally {
+        if (!controller.signal.aborted) setResolvingGpsLabel(false);
+      }
+    };
+    resolveGpsLabel();
+    return () => controller.abort();
+  }, [initialZip, initialOrigin, initialLat, initialLon]);
 
   const search = useCallback(async (z: string, nextRadius = radius, nextQuery = q, nextGroups = groups, originLabel = locationInput, coordinates = originCoordinates) => {
     if (!/^\d{5}$/.test(z)) return setErr("Enter a 5-digit ZIP.");
@@ -316,8 +342,8 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
             </button>
           </div>
         </div>
-        <button className="dk-btn primary" disabled={loading}>
-          {loading ? "Updating nearby events…" : "Update nearby events"}
+        <button className="dk-btn primary" disabled={resolvingGpsLabel || loading}>
+          {resolvingGpsLabel ? "Identifying your city…" : loading ? "Updating nearby events…" : "Update nearby events"}
         </button>
       </form>
 

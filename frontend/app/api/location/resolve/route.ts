@@ -8,10 +8,12 @@ export async function GET(req: NextRequest) {
   const lonParam = req.nextUrl.searchParams.get("lon");
   if (latParam !== null || lonParam !== null) {
     const location = await coordinatesToPoint(Number(latParam), Number(lonParam));
-    if (location.status !== "ok" || !location.postalCode) {
+    const fallbackZip = req.nextUrl.searchParams.get("fallbackZip")?.match(/^\d{5}$/)?.[0];
+    const zip = location.postalCode ?? fallbackZip;
+    if (location.status !== "ok" || !zip) {
       return NextResponse.json({ error: "We couldn’t match your current location to a U.S. ZIP code." }, { status: 404 });
     }
-    return NextResponse.json({ zip: location.postalCode, label: location.label, lat: location.lat, lon: location.lon, source: location.source });
+    return NextResponse.json({ zip, label: location.label, lat: location.lat, lon: location.lon, source: location.source });
   }
   const city = req.nextUrl.searchParams.get("city")?.trim() ?? "";
   if (city.length < 3 || city.length > 100) {
