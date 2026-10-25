@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { llmAvailable, structured } from "../llm";
+import { llmAvailable, structured } from "../../claude";
 import { haversineMiles } from "../integrations/geo";
 import { AIRFARE } from "../ml/price";
 

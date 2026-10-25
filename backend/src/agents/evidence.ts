@@ -7,7 +7,7 @@ import { serp, type SerpOrganic } from "../integrations/brightdata";
 import { haversineMiles, placeToPoint, stateCodeFromLabel, zipToPoint } from "../integrations/geo";
 import { dayBefore, googleFlightsUrl } from "../integrations/googleFlights";
 import { weatherAt } from "../integrations/nws";
-import { llmAvailable, structured } from "../llm";
+import { llmAvailable, structured } from "../../claude";
 import { planPublicTransit, type TransitOption } from "../integrations/transitous";
 import { currentOfficialFares } from "../integrations/official-fares";
 import { planDrivingRoutes, type DrivePlanResult } from "../integrations/osrm";

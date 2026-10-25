@@ -3,7 +3,7 @@ import { fmt } from "../../src/money";
 import { RULES, type RuleId } from "../policy";
 import type { State } from "../../src/store";
 import type { Decision, Trip } from "../../src/types";
-import { llmAvailable, structured } from "../../src/llm";
+import { llmAvailable, structured } from "../../claude";
 
 export function traceFor(state: State, tripId: string) {
   const trip = state.trips.find((t) => t.id === tripId);

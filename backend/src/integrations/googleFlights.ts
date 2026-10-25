@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { llmAvailable, structured } from "../llm";
+import { llmAvailable, structured } from "../../claude";
 import type { FetchStatus } from "../types";
 import { readDatasetSnapshot, triggerDataset, unlock } from "./brightdata";
 

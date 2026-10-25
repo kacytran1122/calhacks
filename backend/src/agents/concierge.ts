@@ -3,7 +3,7 @@ import { z } from "zod";
 import { appendAudit } from "../../hyphenate/audit";
 import type { EventListing } from "../eventStore";
 import { stateCodeFromLabel, zipToPoint } from "../integrations/geo";
-import { MODELS } from "../llm";
+import { MODELS } from "../../claude";
 import { fmt } from "../money";
 import { buddiesFor, planTrip } from "../orchestrator";
 import { authorize } from "../permissions";

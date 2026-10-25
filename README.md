@@ -89,6 +89,7 @@ The venue models are approximate concepts, not verified floor plans or accessibi
 ```text
 frontend/           Next.js web app, map, venue tours, and Chrome extension
 backend/            Agents, routing, finance controls, ledger, and Photon worker
+backend/claude/     Anthropic client, model configuration, and Claude safety boundary
 backend/hyphenate/  The two-seat finance workflow, policy, audit, and reconciliation
 tests/              Frontend, backend, agent, and full-system checks
 .github/workflows/  Continuous integration

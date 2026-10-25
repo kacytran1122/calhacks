@@ -3,9 +3,9 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
 
 export const MODELS = {
-  reason: "claude-opus-5-5", // explanations, defending decisions, auditor challenges
-  extract: "claude-haiku-5-5", // page / receipt extraction
-  concierge: "claude-opus-5-5", // @smile in a private iMessage chat: chooses which tools to call
+  reason: "claude-opus-5-5",
+  extract: "claude-haiku-5-5",
+  concierge: "claude-opus-5-5",
 } as const;
 
 export function llmAvailable(): boolean {

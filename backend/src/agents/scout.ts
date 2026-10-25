@@ -5,7 +5,7 @@ import { newId } from "../store";
 import type { Evidence, FetchStatus } from "../types";
 import { unlock } from "../integrations/brightdata";
 import { addressToPoint } from "../integrations/geo";
-import { llmAvailable, structured } from "../llm";
+import { llmAvailable, structured } from "../../claude";
 
 export interface EventFacts {
   name?: string;

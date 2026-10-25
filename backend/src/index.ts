@@ -8,7 +8,7 @@ export * from "../hyphenate/financeControls";
 export * from "./store";
 export * from "./chatStore";
 export { login, logout, userForSession, ensureUsers, issueTripToken, travelerForTripToken, assertClaimMatches, TooManyAttempts, type User } from "./auth";
-export * from "./llm";
+export * from "../claude";
 export { buildSeed } from "./seed/trips";
 export { COMPANY, EVENTS, PEOPLE, SCHOOLS } from "./seed/company";
 export { decide, parseReceipt } from "../hyphenate/agents/reconciler";
