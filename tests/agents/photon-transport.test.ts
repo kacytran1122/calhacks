@@ -26,6 +26,7 @@ async function fixture(t: TestContext, replies: Reply[] = [{ id: "reply_1", text
   t.mock.method(console, "info", (...args: unknown[]) => { logs.push(args); });
   const directory = await mkdtemp(join(tmpdir(), "smile-photon-test-"));
   const calls: BrainBody[] = [];
+  const requestTimes: number[] = [];
   const controls = { status: 200, raw: undefined as string | undefined };
   const server = createServer(async (req, res) => {
     assert.equal(req.url, "/api/chat/photon");
@@ -34,6 +35,7 @@ async function fixture(t: TestContext, replies: Reply[] = [{ id: "reply_1", text
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    requestTimes.push(Date.now());
     res.writeHead(controls.status, { "content-type": "application/json" });
     res.end(controls.raw ?? JSON.stringify({ replies }));
   });
@@ -60,7 +62,7 @@ async function fixture(t: TestContext, replies: Reply[] = [{ id: "reply_1", text
     },
     createOrGetSpace: async (value: unknown) => { spaces.push(value); return { id: "private_1" }; },
   } } as unknown as Photon;
-  return { config, calls, controls, photon, sent, effects, spaces, fail, logs };
+  return { config, calls, requestTimes, controls, photon, sent, effects, spaces, fail, logs };
 }
 
 class FakeSocket extends EventEmitter {
@@ -159,7 +161,32 @@ test("does not silently accept a failed or malformed brain response or an off-si
   assert.equal(f.sent.length, 0);
 });
 
-test("persists the cursor only after all deliveries succeed and replays failed messages after backoff", async (t) => {
+test("retries a failed first delivery in memory when the durable cursor starts at zero", async (t) => {
+  const f = await fixture(t);
+  f.controls.status = 503;
+  const socket = new FakeSocket();
+  t.after(() => socket.disconnect());
+  await start(f.config, { photon: f.photon, socket: socket as unknown as Socket, retryBaseMs: 25, retryMaxMs: 100 });
+
+  socket.deliver(incoming("first_after_deploy"), 48_685);
+  await until(() => f.calls.length === 1, "initial bridge attempt");
+  await assert.rejects(readFile(f.config.cursorFile), /ENOENT/);
+  assert.equal(socket.connected, true);
+  assert.equal(socket.connections.length, 1);
+  assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [0]);
+
+  f.controls.status = 200;
+  await until(async () => {
+    try { return (await cursorOf(f.config)).seq === 48_685; } catch { return false; }
+  }, "locally retried first delivery");
+  assert.equal(f.calls.length, 2);
+  assert.deepEqual(f.calls.map(({ messageId }) => messageId), ["first_after_deploy", "first_after_deploy"]);
+  assert.equal(f.effects.size, 1);
+  assert.equal(socket.connections.length, 1);
+  assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [0]);
+});
+
+test("persists the cursor only after deliveries succeed and keeps later deliveries queued during a local retry", async (t) => {
   const f = await fixture(t, [{ id: "reply_1", text: "Ready", approvalPath: "/desk#approve=token" }]);
   const socket = new FakeSocket();
   t.after(() => socket.disconnect());
@@ -171,30 +198,27 @@ test("persists the cursor only after all deliveries succeed and replays failed m
   f.fail.idempotencyKey = "smile:second:dm:0";
   socket.deliver(incoming("second"), 2);
   socket.deliver(incoming("not_processed_yet"), 3);
-  await until(() => !socket.connected, "delivery failure disconnect");
+  await until(() => f.calls.filter((body) => body.messageId === "second").length === 1, "failed second delivery");
   assert.equal((await cursorOf(f.config)).seq, 1);
+  assert.equal(socket.connected, true);
   assert.equal(socket.connections.length, 1);
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(socket.connections.length, 1);
-  await until(() => socket.connections.length === 2, "backoff reconnect");
-  assert.equal(socket.subscriptions.at(-1)!.startSeq, 1);
-  socket.deliver(incoming("second"), 2);
-  await until(async () => (await cursorOf(f.config)).seq === 2, "replayed cursor");
-  assert.equal(f.effects.size, 4);
+  assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [0]);
+  await until(async () => (await cursorOf(f.config)).seq === 3, "locally retried and queued cursor");
+  assert.equal(f.effects.size, 6);
   assert.equal(f.calls.filter((body) => body.messageId === "second").length, 2);
-  assert.equal(f.calls.filter((body) => body.messageId === "not_processed_yet").length, 0);
+  assert.equal(f.calls.filter((body) => body.messageId === "not_processed_yet").length, 1);
   assert.equal((await cursorOf(f.config)).projectId, "pho_prj_test");
   socket.disconnect();
   const restarted = new FakeSocket();
   t.after(() => restarted.disconnect());
   await start(f.config, { photon: f.photon, socket: restarted as unknown as Socket });
-  assert.equal(restarted.subscriptions[0]!.startSeq, 2);
+  assert.equal(restarted.subscriptions[0]!.startSeq, 3);
   const count = f.calls.length;
-  restarted.deliver(incoming("second"), 2);
-  restarted.deliver(incoming("third"), 3);
-  await until(async () => (await cursorOf(f.config)).seq === 3, "new message after restart");
+  restarted.deliver(incoming("not_processed_yet"), 3);
+  restarted.deliver(incoming("fourth"), 4);
+  await until(async () => (await cursorOf(f.config)).seq === 4, "new message after restart");
   assert.equal(f.calls.length, count + 1);
-  assert.equal(f.calls.at(-1)!.messageId, "third");
+  assert.equal(f.calls.at(-1)!.messageId, "fourth");
 });
 
 test("skips unrelated projects, bot loops, group spaces, and malformed events without breaking later direct messages", async (t) => {
@@ -229,27 +253,25 @@ test("invalid sequence metadata cannot advance the durable cursor", async (t) =>
   assert.equal(socket.subscriptions.at(-1)!.startSeq, 0);
 });
 
-test("repeated brain failures increase replay backoff instead of creating a hot loop", async (t) => {
+test("repeated brain failures increase local retry backoff without reconnecting or losing the event", async (t) => {
   const f = await fixture(t);
   f.controls.status = 503;
   const socket = new FakeSocket();
   t.after(() => socket.disconnect());
   await start(f.config, { photon: f.photon, socket: socket as unknown as Socket, retryBaseMs: 25, retryMaxMs: 100 });
   socket.deliver(incoming("retry_me"), 1);
-  await until(() => socket.connections.length === 2, "first retry");
-  socket.deliver(incoming("retry_me"), 1);
-  await until(() => !socket.connected, "second failure");
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.equal(socket.connections.length, 2);
-  await until(() => socket.connections.length === 3, "increased retry delay");
-  assert.ok(socket.connections[2]! - socket.connections[1]! >= 45);
-  assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [0, 0, 0]);
-  assert.deepEqual(f.calls.map(({ messageId }) => messageId), ["retry_me", "retry_me"]);
+  await until(() => f.calls.length >= 3, "three local attempts");
+  assert.ok(f.requestTimes[1]! - f.requestTimes[0]! >= 15);
+  assert.ok(f.requestTimes[2]! - f.requestTimes[1]! >= 35);
+  assert.equal(socket.connected, true);
+  assert.equal(socket.connections.length, 1);
+  assert.deepEqual(socket.subscriptions.map(({ startSeq }) => startSeq), [0]);
+  assert.deepEqual(f.calls.map(({ messageId }) => messageId), ["retry_me", "retry_me", "retry_me"]);
   assert.equal(f.sent.length, 0);
   f.controls.status = 200;
-  socket.deliver(incoming("retry_me"), 1);
   await until(async () => { try { return (await cursorOf(f.config)).seq === 1; } catch { return false; } }, "recovered message");
   assert.equal(f.effects.size, 1);
+  assert.equal(socket.connections.length, 1);
 });
 
 test("does not checkpoint a Photon message that already reports delivery failure", async (t) => {
@@ -272,7 +294,8 @@ test("failure logs never expose SDK payloads, user messages, or private approval
   await until(() => logs.length > 0, "safe error log");
   assert.match(JSON.stringify(logs), /HTTP 503/);
   assert.doesNotMatch(JSON.stringify(logs), /hidden-approval-token|sensitive user message|api-secret/);
-  await until(() => socket.connections.length === 2, "safe retry");
+  await until(async () => { try { return (await cursorOf(f.config)).seq === 1; } catch { return false; } }, "safe local retry");
+  assert.equal(socket.connections.length, 1);
   socket.disconnect();
 });
 

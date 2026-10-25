@@ -20,6 +20,19 @@ type DeliveryMeta = { seq: number; replyExpected?: boolean };
 type BridgeReply = { id: string; text: string; approvalPath?: string; mapPath?: string };
 type PhotonClient = Pick<Photon, "projects">;
 type Runtime = { photon?: PhotonClient; socket?: Socket; retryBaseMs?: number; retryMaxMs?: number };
+type FailureStage = "bridge" | "bridge-response" | "photon-send" | "cursor-checkpoint" | "processing";
+
+class ProcessingFailure extends Error {
+  readonly stage: FailureStage;
+  readonly status?: number;
+
+  constructor(stage: FailureStage, message: string, options: { cause?: unknown; status?: number } = {}) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "ProcessingFailure";
+    this.stage = stage;
+    this.status = options.status;
+  }
+}
 
 export type Config = {
   apiKey: string;
@@ -75,10 +88,20 @@ export function textOf(content: unknown, depth = 0): string | undefined {
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const identifier = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 200;
-const failureSummary = (error: unknown) => {
+const httpStatus = (error: unknown) => {
   const status = record(error) ? error.status ?? error.statusCode : undefined;
-  return typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 ? `HTTP ${status}` : "request failed";
+  return typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined;
 };
+const failureSummary = (error: unknown) => {
+  const stage = record(error) && typeof error.stage === "string" && ["bridge", "bridge-response", "photon-send", "cursor-checkpoint", "processing"].includes(error.stage)
+    ? error.stage
+    : "request";
+  const status = httpStatus(error);
+  return status ? `${stage} (HTTP ${status})` : stage;
+};
+const processingFailure = (stage: FailureStage, error: unknown, fallback: string) => error instanceof ProcessingFailure
+  ? error
+  : new ProcessingFailure(stage, error instanceof Error && error.message ? error.message : fallback, { cause: error, status: httpStatus(error) });
 export const mentionsSmile = (text: string) => /(^|[^\p{L}\p{N}_@])@smile(?=$|[^\p{L}\p{N}_])/iu.test(text);
 
 export function messageFrom(event: unknown, projectId?: string): PhotonMessage | undefined {
@@ -115,21 +138,26 @@ async function saveCursor(path: string, seq: number, projectId: string) {
 }
 
 async function callBrain(config: Config, message: PhotonMessage, text: string): Promise<BridgeReply[]> {
-  const response = await fetch(`${config.webUrl}/api/chat/photon`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-smile-photon-secret": config.bridgeSecret },
-    body: JSON.stringify({ projectId: config.projectId, messageId: message.id, spaceId: message.space.id, senderId: message.sentBy.id, text }),
-    signal: AbortSignal.timeout(290_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${config.webUrl}/api/chat/photon`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-smile-photon-secret": config.bridgeSecret },
+      body: JSON.stringify({ projectId: config.projectId, messageId: message.id, spaceId: message.space.id, senderId: message.sentBy.id, text }),
+      signal: AbortSignal.timeout(290_000),
+    });
+  } catch (error) {
+    throw processingFailure("bridge", error, "S’mile bridge request failed.");
+  }
   const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(`S’mile bridge ${response.status}: request failed`);
-  if (!record(body) || !Array.isArray(body.replies) || body.replies.length > 20) throw new Error("S’mile bridge returned invalid replies.");
-  if (body.replies.some((reply) => !record(reply) || !identifier(reply.id) || typeof reply.text !== "string" || !reply.text.trim() || reply.text.length > 20_000 || (reply.approvalPath !== undefined && typeof reply.approvalPath !== "string") || (reply.mapPath !== undefined && typeof reply.mapPath !== "string"))) throw new Error("S’mile bridge returned an invalid reply.");
+  if (!response.ok) throw new ProcessingFailure("bridge", `S’mile bridge ${response.status}: request failed`, { status: response.status });
+  if (!record(body) || !Array.isArray(body.replies) || body.replies.length > 20) throw new ProcessingFailure("bridge-response", "S’mile bridge returned invalid replies.");
+  if (body.replies.some((reply) => !record(reply) || !identifier(reply.id) || typeof reply.text !== "string" || !reply.text.trim() || reply.text.length > 20_000 || (reply.approvalPath !== undefined && typeof reply.approvalPath !== "string") || (reply.mapPath !== undefined && typeof reply.mapPath !== "string"))) throw new ProcessingFailure("bridge-response", "S’mile bridge returned an invalid reply.");
   const replies = body.replies as BridgeReply[];
   for (const reply of replies) {
     if (reply.approvalPath) {
       const url = new URL(reply.approvalPath, config.webUrl);
-      if (url.origin !== new URL(config.webUrl).origin || url.username || url.password) throw new Error("S’mile approval must use the configured website.");
+      if (url.origin !== new URL(config.webUrl).origin || url.username || url.password) throw new ProcessingFailure("bridge-response", "S’mile approval must use the configured website.");
     }
     if (reply.mapPath) {
       const url = new URL(reply.mapPath, config.webUrl);
@@ -144,13 +172,27 @@ async function callBrain(config: Config, message: PhotonMessage, text: string): 
         || keys.length !== 1
         || keys[0] !== "handoff"
         || !/^phm1_[A-Za-z0-9_-]{43}$/.test(token)
-      ) throw new Error("S’mile map handoff must use the configured website and an opaque map token.");
+      ) throw new ProcessingFailure("bridge-response", "S’mile map handoff must use the configured website and an opaque map token.");
     }
   }
   return replies;
 }
 
 const idempotency = (messageId: string, channel: "room" | "dm" | "map", index: number) => `smile:${messageId}:${channel}:${index}`;
+
+async function sendPhotonMessage(
+  photon: PhotonClient,
+  input: Parameters<Photon["projects"]["sendMessage"]>[0],
+  rejectedMessage: string,
+) {
+  try {
+    const delivery = await photon.projects.sendMessage(input);
+    if (delivery.status === "failed") throw new ProcessingFailure("photon-send", rejectedMessage);
+    return delivery;
+  } catch (error) {
+    throw processingFailure("photon-send", error, "Photon reply request failed.");
+  }
+}
 
 export async function processMessage(photon: PhotonClient, config: Config, message: PhotonMessage) {
   const text = textOf(message.content);
@@ -159,7 +201,7 @@ export async function processMessage(photon: PhotonClient, config: Config, messa
   const replies = await callBrain(config, message, text);
 
   for (const [index, reply] of replies.entries()) {
-    const roomDelivery = await photon.projects.sendMessage({
+    await sendPhotonMessage(photon, {
       path: { id: config.projectId },
       headers: { "idempotency-key": idempotency(message.id, "room", index) },
       body: {
@@ -168,12 +210,11 @@ export async function processMessage(photon: PhotonClient, config: Config, messa
         parentMessageId: message.id,
         content: { type: "text", format: "plain", text: reply.text },
       },
-    });
-    if (roomDelivery.status === "failed") throw new Error("Photon did not accept the room reply.");
+    }, "Photon did not accept the room reply.");
 
     if (reply.approvalPath) {
       const approvalUrl = new URL(reply.approvalPath, config.webUrl).toString();
-      const privateDelivery = await photon.projects.sendMessage({
+      await sendPhotonMessage(photon, {
         path: { id: config.projectId },
         headers: { "idempotency-key": idempotency(message.id, "dm", index) },
         body: {
@@ -181,13 +222,12 @@ export async function processMessage(photon: PhotonClient, config: Config, messa
           senderId: agent.id,
           content: { type: "text", format: "plain", text: `Private approval for your S’mile trip: ${approvalUrl}\n\nThis link is scoped to one trip and expires in 24 hours. Don’t forward it.` },
         },
-      });
-      if (privateDelivery.status === "failed") throw new Error("Photon did not accept the private reply.");
+      }, "Photon did not accept the private reply.");
     }
 
     if (reply.mapPath) {
       const mapUrl = new URL(reply.mapPath, config.webUrl).toString();
-      const mapDelivery = await photon.projects.sendMessage({
+      await sendPhotonMessage(photon, {
         path: { id: config.projectId },
         headers: { "idempotency-key": idempotency(message.id, "map", index) },
         body: {
@@ -195,8 +235,7 @@ export async function processMessage(photon: PhotonClient, config: Config, messa
           senderId: agent.id,
           content: { type: "text", format: "plain", text: `Open your route: ${mapUrl}\n\nThis link is scoped to one trip and expires in 12 hours. Don’t forward it.` },
         },
-      });
-      if (mapDelivery.status === "failed") throw new Error("Photon did not accept the map link.");
+      }, "Photon did not accept the map link.");
     }
   }
 }
@@ -206,7 +245,6 @@ export async function start(config = configuration(), runtime: Runtime = {}) {
   const photon = runtime.photon ?? new (await import("@photon-ai/api")).Photon({ baseUrl: config.apiOrigin, headers: { Authorization: `Bearer ${config.apiKey}` } });
   await photon.projects.get({ path: { projectId: config.projectId } });
   let cursor = await loadCursor(config.cursorFile, config.projectId);
-  let epoch = 0;
   let pending = 0;
   let queue = Promise.resolve();
   let retryAttempt = 0;
@@ -225,7 +263,6 @@ export async function start(config = configuration(), runtime: Runtime = {}) {
 
   const retry = () => {
     if (retryTimer) return;
-    epoch++;
     socket.disconnect();
     const delay = Math.min(retryMaxMs, retryBaseMs * 2 ** Math.min(retryAttempt++, 10));
     retryTimer = setTimeout(() => { retryTimer = undefined; socket.connect(); }, delay);
@@ -240,7 +277,6 @@ export async function start(config = configuration(), runtime: Runtime = {}) {
     });
   });
   socket.on("disconnect", () => {
-    epoch++;
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = undefined;
   });
@@ -250,23 +286,32 @@ export async function start(config = configuration(), runtime: Runtime = {}) {
       retry();
       return;
     }
-    const generation = epoch;
     if (++pending > 128) {
       pending--;
       retry();
       return;
     }
     queue = queue.then(async () => {
-      if (generation !== epoch || meta.seq <= cursor) return;
-      const message = messageFrom(event, config.projectId);
-      if (message) await processMessage(photon, config, message);
-      await saveCursor(config.cursorFile, meta.seq, config.projectId);
-      cursor = meta.seq;
-      retryAttempt = 0;
-    }).catch((error) => {
-      console.error("Photon event processing failed. The worker will retry:", failureSummary(error));
-      if (generation === epoch) {
-        retry();
+      if (meta.seq <= cursor) return;
+      let processingAttempt = 0;
+      while (meta.seq > cursor) {
+        try {
+          const message = messageFrom(event, config.projectId);
+          if (message) await processMessage(photon, config, message);
+          try {
+            await saveCursor(config.cursorFile, meta.seq, config.projectId);
+          } catch (error) {
+            throw processingFailure("cursor-checkpoint", error, "Photon cursor checkpoint failed.");
+          }
+          cursor = meta.seq;
+          retryAttempt = 0;
+          return;
+        } catch (error) {
+          const failure = error instanceof ProcessingFailure ? error : processingFailure("processing", error, "Photon event processing failed.");
+          const delay = Math.min(retryMaxMs, retryBaseMs * 2 ** Math.min(processingAttempt++, 10));
+          console.error(`Photon event processing failed at ${failureSummary(failure)}. Retrying this event in ${delay} ms.`);
+          await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        }
       }
     }).finally(() => { pending--; });
   });
