@@ -88,6 +88,25 @@ function localHourKey(isoUtc: string, utcOffsetSeconds: number) {
   return d.toISOString().slice(0, 13) + ":00";
 }
 
+/** Prefer the requested local hour, but tolerate a provider gap of up to three hours. */
+export function nearestHourIndex(times: string[], target: string, maxHours = 3) {
+  const exact = times.indexOf(target);
+  if (exact >= 0) return exact;
+  const wanted = Date.parse(`${target}Z`);
+  if (!Number.isFinite(wanted)) return -1;
+  let best = -1;
+  let bestDelta = Infinity;
+  times.forEach((time, index) => {
+    const parsed = Date.parse(`${time}Z`);
+    const delta = Math.abs(parsed - wanted);
+    if (Number.isFinite(parsed) && delta < bestDelta) {
+      best = index;
+      bestDelta = delta;
+    }
+  });
+  return bestDelta <= maxHours * 3_600_000 ? best : -1;
+}
+
 async function getJson(url: string, timeoutMs = 12_000): Promise<{ ok: true; body: unknown } | { ok: false; status: FetchStatus; error: string }> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -145,22 +164,25 @@ export async function heatMapAround(args: { lat: number; lon: number; at: string
   let basis: HeatMap["basis"];
   let sources: HeatMap["sources"];
 
-  if (leadDays <= 15 && leadDays >= -1) {
+  // Open-Meteo's forecast endpoint also exposes recent model output. Using it for
+  // events in the last 92 days avoids a blank card when kickoff has just passed.
+  if (leadDays <= 15 && leadDays >= -92) {
     basis = "forecast";
-    const url = `${FORECAST}?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,apparent_temperature&models=${MODELS.join(",")}&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
-    sources = [{ name: "Open-Meteo forecast (GFS + ECMWF IFS)", url: `${FORECAST}?latitude=${args.lat}&longitude=${args.lon}&hourly=apparent_temperature&models=${MODELS.join(",")}` }];
+    const pastDays = leadDays < 0 ? Math.min(92, Math.ceil(-leadDays) + 1) : 0;
+    const url = `${FORECAST}?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,apparent_temperature&models=${MODELS.join(",")}&temperature_unit=fahrenheit&timezone=auto&forecast_days=16${pastDays ? `&past_days=${pastDays}` : ""}`;
+    sources = [{ name: leadDays < 0 ? "Open-Meteo recent model history (GFS + ECMWF IFS)" : "Open-Meteo forecast (GFS + ECMWF IFS)", url: `${FORECAST}?latitude=${args.lat}&longitude=${args.lon}&hourly=apparent_temperature&models=${MODELS.join(",")}` }];
     const r = await getJson(url);
     if (!r.ok) return empty(r.status, basis, r.error, sources);
     const list = (Array.isArray(r.body) ? r.body : [r.body]) as Located[];
     list.forEach((loc, i) => {
-      const k = loc.hourly.time.indexOf(localHourKey(args.at, loc.utc_offset_seconds));
+      const k = nearestHourIndex(loc.hourly.time, localHourKey(args.at, loc.utc_offset_seconds));
       if (k < 0) return;
       const feels = MODELS.map((m) => loc.hourly[`apparent_temperature_${m}`]?.[k]).filter((v): v is number => typeof v === "number");
       const air = MODELS.map((m) => loc.hourly[`temperature_2m_${m}`]?.[k]).filter((v): v is number => typeof v === "number");
       if (!feels.length || !air.length) return;
       raw.push({ ...pts[i]!, feelsLikeF: feels.reduce((a, b) => a + b, 0) / feels.length, airTempF: air.reduce((a, b) => a + b, 0) / air.length, modelSpreadF: feels.length === 2 ? Math.round(Math.abs(feels[0]! - feels[1]!) * 10) / 10 : null });
     });
-  } else if (leadDays > 15) {
+  } else {
     // Too far out to forecast: the same date and hour over the last three years (ERA5 reanalysis).
     basis = "climatology";
     const when = new Date(args.at);
@@ -185,7 +207,7 @@ export async function heatMapAround(args: { lat: number; lon: number; at: string
         const loc = ((Array.isArray(r.body) ? r.body : [r.body]) as Located[])[i];
         if (!loc) continue;
         const key = localHourKey(args.at, loc.utc_offset_seconds).replace(/^\d{4}/, String(y));
-        const k = loc.hourly.time.indexOf(key);
+        const k = nearestHourIndex(loc.hourly.time, key);
         const f = loc.hourly.apparent_temperature?.[k];
         const a = loc.hourly.temperature_2m?.[k];
         if (typeof f === "number") feels.push(f);
@@ -193,8 +215,6 @@ export async function heatMapAround(args: { lat: number; lon: number; at: string
       }
       if (feels.length && air.length) raw.push({ ...p, feelsLikeF: feels.reduce((s, v) => s + v, 0) / feels.length, airTempF: air.reduce((s, v) => s + v, 0) / air.length, modelSpreadF: null });
     });
-  } else {
-    return empty("empty", "forecast", "The event has already started; no heat map needed.", []);
   }
 
   if (!raw.length) return empty("empty", basis, "No temperature evidence for the event's start hour.", sources);
@@ -204,7 +224,7 @@ export async function heatMapAround(args: { lat: number; lon: number; at: string
   const hottest = cells.reduce((a, b) => (b.feelsLikeF > a.feelsLikeF ? b : a));
   const band = severityFor(hottest.feelsLikeF).band;
   const coolest = Math.min(...cells.map((c) => c.feelsLikeF));
-  const when = basis === "forecast" ? "forecast" : "typical for this date (last 3 years)";
+  const when = basis === "forecast" ? (leadDays < 0 ? "recent model history" : "forecast") : "typical for this date (last 3 years)";
   const summary =
     `Feels like ${Math.round(coolest)}–${Math.round(hottest.feelsLikeF)}°F around the venue at kickoff (${when}); hottest band: ${band}. ` +
     (hotspots.length ? `${hotspots.length} spot${hotspots.length > 1 ? "s" : ""} run at least ${ANOMALY_THRESHOLD_F}°F hotter than the area.` : "No spot stands out as hotter than the rest of the area.");

@@ -144,7 +144,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
   const rows = price
     ? [
         ...(price.rideshare ? [{ label: "Uber", sub: `${price.rideshare.miles} mi · ${price.rideshare.minutes} min`, r: price.rideshare.uber }, { label: "Lyft", sub: `${price.rideshare.miles} mi · ${price.rideshare.minutes} min`, r: price.rideshare.lyft }] : []),
-        ...(price.airfare ? [{ label: `Flight ${price.airfare.from.code} → ${price.airfare.to.code}`, sub: `${price.airfare.miles} mi between airports`, r: price.airfare.range }] : []),
+        ...(price.airfare ? [{ label: `Predicted later · ${price.airfare.from.code} → ${price.airfare.to.code}`, sub: `${price.airfare.miles} mi between airports · model estimate, not a live fare`, r: price.airfare.range }] : []),
       ]
     : [];
   const max = Math.max(1, ...rows.map((x) => x.r.p90)) * 1.05;
@@ -152,8 +152,8 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
 
   return (
     <div className="ti">
-      <h3>Price outlook</h3>
-      <p className="dk-mut">For domestic trips between different U.S. states, the pricing agent checks a current Google Flights fare and keeps it separate from the trained forecast. A live fare can change and still requires your approval.</p>
+      <h3>Live price now and predicted price later</h3>
+      <p className="dk-mut">For domestic interstate trips, S’mile checks Google Flights for a real fare now. The model’s predicted later price is shown separately and is never treated as a quote or approved amount.</p>
       {err.price && <p className="dk-note">Price outlook unavailable: {err.price}</p>}
       {!price && !err.price && <p className="dk-mut">Running the price models…</p>}
       {price && !price.scope.eligible && <p className="dk-note">{price.scope.reason} Live route evidence above is still used for planning.</p>}
@@ -185,17 +185,17 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
       {flight && (
         <div className={`ti-live ${flight.live.status === "ok" ? "ok" : "waiting"}`}>
           <div>
-            <span className="ti-live-kicker">Live Google Flights check</span>
+            <span className="ti-live-kicker">Real price now · Google Flights</span>
             <b>{flight.live.fromAirport} → {flight.live.toAirport} · {flight.live.departDate}</b>
             {flight.live.amountUsd !== undefined ? (
               <p>
-                <strong>{usd(flight.live.amountUsd)}</strong> observed now · forecast midpoint {usd(flight.prediction.range.p50)}
+                <strong>{usd(flight.live.amountUsd)}</strong> verified live fare now · predicted later {usd(flight.prediction.range.p10)}–{usd(flight.prediction.range.p90)} (midpoint {usd(flight.prediction.range.p50)})
                 {flight.differencePct !== null ? ` · ${Math.abs(flight.differencePct)}% ${flight.differencePct < 0 ? "below" : flight.differencePct > 0 ? "above" : "at"} the midpoint` : ""}
               </p>
             ) : flight.live.status === "timeout" && flight.live.snapshotId ? (
-              <p>{flightPollingEnded ? "Google Flights is still processing this live search. The trained forecast stays visible, and the trip watcher can continue checking after you leave this page." : "Collecting the current fare now. The pricing agent will update this card automatically while keeping the trained forecast visible."}</p>
+              <p>{flightPollingEnded ? `Google Flights is still processing this live search. No live amount is shown yet. A later fare is predicted at ${usd(flight.prediction.range.p10)}–${usd(flight.prediction.range.p90)}, but that estimate cannot be approved.` : `Collecting the real fare now. Until Google Flights returns it, the predicted later range is ${usd(flight.prediction.range.p10)}–${usd(flight.prediction.range.p90)} and remains an estimate only.`}</p>
             ) : (
-              <p>No exact live fare was verified in this check. The forecast remains planning evidence, not a quoted price.</p>
+              <p>No exact Google Flights fare was verified right now. The predicted later range is {usd(flight.prediction.range.p10)}–{usd(flight.prediction.range.p90)} (midpoint {usd(flight.prediction.range.p50)}); it is planning evidence, not a quoted price.</p>
             )}
             <span className="dk-mut ti-small">
               {flight.live.amountUsd !== undefined ? `${flight.live.scope ?? "Lowest visible fare"}. ` : ""}
@@ -253,7 +253,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
       <h3>Heat at the venue</h3>
       {err.heat && <p className="dk-note">Heat map unavailable: {err.heat}</p>}
       {!heat && !err.heat && <p className="dk-mut">Collecting temperatures around the venue…</p>}
-      {heat && heat.status !== "ok" && <p className="dk-note">Venue heat evidence is not available for this event hour yet. No heat estimate is shown.</p>}
+      {heat && heat.status !== "ok" && <p className="dk-note">Heat evidence could not be retrieved from Open-Meteo: {heat.error || heat.summary || "no forecast or historical sample was returned"}. No temperature is invented; try again shortly.</p>}
       {heat && heat.status === "ok" && (
         <>
           <HeatMapView heat={heat} />

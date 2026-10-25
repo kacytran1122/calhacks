@@ -105,9 +105,13 @@ export function compareRoutes(
     pick = swap.option;
     pickReason = swap.reason;
   }
-  // "Fastest" and "lowest carbon" only mean something with at least two options to compare.
-  const timed = options.filter((o) => o.minutes !== undefined);
-  const fastest = timed.length > 1 ? timed.sort((a, b) => a.minutes! - b.minutes!)[0]?.mode : undefined;
+  // "Fastest" compares every grounded route, including a flight whose live fare is
+  // still pending. Price verification controls approval, not whether an alternative
+  // may be shown to the traveler.
+  const timed = Object.entries(args.context?.minutes ?? {})
+    .filter((entry): entry is [Trip["mode"], { minutes: number; source: string }] => Number.isFinite(entry[1]?.minutes))
+    .map(([mode, timing]) => ({ mode, ...timing }));
+  const fastest = timed.length > 1 ? timed.sort((a, b) => a.minutes - b.minutes)[0]?.mode : undefined;
   const rated = options.filter((o) => o.co2eKg !== undefined);
   const lowestCarbon = rated.length > 1 ? rated.sort((a, b) => a.co2eKg! - b.co2eKg!)[0]?.mode : undefined;
   const blockReason = pick

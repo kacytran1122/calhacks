@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ANOMALY_THRESHOLD_F, confidenceFor, gridAround, scoreCells, severityFor } from "../../backend/src/agents/heat";
+import { ANOMALY_THRESHOLD_F, confidenceFor, gridAround, nearestHourIndex, scoreCells, severityFor } from "../../backend/src/agents/heat";
 
 test("severity follows the NWS heat-index bands", () => {
   assert.equal(severityFor(65).band, "Comfortable");
@@ -41,4 +41,10 @@ test("grid covers the requested radius around the venue", () => {
   assert.equal(pts.length, 49);
   const lats = pts.map((p) => p.lat);
   assert.ok(Math.abs(Math.max(...lats) - Math.min(...lats) - 6 / 69) < 0.001);
+});
+
+test("weather evidence uses the nearest published hour when the exact hour is absent", () => {
+  const hours = ["2026-10-25T09:00", "2026-10-25T11:00", "2026-10-25T12:00"];
+  assert.equal(nearestHourIndex(hours, "2026-10-25T10:00"), 0);
+  assert.equal(nearestHourIndex(hours, "2026-10-25T18:00"), -1);
 });

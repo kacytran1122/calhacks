@@ -19,3 +19,20 @@ test("a live route without an auditable fare waits for fare verification", () =>
   assert.equal(routes.options.length, 0);
   assert.equal(routes.blockReason, "NO_VERIFIED_FARE");
 });
+
+test("an unpriced domestic flight can still be labeled fastest", () => {
+  const routes = compareRoutes(buildSeed().state, {
+    miles: 380,
+    fares: [{ mode: "bus", amountUsd: 45 }],
+    includeSelfDrive: true,
+    context: {
+      minutes: {
+        bus: { minutes: 610, source: "live transit" },
+        drive: { minutes: 360, source: "live road route" },
+        flight: { minutes: 250, source: "door-to-door flight estimate" },
+      },
+    },
+  });
+  assert.equal(routes.fastest, "flight");
+  assert.ok(routes.options.every((option) => option.mode !== "flight"));
+});

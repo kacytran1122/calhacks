@@ -37,7 +37,7 @@ test("shows a live Google Flights observation beside the trained forecast", asyn
   }));
   render(<TripInsights from={{ lat: 37.6, lon: -122.3 }} to={{ lat: 34.1, lon: -118.2 }} startsAt="2027-01-17T17:00:00Z" fromState="CA" toState="NV" />);
   expect(await screen.findByText("$219")).toBeVisible();
-  expect(screen.getByText(/forecast midpoint \$230/)).toBeVisible();
+  expect(screen.getByText(/verified live fare now.*predicted later \$180–\$310.*midpoint \$230/)).toBeVisible();
   expect(screen.getByRole("link", { name: /Open Google Flights/ })).toHaveAttribute("href", expect.stringContaining("google.com/travel/flights"));
 });
 
@@ -301,7 +301,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
     event: { name: event.name, startsAt: event.startsAt },
     evidence: [
       { id: "fare", kind: "fare", source: "Bright Data", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { fares: [{ mode: "bus", amountUsd: 10.75, link: "https://example.com/fare", quote: "$10.75 total fare" }] } },
-      { id: "guide", kind: "route_guide", source: "Bright Data → Claude", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", sourceUrl: "https://example.com/route", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }] } },
+      { id: "guide", kind: "route_guide", source: "Live routing", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", sourceUrl: "https://example.com/route", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }, { mode: "flight", title: "Fly LAX → SFO", durationText: "About 4 hr door to door", sourceUrl: "https://www.google.com/travel/flights/", sourceQuote: "Estimated door-to-door flight time; verify the live itinerary.", steps: [{ instruction: "Travel to LAX.", detail: "Allow time for security." }, { instruction: "Fly to SFO.", detail: "Check Google Flights." }] }] } },
     ],
     routes: {
       options: [
@@ -309,6 +309,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
         { mode: "rideshare", costCents: 3400, costSource: "fare", pMiss: 0.2, history: { trips: 5, late: 1 }, withinCap: true, withinBudget: true },
       ],
       pick: { mode: "bus" },
+      fastest: "flight",
       cap: 5000,
       travelerBudgetCents: 10000,
     },
@@ -333,7 +334,9 @@ test("shows the best route first with detailed steps, total cost, and alternativ
   expect(await screen.findByText("Best route")).toBeVisible();
   expect(screen.getByText("Walk to the UCLA transit stop.")).toBeVisible();
   expect(screen.getByText("$10.75 total fare", { exact: false })).toBeVisible();
-  expect(screen.getByText("Other ways to get there")).toBeVisible();
+  expect(screen.getByText("Fastest route and alternatives")).toBeVisible();
+  const flightSummary = screen.getAllByText("Fly LAX → SFO").map((element) => element.closest("summary")).find(Boolean);
+  expect(flightSummary).toHaveTextContent("Fastest");
   expect(screen.getAllByText("Rideshare").length).toBeGreaterThan(0);
 });
 

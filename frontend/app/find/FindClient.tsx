@@ -162,11 +162,11 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false, t
   return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}{option.co2eKg !== undefined && <small> · {option.co2eKg} kg CO₂e</small>}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
 }
 
-function UnpricedRouteGuide({ guide, origin, event, best = false }: { guide: RouteGuide; origin: string; event: Listing; best?: boolean }) {
+function UnpricedRouteGuide({ guide, origin, event, best = false, tags = [] }: { guide: RouteGuide; origin: string; event: Listing; best?: boolean; tags?: string[] }) {
   const content = (
       <div className="fd-route-detail">
         <div className="fd-route-head"><div><span>{best ? "Best live route" : "Live alternative"}</span><h3>{guide.title}</h3></div><div className="fd-route-price"><small>fare verification needed</small></div></div>
-        {guide.durationText && <div className="fd-route-facts"><span>{guide.durationText}</span><span>public GTFS / GTFS-Realtime</span></div>}
+        <div className="fd-route-facts">{guide.durationText && <span>{guide.durationText}</span>}<span>{guide.mode === "flight" ? "Google Flights schedule · fare checked separately" : guide.mode === "drive" ? "OSRM live road route" : "public GTFS / GTFS-Realtime"}</span>{tags.map((tag) => <span key={tag} className="fd-tag">{tag}</span>)}</div>
         <ol className="fd-route-steps">
           {guide.steps.map((step, index) => <li key={`${guide.title}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
         </ol>
@@ -175,11 +175,11 @@ function UnpricedRouteGuide({ guide, origin, event, best = false }: { guide: Rou
           <a className="dk-link" href={guide.sourceUrl} target="_blank" rel="noreferrer">Route data sources ↗</a>
         </div>
         <p className="fd-route-source">Route source: {guide.sourceQuote}</p>
-        <p className="dk-note">This route is shown for comparison, but S’mile will not display or approve a total until a public source states the fare.</p>
+        <p className="dk-note">This route is shown for comparison, but S’mile will not approve a total until a public source states the current fare. For flights, the Price outlook below checks Google Flights now and shows a clearly labeled predicted range for later.</p>
       </div>
   );
   if (best) return <section className="fd-route-card best">{content}</section>;
-  return <details className="fd-route-card alternative"><summary><span>{guide.title}</span><b>check fare</b></summary>{content}</details>;
+  return <details className="fd-route-card alternative"><summary><span>{guide.title}{tags.map((tag) => <small key={tag}> · {tag}</small>)}</span><b>check fare</b></summary>{content}</details>;
 }
 
 export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }: { initialZip: string; initialOrigin?: string; initialLat?: number; initialLon?: number }) {
@@ -571,7 +571,10 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
     const index = routeGuides.findIndex((guide, guideIndex) => guide === selectedGuide && !representedGuideIndexes.has(guideIndex));
     if (index >= 0) representedGuideIndexes.add(index);
   }
-  const additionalRouteGuides = routeGuides.filter((_, index) => !representedGuideIndexes.has(index));
+  const additionalRouteGuides = routeGuides
+    .filter((_, index) => !representedGuideIndexes.has(index))
+    .sort((a, b) => Number(b.mode === plan?.routes?.fastest) - Number(a.mode === plan?.routes?.fastest));
+  const guideTags = (guide: RouteGuide) => guide.mode === plan?.routes?.fastest ? ["Fastest"] : [];
   const unpricedPrimary = !pickedRoute ? additionalRouteGuides[0] : undefined;
   const unpricedAlternatives = !pickedRoute ? additionalRouteGuides.slice(1) : additionalRouteGuides;
 
@@ -655,8 +658,8 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
         <>
           {constraint?.data.summary && <div className="fd-constraint-ready"><b>Travel requirement applied</b><span>{String(constraint.data.summary)}</span></div>}
           {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} best tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
-          {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best />}
-          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} />)}</section>}
+          {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best tags={guideTags(unpricedPrimary)} />}
+          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Fastest route and alternatives</span><small>Every available live itinerary is shown. Unverified fares stay visible for comparison but cannot be approved.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} tags={guideTags(guide)} />)}</section>}
           {plan.routes.carbon && <CarbonCompare carbon={plan.routes.carbon} pick={plan.routes.pick?.mode} fastest={plan.routes.fastest} priced={plan.routes.options.map((o) => o.mode)} carpool={plan.carpool ?? null} />}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
