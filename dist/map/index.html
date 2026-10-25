@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#10130f" />
+    <meta name="description" content="Private, browser-based live directions using your device location." />
+    <title>Directions</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="preconnect" href="https://tile.openstreetmap.org" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+    <link rel="stylesheet" href="/assets/map.css?v=2" />
+  </head>
+  <body>
+    <main id="app">
+      <div id="map" aria-label="Interactive street map"></div>
+
+      <header class="topbar">
+        <form id="search-form" class="search-shell" role="search">
+          <button id="back-button" class="icon-button hidden" type="button" aria-label="Clear destination">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+          </button>
+          <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <input id="destination-input" autocomplete="off" enterkeyhint="search" placeholder="Where are you going?" aria-label="Destination" />
+          <button id="clear-search" class="icon-button hidden" type="button" aria-label="Clear search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>
+          </button>
+        </form>
+        <p id="search-hint" class="map-hint">Search or press and hold the map to set a destination</p>
+        <div id="search-results" class="search-results hidden" aria-live="polite"></div>
+      </header>
+
+      <section id="permission-card" class="permission-card">
+        <div class="permission-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2"/></svg>
+        </div>
+        <div>
+          <b>Use your live location</b>
+          <span>Your position stays in this browser and is only sent to the routing service when a route is requested.</span>
+        </div>
+        <button id="location-permission" type="button">Enable GPS</button>
+      </section>
+
+      <div class="map-controls" aria-label="Map controls">
+        <button id="recenter" class="round-button" type="button" aria-label="Recenter on my location" title="My location">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>
+        </button>
+        <button id="orientation" class="round-button" type="button" aria-label="Point map in travel direction" title="Follow heading">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 6 16-6-3-6 3 6-16Z"/></svg>
+        </button>
+      </div>
+
+      <section id="route-setup" class="bottom-sheet hidden" aria-label="Route choices">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="destination-row">
+          <div><span>Destination</span><b id="destination-name">Selected location</b><small id="destination-address"></small></div>
+          <button id="close-route" class="icon-button" type="button" aria-label="Close route"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+        </div>
+        <div class="mode-tabs" role="tablist" aria-label="Travel mode">
+          <button class="mode-tab active" data-mode="drive" role="tab" aria-selected="true" type="button"><span>↗</span>Drive</button>
+          <button class="mode-tab" data-mode="walk" role="tab" aria-selected="false" type="button"><span>●</span>Walk</button>
+          <button class="mode-tab" data-mode="bike" role="tab" aria-selected="false" type="button"><span>◆</span>Bike</button>
+        </div>
+        <div id="route-status" class="route-status" aria-live="polite">Waiting for your location…</div>
+        <div id="route-options" class="route-options"></div>
+        <button id="start-navigation" class="primary-button" type="button" disabled>Start navigation</button>
+      </section>
+
+      <section id="navigation-panel" class="navigation-panel hidden" aria-label="Live navigation">
+        <div class="instruction-card">
+          <div id="maneuver-icon" class="maneuver-icon" aria-hidden="true">↑</div>
+          <div class="instruction-copy"><span id="step-distance">Starting route</span><b id="step-instruction">Continue to the route</b></div>
+          <button id="end-navigation" class="end-button" type="button">End</button>
+        </div>
+        <div class="progress-card">
+          <div class="journey-head">
+            <div><span>Remaining</span><b id="remaining-distance">—</b></div>
+            <div><span>Arrival</span><b id="arrival-time">—</b></div>
+            <div><span>GPS</span><b id="gps-accuracy">—</b></div>
+          </div>
+          <svg class="street-progress" viewBox="0 0 420 54" preserveAspectRatio="none" role="img" aria-label="Route progress">
+            <path class="road-base" pathLength="100" d="M6 40 C50 5 86 49 126 24 S202 5 238 31 S310 51 344 20 S390 7 414 16" />
+            <path id="road-progress" class="road-progress" pathLength="100" d="M6 40 C50 5 86 49 126 24 S202 5 238 31 S310 51 344 20 S390 7 414 16" />
+            <circle id="progress-dot" cx="6" cy="40" r="6" />
+          </svg>
+          <div class="street-labels"><span id="current-street">Current position</span><span id="progress-percent">0%</span><span id="route-destination">Destination</span></div>
+        </div>
+      </section>
+
+      <div id="toast" class="toast hidden" role="status"></div>
+    </main>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+    <script type="module" src="/assets/map.js?v=2"></script>
+  </body>
+</html>

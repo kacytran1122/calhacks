@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node tests/validate.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

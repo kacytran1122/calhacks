@@ -1,0 +1,8 @@
+.DS_Store
+.vercel
+.railway
+node_modules
+.next
+/backend/
+/frontend/
+npm-debug.log*
