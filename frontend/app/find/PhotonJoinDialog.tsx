@@ -14,11 +14,19 @@ type PhotonJoinDialogProps = {
   tripId: string;
   tripToken: string;
   eventName: string;
+  triggerLabel?: string;
+  triggerClassName?: string;
 };
 
 const FOCUSABLE = 'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
-export function PhotonJoinDialog({ tripId, tripToken, eventName }: PhotonJoinDialogProps) {
+export function PhotonJoinDialog({
+  tripId,
+  tripToken,
+  eventName,
+  triggerLabel = "Message @smile privately in iMessage",
+  triggerClassName = "",
+}: PhotonJoinDialogProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,8 +146,8 @@ export function PhotonJoinDialog({ tripId, tripToken, eventName }: PhotonJoinDia
 
   return (
     <>
-      <button ref={triggerRef} type="button" className="fd-photon-trigger" onClick={launch}>
-        Message @smile privately in iMessage <span aria-hidden="true">→</span>
+      <button ref={triggerRef} type="button" className={`fd-photon-trigger ${triggerClassName}`.trim()} onClick={launch}>
+        {triggerLabel} <span aria-hidden="true">→</span>
       </button>
       {open && createPortal(
         <div className="fd-photon-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>

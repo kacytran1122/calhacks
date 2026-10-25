@@ -169,11 +169,11 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
   return (
     <div className="ti">
       <h3>Price outlook</h3>
-      <p className="dk-mut">For domestic trips between different U.S. states, the pricing agent checks a current Google Flights fare and keeps it separate from the trained forecast. A live fare can change and still requires your approval.</p>
+      <p className="dk-mut">For domestic trips between different U.S. states, compare the current Google Flights result with the trained price forecast.</p>
       {err.price && <p className="dk-note">Price outlook unavailable: {err.price}</p>}
       {!price && !err.price && <p className="dk-mut">Running the price models…</p>}
-      {price && !price.scope.eligible && <p className="dk-note">{price.scope.reason} Live route evidence above is still used for planning.</p>}
-      {price && price.scope.eligible && rows.length === 0 && <p className="dk-note">No demand-based estimate is available for this interstate route. Live route evidence above is still used for planning.</p>}
+      {price && !price.scope.eligible && <p className="dk-note">{price.scope.reason}</p>}
+      {price && price.scope.eligible && rows.length === 0 && <p className="dk-note">No demand-based price forecast is available for this interstate route.</p>}
       {rows.length > 0 && (
         <table className="dk-table tight ti-prices">
           <tbody>
@@ -201,7 +201,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
       {flight && (
         <div className={`ti-live ${flight.live.status === "ok" ? "ok" : "waiting"}`}>
           <div>
-            <span className="ti-live-kicker">Live Google Flights check</span>
+            <span className="ti-live-kicker">Google Flights price check</span>
             <b>{flight.live.fromAirport} → {flight.live.toAirport} · {flight.live.departDate}</b>
             {flight.live.amountUsd !== undefined ? (
               <p>
@@ -211,13 +211,12 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
             ) : flight.live.status === "timeout" && flight.live.snapshotId ? (
               <p>{flightPollingEnded ? "Google Flights is still processing this live search. The trained forecast stays visible, and the trip watcher can continue checking after you leave this page." : "Collecting the current fare now. The pricing agent will update this card automatically while keeping the trained forecast visible."}</p>
             ) : (
-              <p>No exact live fare was verified in this check. The forecast remains planning evidence, not a quoted price.</p>
+              <p>Open Google Flights to check the current fare; the forecast is shown above.</p>
             )}
             <span className="dk-mut ti-small">
               {flight.live.amountUsd !== undefined ? `${flight.live.scope ?? "Lowest visible fare"}. ` : ""}
               {flight.live.via} · checked {new Date(flight.live.observedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
             </span>
-            {flight.live.note && <span className="dk-mut ti-small">{flight.live.note}</span>}
           </div>
           <a href={flight.live.bookingUrl ?? flight.live.sourceUrl} target="_blank" rel="noreferrer">Open Google Flights ↗</a>
         </div>

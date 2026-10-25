@@ -3,7 +3,7 @@
   "name": "S’mile Trip Planner",
   "version": "1.6.2",
   "description": "Plan the fastest route and clear alternatives to the collegiate hackathon page you are viewing.",
-  "homepage_url": "https://smilefromhereto.work/",
+  "homepage_url": "https://smilefromhereto.work/landing",
   "icons": {
     "16": "images/icon-16.png",
     "32": "images/icon-32.png",

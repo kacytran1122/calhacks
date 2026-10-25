@@ -93,11 +93,7 @@ function instructionFor(step: Step, index: number, steps: Step[], context?: { fr
 export function driveRoutesFrom(body: OsrmPayload, sourceUrl: string, context?: { fromLabel?: string; toLabel?: string }): DriveRoute[] {
   return (body.routes ?? []).slice(0, 3).map((route, routeIndex) => {
     const rawSteps = (route.legs ?? []).flatMap((leg) => leg.steps ?? []);
-    const important = new Set(["depart", "arrive", "turn", "merge", "fork", "on ramp", "off ramp", "end of road", "new name", "roundabout", "rotary"]);
-    const selectedSteps = rawSteps
-      .filter((step, index) => index === 0 || index === rawSteps.length - 1 || important.has(step.maneuver?.type ?? "") || (step.distance ?? 0) >= 240)
-      .slice(0, 16);
-    const steps = selectedSteps
+    const steps = rawSteps
       .map((step, index, all) => ({
         instruction: instructionFor(step, index, all, context),
         detail: `${Math.max(0.1, Math.round(((step.distance ?? 0) / 1609.344) * 10) / 10)} mi · ${durationText(step.duration ?? 0)}`,
@@ -111,7 +107,7 @@ export function driveRoutesFrom(body: OsrmPayload, sourceUrl: string, context?: 
       distanceMiles,
       sourceUrl,
       sourceQuote: "Live road routing from the OSRM service using OpenStreetMap road data.",
-      steps: steps.length ? steps : [{ instruction: "Follow the live road route to the event.", detail: `${distanceMiles} mi` }],
+      steps: steps.length ? steps : [{ instruction: "Follow the mapped road route from your starting point to the event entrance.", detail: `${distanceMiles} mi · check current conditions before departure` }],
     };
   });
 }

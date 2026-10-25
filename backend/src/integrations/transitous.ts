@@ -46,10 +46,39 @@ export interface TransitOption {
   durationText: string;
   sourceUrl: string;
   sourceQuote: string;
+  fareUrl?: string;
   steps: TransitStep[];
   agencies: string[];
   amountUsd?: number;
   fareQuote?: string;
+}
+
+const OPERATOR_FARE_PAGES: { agency: RegExp; url: string }[] = [
+  { agency: /\bBART\b|Bay Area Rapid Transit/i, url: "https://www.bart.gov/tickets/calculator" },
+  { agency: /Caltrain/i, url: "https://www.caltrain.com/fares" },
+  { agency: /SamTrans/i, url: "https://www.samtrans.com/fares" },
+  { agency: /AC Transit/i, url: "https://www.actransit.org/fares" },
+  { agency: /San Francisco Municipal|\bSFMTA\b|\bMuni\b/i, url: "https://www.sfmta.com/getting-around/muni/fares" },
+  { agency: /Santa Clara Valley|\bVTA\b/i, url: "https://www.vta.org/go/fares" },
+  { agency: /Metrolink/i, url: "https://metrolinktrains.com/ticketsOverview/" },
+  { agency: /Metro.*Los Angeles|Los Angeles.*Metro/i, url: "https://www.metro.net/riding/fares/" },
+  { agency: /Orange County Transportation|\bOCTA\b/i, url: "https://www.octa.net/getting-around/bus/oc-bus/fares-and-passes/overview/" },
+  { agency: /Amtrak/i, url: "https://www.amtrak.com/tickets/departure.html" },
+  { agency: /Greyhound/i, url: "https://www.greyhound.com/" },
+  { agency: /FlixBus/i, url: "https://www.flixbus.com/" },
+  { agency: /Chicago Transit|\bCTA\b/i, url: "https://www.transitchicago.com/fares/" },
+  { agency: /Washington Metropolitan|\bWMATA\b/i, url: "https://www.wmata.com/fares/" },
+  { agency: /Massachusetts Bay|\bMBTA\b/i, url: "https://www.mbta.com/fares" },
+  { agency: /Metropolitan Transportation Authority|\bMTA\b/i, url: "https://new.mta.info/fares" },
+];
+
+/** Return an operator-owned fare page when the itinerary names a supported agency. */
+export function officialTransitFareUrl(agencies: string[]) {
+  for (const agency of agencies) {
+    const match = OPERATOR_FARE_PAGES.find((candidate) => candidate.agency.test(agency));
+    if (match) return match.url;
+  }
+  return undefined;
 }
 
 export interface TransitPlanResult {
@@ -106,7 +135,7 @@ function toOption(itinerary: Itinerary): TransitOption | null {
   const coach = transit.some((leg) => leg.mode === "COACH");
   const rail = intercityRail || (!coach && transit.some((leg) => /SUBWAY|TRAM/.test(leg.mode)));
   const realtime = transit.filter((leg) => leg.realTime).length;
-  const steps = usable.slice(0, 12).map((leg, index, legs) => {
+  const steps = usable.map((leg, index, legs) => {
     const from = leg.from.name || "your current stop";
     const to = leg.to.name || "the next stop";
     const zone = leg.from.tz || leg.to.tz;
@@ -135,6 +164,7 @@ function toOption(itinerary: Itinerary): TransitOption | null {
     durationText: `${durationText(itinerary.duration)} · ${itinerary.transfers} transfer${itinerary.transfers === 1 ? "" : "s"}`,
     sourceUrl: ATTRIBUTION_URL,
     sourceQuote: `Live GTFS itinerary with ${realtime} real-time transit leg${realtime === 1 ? "" : "s"}; remaining times are scheduled.`,
+    fareUrl: officialTransitFareUrl(agencies),
     steps,
     agencies,
     amountUsd: total,

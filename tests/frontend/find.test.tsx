@@ -302,7 +302,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
     event: { name: event.name, startsAt: event.startsAt },
     evidence: [
       { id: "fare", kind: "fare", source: "Bright Data", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { fares: [{ mode: "bus", amountUsd: 10.75, link: "https://example.com/fare", quote: "$10.75 total fare" }] } },
-      { id: "guide", kind: "route_guide", source: "Live routing", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", durationMinutes: 55, sourceUrl: "https://example.com/route", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }, { mode: "flight", title: "Fly LAX → SFO", durationText: "About 4 hr door to door", durationMinutes: 240, sourceUrl: "https://www.google.com/travel/flights/", sourceQuote: "Estimated door-to-door flight time; verify the live itinerary.", steps: [{ instruction: "Travel to LAX.", detail: "Allow time for security." }, { instruction: "Fly to SFO.", detail: "Check Google Flights." }] }] } },
+      { id: "guide", kind: "route_guide", source: "Live routing", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", durationMinutes: 55, sourceUrl: "https://example.com/route", fareUrl: "https://example.com/fare", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }, { mode: "flight", title: "Combined trip via LAX → SFO", durationText: "About 4 hr door to door", durationMinutes: 240, sourceUrl: "https://www.google.com/travel/flights/", fareUrl: "https://www.google.com/travel/flights/", sourceQuote: "Estimated door-to-door flight time; verify the current itinerary.", steps: [{ instruction: "Take the ground connection to LAX.", detail: "Allow time for security." }, { instruction: "Fly to SFO, then take the final ground connection.", detail: "Check Google Flights and the destination transit route." }] }] } },
     ],
     routes: {
       options: [
@@ -340,17 +340,29 @@ test("shows the best route first with detailed steps, total cost, and alternativ
   await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
   await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
 
-  expect(await screen.findByText("Best route")).toBeVisible();
+  const bestHeading = await screen.findByText("Best route");
+  expect(bestHeading).toBeVisible();
   expect(screen.getByText("Walk to the UCLA transit stop.")).toBeVisible();
   expect(screen.getByText("$10.75 total fare", { exact: false })).toBeVisible();
   expect(screen.getByText("Fastest available itinerary")).toBeVisible();
   expect(screen.getByText("Fastest route")).toBeVisible();
   expect(screen.getByText("Other ways to get there")).toBeVisible();
   expect(screen.getAllByText("Rideshare").length).toBeGreaterThan(0);
+  const bestRoute = bestHeading.closest("section")!;
+  const routeButton = within(bestRoute).getByRole("button", { name: /Open step-by-step route/ });
+  const fareLink = within(bestRoute).getByRole("link", { name: /Check Fare/ });
+  expect(fareLink).toHaveAttribute("href", "https://example.com/fare");
+  expect(routeButton.parentElement).toBe(fareLink.parentElement);
+  expect(screen.queryByText(/live directions?/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Route data sources/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Open data source/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/This route remains visible for comparison/i)).not.toBeInTheDocument();
+  const flightRoute = Array.from(document.querySelectorAll("details.fd-route-card")).find((card) => card.textContent?.includes("Combined trip via LAX → SFO"))!;
+  expect(within(flightRoute).getByRole("button", { name: /Open step-by-step route/, hidden: true })).toBeInTheDocument();
+  expect(within(flightRoute).getByRole("link", { name: /Check Fare/, hidden: true })).toHaveAttribute("href", "https://www.google.com/travel/flights/");
   const beforeHref = window.location.href;
-  const photonButton = screen.getByRole("button", { name: /Message @smile privately in iMessage/ });
-  expect(screen.queryByRole("link", { name: /Message @smile privately in iMessage/ })).not.toBeInTheDocument();
-  await user.click(photonButton);
+  expect(screen.queryByRole("link", { name: /Open step-by-step route/ })).not.toBeInTheDocument();
+  await user.click(routeButton);
   const photonDialog = await screen.findByRole("dialog", { name: "Scan, then send the message" });
   expect(photonDialog).toBeVisible();
   expect(within(photonDialog).queryByRole("textbox")).not.toBeInTheDocument();
@@ -359,7 +371,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
   expect(document.body.innerHTML).not.toContain("token");
 });
 
-test("keeps detailed live transit visible while its fare is being verified", async () => {
+test("keeps detailed transit visible while its fare is being verified", async () => {
   const event = {
     key: "irvine-event", source: "luma", name: "Irvine Build Night", startsAt: "2026-10-25T17:00:00Z", city: "Irvine, CA", venue: "UCI", locationPrecision: "exact" as const, url: "https://lu.ma/irvine", kind: "tech" as const, distanceMiles: 45, fetchedAt: "2026-10-24T00:00:00Z", via: "direct",
   };
@@ -370,9 +382,9 @@ test("keeps detailed live transit visible while its fare is being verified", asy
     evidence: [
       { id: "fare", kind: "fare", source: "Official fares", status: "timeout", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", note: "Bright Data did not respond within 6 seconds", data: { fares: [] } },
       { id: "stop", kind: "stop", source: "Live search", status: "timeout", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", note: "Bright Data did not respond within 6 seconds", data: { results: [] } },
-      { id: "guide", kind: "route_guide", source: "Transitous", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "train", title: "Metro + Metrolink to Irvine", durationText: "2 hrs 20 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Live GTFS itinerary.", steps: [{ instruction: "Take Metro from UCLA to Union Station.", detail: "Check the live platform." }, { instruction: "Take Metrolink to Tustin.", detail: "Transfer to the final local bus." }] }] } },
+      { id: "guide", kind: "route_guide", source: "Transitous", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "train", title: "Metro + Metrolink to Irvine", durationText: "2 hrs 20 min", sourceUrl: "https://transitous.org/sources/", fareUrl: "https://metrolinktrains.com/ticketsOverview/", sourceQuote: "Live GTFS itinerary.", steps: [{ instruction: "Take Metro from UCLA to Union Station.", detail: "Check the current platform." }, { instruction: "Take Metrolink to Tustin.", detail: "Transfer to the final local bus." }] }] } },
     ],
-    routes: { options: [], cap: 4000, travelerBudgetCents: 10000, blockReason: "NO_VERIFIED_FARE" },
+    routes: { options: [], cap: 4000, travelerBudgetCents: 10000 },
     inbox: null,
     buddies: [],
   };
@@ -390,9 +402,17 @@ test("keeps detailed live transit visible while its fare is being verified", asy
   await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
   await user.click(screen.getByLabelText("Include self-drive"));
   await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
-  expect(await screen.findByText("Best live route")).toBeVisible();
+  const bestHeading = await screen.findByText("Best route");
+  expect(bestHeading).toBeVisible();
   expect(screen.getByText("Take Metro from UCLA to Union Station.")).toBeVisible();
-  expect(screen.getByText(/no live source stated a complete trip total/i)).toBeVisible();
+  const bestRoute = bestHeading.closest("section")!;
+  expect(within(bestRoute).getByRole("button", { name: /Open step-by-step route/ })).toBeVisible();
+  expect(within(bestRoute).getByRole("link", { name: /Check Fare/ })).toHaveAttribute("href", "https://metrolinktrains.com/ticketsOverview/");
+  expect(screen.queryByText(/live directions?/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Route data sources/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/fare verification needed/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/This route remains visible for comparison/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/A verified live fare is not available/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Bright Data did not respond/i)).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "A stop on the way" })).not.toBeInTheDocument();
   expect(screen.queryByText(/No route fits organizer policy/i)).not.toBeInTheDocument();

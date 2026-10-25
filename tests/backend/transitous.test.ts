@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { transitOptionsFrom, type TransitPlanPayload } from "../../backend/src/integrations/transitous";
+import { officialTransitFareUrl, transitOptionsFrom, type TransitPlanPayload } from "../../backend/src/integrations/transitous";
 
 const baseTime = "2026-10-24T18:00:00Z";
 
@@ -28,11 +28,38 @@ test("Transitous turns GTFS legs into detailed live route instructions", () => {
   assert.equal(options[0].mode, "train");
   assert.equal(options[0].durationMinutes, 120);
   assert.deepEqual(options[0].agencies, ["Metro - Los Angeles", "Metrolink"]);
+  assert.equal(options[0].fareUrl, "https://www.metro.net/riding/fares/");
   assert.match(options[0].steps[0].instruction, /Walk from UCLA to Westwood/);
   assert.match(options[0].steps[0].instruction, /look for 761 toward Downtown/);
   assert.match(options[0].steps[1].detail ?? "", /live timing/);
   assert.match(options[0].steps[2].instruction, /follow station signs for Orange County Line/);
   assert.match(options[0].steps[2].instruction, /direction of Oceanside/);
+});
+
+test("Transitous links supported agencies to their official fare pages", () => {
+  assert.equal(officialTransitFareUrl(["Bay Area Rapid Transit"]), "https://www.bart.gov/tickets/calculator");
+  assert.equal(officialTransitFareUrl(["Metrolink"]), "https://metrolinktrains.com/ticketsOverview/");
+  assert.equal(officialTransitFareUrl(["Unknown Local Operator"]), undefined);
+});
+
+test("Transitous keeps long multimodal itineraries instead of shortening the instructions", () => {
+  const legs = Array.from({ length: 15 }, (_, index) => ({
+    mode: index % 3 === 0 ? "WALK" : index % 3 === 1 ? "BUS" : "RAIL",
+    from: { name: `Stop ${index}` },
+    to: { name: `Stop ${index + 1}` },
+    duration: 300,
+    startTime: new Date(Date.parse(baseTime) + index * 300_000).toISOString(),
+    endTime: new Date(Date.parse(baseTime) + (index + 1) * 300_000).toISOString(),
+    realTime: false,
+    displayName: index % 3 === 1 ? `Bus ${index}` : index % 3 === 2 ? `Rail ${index}` : undefined,
+    agencyName: index % 3 === 0 ? undefined : "Metrolink",
+  }));
+
+  const options = transitOptionsFrom(payload(legs));
+
+  assert.equal(options[0].steps.length, 15);
+  assert.match(options[0].steps[14].instruction, /Stop 14/);
+  assert.equal(options[0].fareUrl, "https://metrolinktrains.com/ticketsOverview/");
 });
 
 test("Transitous keeps an intercity coach itinerary in the bus category", () => {

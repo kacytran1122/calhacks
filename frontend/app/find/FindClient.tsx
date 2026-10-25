@@ -63,7 +63,7 @@ type ConstraintReview = {
 };
 type ConstraintAnswer = { question: string; answer: string };
 type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean; co2eKg?: number; co2eFormula?: string; minutes?: number; minutesSource?: string };
-type RouteGuide = { mode: string; title: string; durationText: string | null; durationMinutes?: number | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
+type RouteGuide = { mode: string; title: string; durationText: string | null; durationMinutes?: number | null; sourceUrl: string; sourceQuote: string; fareUrl?: string; agencies?: string[]; steps: { instruction: string; detail: string | null }[] };
 type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string; provider?: string; priceScope?: "route_total" | "published_ticket" | "day_pass"; fees?: "included" | "not_applicable" | "not_stated" };
 
 const fmt = (c: number) => (c < 0 ? "-$" : "$") + (Math.abs(c) / 100).toFixed(2);
@@ -115,11 +115,59 @@ function modeName(mode: string) {
   return ({ train: "Train + local transit", bus: "Bus + local transit", rideshare: "Rideshare", flight: "Flight + airport transfer", drive: "Self-drive" } as Record<string, string>)[mode] ?? mode;
 }
 
-function liveDirectionsUrl(origin: string, event: Listing, mode: string) {
-  const destination = event.lat !== undefined && event.lon !== undefined ? `${event.lat},${event.lon}` : [event.venue, event.city].filter(Boolean).join(", ");
-  if (mode === "flight") return `https://www.google.com/travel/flights?q=${encodeURIComponent(`Flights from ${origin} to ${destination}`)}`;
-  const travelmode = mode === "drive" || mode === "rideshare" ? "driving" : "transit";
-  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${travelmode}`;
+function fareCheckUrl(guide?: RouteGuide, fare?: FareItem) {
+  const verifiedFareLink = (() => {
+    if (!fare?.link) return undefined;
+    try {
+      const url = new URL(fare.link);
+      return url.hostname === "transitous.org" && url.pathname.startsWith("/sources") ? undefined : fare.link;
+    } catch {
+      return undefined;
+    }
+  })();
+  if (verifiedFareLink) return verifiedFareLink;
+  if (guide?.fareUrl) return guide.fareUrl;
+  if (guide?.mode === "flight") return guide.sourceUrl;
+  if (guide?.mode === "rideshare") return "https://www.uber.com/global/en/price-estimate/";
+  return undefined;
+}
+
+function fallbackRouteSteps(origin: string, destination: string, event: Listing, mode: string) {
+  const arrival = event.city ? `${destination} in ${event.city}` : destination;
+  if (mode === "flight") {
+    return [
+      { instruction: `Leave ${origin} with enough time for the airport connection and check-in.`, detail: "Use the flight-schedule action below to choose the departure airport and flight, then allow time for the ground trip, security, and the airline’s boarding cutoff." },
+      { instruction: "Travel to the selected departure terminal.", detail: "Follow the terminal shown by the airline, confirm the operating carrier and flight number, and check the departure board before entering security." },
+      { instruction: "Complete check-in, security, and boarding in the order shown by the airline.", detail: "Keep the boarding pass and identification ready, and recheck the gate because assignments can change before departure." },
+      { instruction: "Take the selected flight to the destination airport.", detail: "After landing, follow signs for baggage claim or ground transportation based on whether you checked a bag." },
+      { instruction: `Continue from the arrival airport to ${arrival}.`, detail: "Choose the listed rail, bus, rideshare, or driving connection, complete every transfer shown, and verify the final event entrance before leaving the airport." },
+    ];
+  }
+  if (mode === "train" || mode === "bus") {
+    return [
+      { instruction: `Walk from ${origin} to the first stop or station shown in the itinerary.`, detail: "Check the stop name, boarding side, platform when available, and the departure time before leaving so you do not board from the opposite direction." },
+      { instruction: "Board the first listed service in the correct direction.", detail: "Match the operator, route or line number, and destination sign to the itinerary before boarding; complete any fare purchase or validation required by that operator." },
+      { instruction: "Complete each connection in the order listed.", detail: "At every transfer, follow the named stop or platform, confirm the next service and direction, and keep enough time to walk between boarding points." },
+      { instruction: `Exit at the stop closest to ${arrival}.`, detail: "Check the stop name before getting off, then use the mapped pedestrian segment rather than estimating the remaining direction." },
+      { instruction: `Walk the final segment to ${event.name}.`, detail: "Follow the mapped streets and crossings to the venue entrance, and confirm the entrance or check-in location before ending the trip." },
+    ];
+  }
+  if (mode === "rideshare") {
+    return [
+      { instruction: `Set ${origin} as the exact pickup point.`, detail: "Place the pin where the driver can legally stop, then confirm the pickup address and any building-side instructions before requesting the ride." },
+      { instruction: `Set ${arrival} as the destination.`, detail: "Choose the venue entrance when it appears in the app so the driver does not route only to the center of the property." },
+      { instruction: "Confirm the assigned vehicle before entering.", detail: "Match the driver name, license plate, vehicle model, and pickup location shown in the rideshare app." },
+      { instruction: "Follow the mapped road route to the destination.", detail: "Keep the trip open during travel so you can see route changes and confirm the intended drop-off point with the driver." },
+      { instruction: `Walk from the drop-off point to ${event.name}.`, detail: "Use the signed pedestrian entrance and verify the event check-in location before completing the trip." },
+    ];
+  }
+  return [
+    { instruction: `Start at ${origin} and review the complete road itinerary before departure.`, detail: "Confirm the destination pin, the first road, major junctions, toll settings, and the estimated arrival time before moving the vehicle." },
+    { instruction: "Follow every turn-by-turn maneuver in sequence.", detail: "Stay on the named roads and exits shown in the route, and use current road signs for any closure, detour, or lane restriction encountered along the way." },
+    { instruction: "Recheck the remaining route after each major junction.", detail: "Confirm that the destination and arrival time remain correct; if the route changes, follow the newly displayed maneuvers rather than skipping intermediate steps." },
+    { instruction: `Approach ${arrival} using the final mapped streets.`, detail: "Slow down near the venue, follow posted access rules, and select a legal parking or passenger drop-off location." },
+    { instruction: `Walk from the parking or drop-off point to ${event.name}.`, detail: "Follow venue signs to the correct public entrance and confirm the event check-in location before ending navigation." },
+  ];
 }
 
 function routeDurationMinutes(guide: RouteGuide) {
@@ -132,24 +180,21 @@ function routeDurationMinutes(guide: RouteGuide) {
   return total > 0 ? total : undefined;
 }
 
-function RouteInstructions({ option, guide, fare, origin, event, best = false, tags = [], why }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; best?: boolean; tags?: string[]; why?: string }) {
+function RouteInstructions({ option, guide, fare, origin, event, tripId, tripToken, best = false, tags = [], why }: { option: RouteOption; guide?: RouteGuide; fare?: FareItem; origin: string; event: Listing; tripId: string; tripToken: string; best?: boolean; tags?: string[]; why?: string }) {
   const destination = event.venue || event.city || event.name;
-  const directionsUrl = liveDirectionsUrl(origin, event, option.mode);
-  const steps = guide?.steps?.length ? guide.steps : [
-    { instruction: `Start at ${origin}.`, detail: `Open the live ${option.mode === "drive" || option.mode === "rideshare" ? "road" : "transit"} directions before leaving so the first departure and delays are current.` },
-    { instruction: `Follow the ${modeName(option.mode).toLowerCase()} route to ${destination}.`, detail: "Use the linked live directions for the exact platform, stop, terminal, or pickup point." },
-    { instruction: `Complete the last leg to ${event.name}.`, detail: event.city ? `Confirm the event entrance in ${event.city} before the final transfer.` : "Confirm the event entrance before the final transfer." },
-  ];
+  const checkFareUrl = fareCheckUrl(guide, fare);
+  const steps = guide?.steps?.length ? guide.steps : fallbackRouteSteps(origin, destination, event, option.mode);
   const content = (
     <>
       <div className="fd-route-head">
-        <div><span>{best ? "Best route" : "Alternative"}</span><h3>{guide?.title || modeName(option.mode)}</h3></div>
+        <div><span>{best ? "Best route" : "Alternative route"}</span><h3>{guide?.title || modeName(option.mode)}</h3></div>
         <div className="fd-route-price"><b>{fmt(option.costCents)}</b><small>trip total</small></div>
       </div>
       <div className="fd-route-facts">
         {guide?.durationText && <span>{guide.durationText}</span>}
-        <span>{option.history.trips ? `${Math.round(option.pMiss * 100)}% historical late risk` : "new route · no history yet"}</span>
-        <span>{option.mode === "drive" ? "IRS mileage estimate" : fare ? "exact published fare" : "fare not verified"}</span>
+        {option.history.trips > 0 && <span>{Math.round(option.pMiss * 100)}% historical late risk across {option.history.trips} trip{option.history.trips === 1 ? "" : "s"}</span>}
+        {option.mode === "drive" ? <span>IRS mileage estimate</span> : fare ? <span>Published fare</span> : null}
+        {guide?.agencies?.length ? <span>{guide.agencies.join(" + ")}</span> : null}
         {option.co2eKg !== undefined && <span title={option.co2eFormula}>≈ {option.co2eKg} kg CO₂e per traveler</span>}
         {tags.map((t) => <span key={t} className="fd-tag">{t}</span>)}
       </div>
@@ -157,16 +202,16 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false, t
       <ol className="fd-route-steps">
         {steps.map((step, index) => <li key={`${option.mode}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
       </ol>
-      <div className="fd-cost-box">
-        <div><span>{option.mode === "drive" ? "Estimated driving cost" : "Exact fare found"}</span><b>{fmt(option.costCents)}</b></div>
-        <p>{option.mode === "drive" ? "Mileage estimate based on the current IRS rate and route distance." : fare ? `${fare.provider ? `${fare.provider}: ` : ""}“${fare.quote}”${fare.fees === "included" ? " Taxes and mandatory fees are included in the quoted total." : fare.fees === "not_applicable" ? " This is the published operator fare for the covered ticket or pass." : " The source does not separately state fees."}` : "No explicit live fare was published, so S’mile will not approve an amount."}</p>
-      </div>
+      {(option.mode === "drive" || fare) && (
+        <div className="fd-cost-box">
+          <div><span>{option.mode === "drive" ? "Estimated driving cost" : "Published fare"}</span><b>{fmt(option.costCents)}</b></div>
+          <p>{option.mode === "drive" ? "Mileage estimate based on the current IRS rate and route distance." : `${fare?.provider ? `${fare.provider}: ` : ""}“${fare?.quote}”${fare?.fees === "included" ? " Taxes and mandatory fees are included in the quoted total." : fare?.fees === "not_applicable" ? " This is the published operator fare for the covered ticket or pass." : " The source does not separately state fees."}`}</p>
+        </div>
+      )}
       <div className="dk-row fd-route-links">
-        <a className="dk-btn primary" href={directionsUrl} target="_blank" rel="noreferrer">Open live directions ↗</a>
-        {fare?.link && <a className="dk-link" href={fare.link} target="_blank" rel="noreferrer">Check fare source ↗</a>}
-        {guide?.sourceUrl && <a className="dk-link" href={guide.sourceUrl} target="_blank" rel="noreferrer">Route data sources ↗</a>}
+        <PhotonJoinDialog tripId={tripId} tripToken={tripToken} eventName={event.name} triggerLabel="Open step-by-step route" triggerClassName="dk-btn primary" />
+        {checkFareUrl && <a className="dk-btn ghost" href={checkFareUrl} target="_blank" rel="noreferrer">Check Fare ↗</a>}
       </div>
-      {guide?.sourceQuote && <p className="fd-route-source">Route source: {guide.sourceQuote}</p>}
       {!option.withinCap && <div className="dk-warn">This option is over the organizer cap.</div>}
       {!option.withinBudget && <div className="dk-warn">This option is over your travel budget.</div>}
     </>
@@ -175,28 +220,27 @@ function RouteInstructions({ option, guide, fare, origin, event, best = false, t
   return <details className="fd-route-card alternative"><summary><span>{modeName(option.mode)}{option.co2eKg !== undefined && <small> · {option.co2eKg} kg CO₂e</small>}</span><b>{fmt(option.costCents)}</b></summary><div className="fd-route-detail">{content}</div></details>;
 }
 
-function UnpricedRouteGuide({ guide, origin, event, best = false, tags = [] }: { guide: RouteGuide; origin: string; event: Listing; best?: boolean; tags?: string[] }) {
+function UnpricedRouteGuide({ guide, event, tripId, tripToken, best = false, tags = [] }: { guide: RouteGuide; event: Listing; tripId: string; tripToken: string; best?: boolean; tags?: string[] }) {
+  const checkFareUrl = fareCheckUrl(guide);
   const content = (
       <div className="fd-route-detail">
-        <div className="fd-route-head"><div><span>{best ? "Best live route" : "Live alternative"}</span><h3>{guide.title}</h3></div><div className="fd-route-price"><small>fare verification needed</small></div></div>
+        <div className="fd-route-head"><div><span>{best ? "Best route" : "Alternative route"}</span><h3>{guide.title}</h3></div></div>
         <div className="fd-route-facts">
           {guide.durationText && <span>{guide.durationText}</span>}
-          <span>{guide.mode === "flight" ? "Google Flights schedule · fare checked separately" : guide.mode === "drive" ? "OpenStreetMap + OSRM road route" : "public GTFS / GTFS-Realtime"}</span>
+          {guide.agencies?.length ? <span>{guide.agencies.join(" + ")}</span> : null}
           {tags.map((tag) => <span key={tag} className="fd-tag">{tag}</span>)}
         </div>
         <ol className="fd-route-steps">
           {guide.steps.map((step, index) => <li key={`${guide.title}-${index}`}><i>{index + 1}</i><div><b>{step.instruction}</b>{step.detail && <span>{step.detail}</span>}</div></li>)}
         </ol>
         <div className="dk-row fd-route-links">
-          <a className="dk-btn primary" href={liveDirectionsUrl(origin, event, guide.mode)} target="_blank" rel="noreferrer">Open live directions ↗</a>
-          <a className="dk-link" href={guide.sourceUrl} target="_blank" rel="noreferrer">Route data sources ↗</a>
+          <PhotonJoinDialog tripId={tripId} tripToken={tripToken} eventName={event.name} triggerLabel="Open step-by-step route" triggerClassName="dk-btn primary" />
+          {checkFareUrl && <a className="dk-btn ghost" href={checkFareUrl} target="_blank" rel="noreferrer">Check Fare ↗</a>}
         </div>
-        <p className="fd-route-source">Route source: {guide.sourceQuote}</p>
-        <p className="dk-note">This route remains visible for comparison, but S’mile will not approve a total until a public source states the current fare. Flight duration is a labeled door-to-door estimate; the price section checks Google Flights separately.</p>
       </div>
   );
   if (best) return <section className="fd-route-card best">{content}</section>;
-  return <details className="fd-route-card alternative"><summary><span>{guide.title}{tags.map((tag) => <small key={tag}> · {tag}</small>)}</span><b>check fare</b></summary>{content}</details>;
+  return <details className="fd-route-card alternative"><summary><span>{guide.title}{tags.map((tag) => <small key={tag}> · {tag}</small>)}</span><b>{guide.durationText ?? "View details"}</b></summary>{content}</details>;
 }
 
 export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, initialEnteredOrigin, initialNotice, onHome, onOriginChange }: { initialZip: string; initialOrigin?: string; initialLat?: number; initialLon?: number; initialEnteredOrigin?: { zip: string; label: string }; initialNotice?: string; onHome?: () => void; onOriginChange?: (origin: TravelOrigin) => void }) {
@@ -693,13 +737,13 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
             <section className="fd-fastest" aria-label="Fastest available itinerary">
               <span>Fastest available itinerary</span>
               <div><b>{fastestGuide.title}</b>{fastestGuide.durationText && <strong>{fastestGuide.durationText}</strong>}</div>
-              <small>Ranked by current transit and road times plus a clearly labeled door-to-door flight estimate. Fare verification is separate.</small>
+              <small>Includes the ground connections and transfers shown in the itinerary.</small>
             </section>
           )}
-          {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} best tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
-          {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} origin={originText || zip} event={event} best tags={tagsForGuide(unpricedPrimary)} />}
-          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span><small>Compare each live itinerary; S’mile labels any fare it cannot verify.</small></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} origin={originText || zip} event={event} tags={tagsForGuide(guide)} />)}</section>}
-          {plan.routes.carbon && <CarbonCompare carbon={plan.routes.carbon} pick={plan.routes.pick?.mode} fastest={plan.routes.fastest} priced={plan.routes.options.map((o) => o.mode)} carpool={plan.carpool ?? null} />}
+          {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} best tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
+          {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} best tags={tagsForGuide(unpricedPrimary)} />}
+          {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span></div>{alternativeRoutes.map((option) => <RouteInstructions key={option.mode} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} tags={tagsForGuide(guide)} />)}</section>}
+          {plan.routes.carbon && <CarbonCompare carbon={plan.routes.carbon} pick={plan.routes.pick?.mode} fastest={plan.routes.fastest} carpool={plan.carpool ?? null} />}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
             <i aria-hidden="true">→</i>
@@ -717,9 +761,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
           {plan.routes.blockReason === "MAX_DISTANCE" && (
             <div className="dk-q"><b>This event is outside your distance limit.</b><p>Go back and increase the maximum distance only if you want to.</p></div>
           )}
-          {plan.routes.blockReason === "NO_VERIFIED_FARE" && <p className="dk-note">No payment approval was created because no live source stated a complete trip total. Review the route now, then refresh closer to departure or open the live source to confirm the fare.</p>}
           {plan.routes.blockReason === "ORGANIZER_CAP" && <p className="dk-note">No route fits organizer policy R1. The finance controller—not the traveler—receives the exception request.</p>}
-          {fare?.status !== "ok" && plan.routes.blockReason !== "NO_VERIFIED_FARE" && <p className="dk-note">A verified live fare is not available for this route yet. S’mile will not estimate or invent a price.{includeSelfDrive ? " Driving cost uses the IRS mileage rate and the live route distance." : ""}</p>}
 
           {stops?.status === "ok" && stopItems.length > 0 && (
             <section className="fd-stop-options">

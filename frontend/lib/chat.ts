@@ -86,7 +86,7 @@ function tripReply(r: Room, name: string, me: string, p: PlanTripResult, approva
   if (!p.routes) return [bot(r, `@${me} I couldn’t work out the distance to ${p.event.name} (the ZIP or venue location wasn’t found). Try another ZIP, or check the event link.`)];
   if (!pick) {
     const reason = p.routes.blockReason === "NO_VERIFIED_FARE"
-      ? `I found routes to ${p.event.name}, but no live source stated a complete fare, so I did not create a payment approval.`
+      ? `I found routes to ${p.event.name}. Open the trip planner and use Check Fare beside a route before approving it.`
       : p.routes.blockReason === "TRAVELER_BUDGET"
         ? `no route to ${p.event.name} fits your travel budget.`
         : p.routes.blockReason === "MAX_DISTANCE"

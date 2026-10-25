@@ -70,7 +70,7 @@ test("price_watch compares a live Google Flights fare with the trained forecast 
   assert.equal(evidence.data.predictedCents, 19_000);
   assert.equal(evidence.data.liveSnapshotId, "s_scheduler123");
   assert.equal(evidence.data.liveCollectionState, "ready");
-  assert.match(notices()[0]!.question, /Live Google Flights check.*\$150\.00.*forecast is \$152\.00–\$247\.00/);
+  assert.match(notices()[0]!.question, /Google Flights price check.*\$150\.00.*forecast is \$152\.00–\$247\.00/);
 });
 
 test("a pending Google Flights snapshot is resumed promptly and stops after it is ready", async () => {

@@ -60,7 +60,9 @@ const RouteGuideCandidates = z.object({
       durationMinutes: z.number().positive().nullable().optional(),
       sourceUrl: z.string(),
       sourceQuote: z.string().min(1).max(300),
-      steps: z.array(z.object({ instruction: z.string().min(1).max(220), detail: z.string().max(300).nullable() })).min(1).max(8),
+      fareUrl: z.string().url().optional(),
+      agencies: z.array(z.string().min(1).max(120)).max(12).optional(),
+      steps: z.array(z.object({ instruction: z.string().min(1).max(320), detail: z.string().max(420).nullable() })).min(1).max(64),
     }),
   ).max(4),
 });
@@ -128,11 +130,18 @@ async function extractRouteGuides(results: SerpOrganic[], from: string, to: stri
   try {
     const candidates = await structured(RouteGuideCandidates, {
       model: "extract",
-      system: "Build concise door-to-door travel instructions using only the supplied live search-result titles and descriptions. Produce the best supported train, bus, rideshare, or flight options. Preserve an exact transit line, stop, transfer, duration, or schedule only when it appears in the evidence. Set durationMinutes only when the evidence states an exact duration; otherwise omit it. Never invent route details. When the evidence omits a detail, tell the traveler to confirm that part in the linked live directions. sourceQuote must be one exact contiguous quote from the supplied result for sourceUrl.",
+      system: "Build complete, leg-by-leg door-to-door travel instructions using only the supplied current search-result titles and descriptions. Do not shorten a route to a generic summary. Include every grounded walking connection, boarding stop, operator and line, headsign or direction, transfer location, alighting stop, airport terminal step, and final walk that the evidence supports. Produce the best supported train, bus, rideshare, or flight options. Preserve an exact stop, transfer, duration, or schedule only when it appears in the evidence. Set durationMinutes only when the evidence states an exact duration; otherwise omit it. Never invent route details. When evidence omits a detail, say exactly what the traveler must confirm in the linked step-by-step directions. Include agencies when the evidence names them. Set fareUrl only to an operator-owned fare or booking page that appears verbatim in the supplied results; otherwise omit it. sourceQuote must be one exact contiguous quote from the supplied result for sourceUrl.",
       user: JSON.stringify({ from, to, requirement, results }),
       effort: "low",
     });
-    const guides = candidates.options.filter((option) => links.has(option.sourceUrl) && corpus.includes(option.sourceQuote.toLowerCase()));
+    const guides = candidates.options
+      .filter((option) => links.has(option.sourceUrl) && corpus.includes(option.sourceQuote.toLowerCase()))
+      .map((option) => ({
+        ...option,
+        // Only expose a fare link that was present in the fetched result set. This
+        // keeps a model-generated URL from becoming a user-facing action.
+        fareUrl: option.fareUrl && links.has(option.fareUrl) ? option.fareUrl : undefined,
+      }));
     return { guides, extractedBy: "claude (routes grounded in live search snippets)" };
   } catch {
     return { guides: [] as RouteGuide[], extractedBy: "unavailable" };
@@ -209,7 +218,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     fareResults.length ? extractFares(fareResults, fromCity, destination, routeContext) : Promise.resolve({ fares: [] as { mode: string; amountUsd: number; link: string; quote: string }[], extractedBy: "none" }),
     directionResults.length ? extractRouteGuides(directionResults, fromCity, destination, args.travelConstraintSummary) : Promise.resolve({ guides: [] as RouteGuide[], extractedBy: "none" }),
   ]);
-  const transitFares = transit.options.flatMap((option) => option.amountUsd && option.fareQuote ? [{ mode: option.mode, amountUsd: option.amountUsd, link: option.sourceUrl, quote: option.fareQuote, routeTitle: option.title, provider: option.agencies.join(" + ") || "public transit operator", priceScope: "route_total" as const, fees: "not_applicable" as const }] : []);
+  const transitFares = transit.options.flatMap((option) => option.amountUsd && option.fareQuote ? [{ mode: option.mode, amountUsd: option.amountUsd, link: option.fareUrl ?? option.sourceUrl, quote: option.fareQuote, routeTitle: option.title, provider: option.agencies.join(" + ") || "public transit operator", priceScope: "route_total" as const, fees: "not_applicable" as const }] : []);
   const fares = [...officialFares, ...transitFares, ...fareExtraction.fares].filter((fare, index, all) => all.findIndex((candidate) => candidate.mode === fare.mode && candidate.amountUsd === fare.amountUsd) === index);
   const fareStatus = fares.length ? "ok" : targetedFareSerp?.status === "error" ? targetedFareSerp.status : fareSerp.status === "ok" ? "empty" : fareSerp.status;
   out.push(
@@ -223,7 +232,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
     }),
   );
 
-  const transitGuides: RouteGuide[] = transit.options.map((option) => ({ mode: option.mode, title: option.title, durationText: option.durationText, durationMinutes: option.durationMinutes, sourceUrl: option.sourceUrl, sourceQuote: option.sourceQuote, steps: option.steps }));
+  const transitGuides: RouteGuide[] = transit.options.map((option) => ({ mode: option.mode, title: option.title, durationText: option.durationText, durationMinutes: option.durationMinutes, sourceUrl: option.sourceUrl, sourceQuote: option.sourceQuote, fareUrl: option.fareUrl, agencies: option.agencies, steps: option.steps }));
   const roadGuides: RouteGuide[] = args.includeSelfDrive === false
     ? []
     : (road?.routes ?? []).map((route) => ({ mode: "drive", title: route.title, durationText: route.durationText, durationMinutes: route.durationMinutes, sourceUrl: route.sourceUrl, sourceQuote: route.sourceQuote, steps: route.steps }));
@@ -233,17 +242,22 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const flightGuide: RouteGuide[] = airfare && flightMinutes && event.startsAt
     ? [{
         mode: "flight",
-        title: `Fly ${airfare.from.code} → ${airfare.to.code}`,
+        title: `Combined trip via ${airfare.from.code} → ${airfare.to.code}`,
         durationText: `About ${Math.floor(flightMinutes / 60)} hr ${flightMinutes % 60} min door to door`,
         durationMinutes: flightMinutes,
         sourceUrl: flightDatePassed || !flightDepartDate ? "https://www.google.com/travel/flights/" : googleFlightsUrl(airfare.from.code, airfare.to.code, flightDepartDate),
+        fareUrl: flightDatePassed || !flightDepartDate ? "https://www.google.com/travel/flights/" : googleFlightsUrl(airfare.from.code, airfare.to.code, flightDepartDate),
         sourceQuote: flightDatePassed
           ? "Estimated door-to-door time includes airport buffers. The event's departure date has passed, so no current fare is claimed; choose a new date in Google Flights."
           : "Estimated door-to-door time includes a 90-minute airport arrival buffer and 60 minutes of combined airport transfers; verify the current itinerary in Google Flights.",
         steps: [
-          { instruction: `Travel from ${fromCity} to ${airfare.from.code}.`, detail: "Allow enough time for the airport transfer and security." },
-          { instruction: `Fly ${airfare.from.code} to ${airfare.to.code}.`, detail: flightDatePassed ? "The event date has passed. Choose a new departure date before checking a live fare." : "Open Google Flights for the current schedule and verified live fare." },
-          { instruction: `Continue from ${airfare.to.code} to ${destination}.`, detail: "Check live road or transit conditions for the final transfer." },
+          { instruction: `Start the ground connection from ${fromCity} to ${airfare.from.city} ${airfare.from.code}.`, detail: `Use the transit or road directions for the exact pickup point, stops, transfers, and terminal. This first leg is part of the combined itinerary.` },
+          { instruction: `Arrive at ${airfare.from.code} before the airline's check-in cutoff.`, detail: "Confirm the operating airline and terminal, then allow at least 90 minutes for check-in, security, and the walk to the gate." },
+          { instruction: `Check the departure board and walk to the assigned gate.`, detail: "Recheck the flight number, boarding time, gate, identification requirements, and any baggage rules before joining the boarding line." },
+          { instruction: `Fly from ${airfare.from.code} to ${airfare.to.code}.`, detail: flightDatePassed ? "The event date has passed. Choose a new departure date before checking a current fare." : "Use View flight schedule for the exact departure and arrival, then use Check Fare for the currently displayed total." },
+          { instruction: `After landing at ${airfare.to.code}, follow signs to the correct terminal exit or ground-transport area.`, detail: "Collect checked baggage if needed and confirm the pickup bay, rail station, bus stop, or rideshare zone before leaving the terminal." },
+          { instruction: `Take the destination ground connection from ${airfare.to.city} ${airfare.to.code} to ${destination}.`, detail: "Open the transit or road itinerary for the precise line, platform, transfers, stop, and final walking segment." },
+          { instruction: `Finish at the entrance for ${event.name || "the event"}.`, detail: "Use the venue address—not only the city name—and allow time to walk from the final stop or drop-off area to check-in." },
         ],
       }]
     : [];

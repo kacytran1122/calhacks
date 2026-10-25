@@ -11,7 +11,7 @@ const kg = (v: number) => `${v.toLocaleString("en-US", { maximumFractionDigits: 
  * CO₂e per traveler for every way to get there, one bar per mode on a shared scale. Every number
  * shows its formula, factor and source next to it; nothing is labeled low-carbon without that.
  */
-export function CarbonCompare({ carbon, pick, fastest, priced, carpool }: { carbon: CarbonComparison; pick?: string; fastest?: string; priced: string[]; carpool: Carpool | null }) {
+export function CarbonCompare({ carbon, pick, fastest, carpool }: { carbon: CarbonComparison; pick?: string; fastest?: string; carpool: Carpool | null }) {
   if (!carbon.estimates.length) return null;
   const max = Math.max(...carbon.estimates.map((e) => e.kg), 0.1);
   const chosen = carbon.estimates.find((e) => e.mode === pick);
@@ -52,7 +52,6 @@ export function CarbonCompare({ carbon, pick, fastest, priced, carpool }: { carb
                   {e.mode === pick && <span className="cc-tag pick">Recommended</span>}
                   {e.mode === carbon.lowest && <span className="cc-tag">Lowest carbon</span>}
                   {e.mode === fastest && <span className="cc-tag">Fastest</span>}
-                  {!priced.includes(e.mode) && e.mode !== "carpool" && <span className="cc-tag muted">no verified fare</span>}
                 </span>
                 <small className="cc-formula">
                   {e.formula}.{" "}

@@ -28,7 +28,7 @@ declare global {
 }
 
 const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
-const WEBSITE = "https://smilefromhereto.work";
+const WEBSITE = "https://smilefromhereto.work/landing";
 const websiteLink = () => `<div class="website">Want to learn more about S’mile? <a href="${WEBSITE}" target="_blank" rel="noreferrer">Visit the website ↗</a></div>`;
 
 function isMlhSchedule() {
@@ -151,7 +151,7 @@ function createPlanner(events: EventChoice[]) {
         return;
       }
       selected = { ...selected, location: destination };
-      output.innerHTML = `<div class="loading"><div class="spinner"></div>Checking live routes to ${esc(selected.name)}…</div>`;
+      output.innerHTML = `<div class="loading"><div class="spinner"></div>Checking routes to ${esc(selected.name)}…</div>`;
       const planButton = query<HTMLButtonElement>("#plan");
       planButton.disabled = true;
       const response = await chrome.runtime.sendMessage({ type: "route", body: { originText: originText || undefined, originCoordinates: currentCoordinates, includeSelfDrive, event: selected } }) as { ok: boolean; json: RoutePlan & { error?: string } };
@@ -170,10 +170,12 @@ function createPlanner(events: EventChoice[]) {
     const icon = (mode: string) => mode === "drive" ? "⌁" : mode === "train" ? "▰" : "▣";
     const routes = plan.routes.map((route) => {
       const fastest = route.id === plan.fastestRouteId;
-      return `<article class="route ${fastest ? "fast" : ""}"><div class="route-head">${fastest ? `<span class="badge">Fastest route</span>` : `<span class="badge" style="background:#eee7f3;color:#5b416e">Alternative</span>`}<div class="route-line"><div class="mode">${icon(route.mode)}</div><div class="route-copy"><div class="route-title">${esc(route.title)}</div><div class="time">${esc(route.durationText)}</div></div></div><div class="route-meta">${esc(route.mode === "drive" && route.distanceMiles ? `${route.distanceMiles} miles · ` : "")}${esc(route.sourceLabel)}</div></div><div class="steps">${route.steps.map((step, index) => `<div class="step"><span class="num">${index + 1}</span><div><b>${esc(step.instruction)}</b>${step.detail ? `<small>${esc(step.detail)}</small>` : ""}</div></div>`).join("")}<a class="source" href="${esc(route.sourceUrl)}" target="_blank" rel="noreferrer">Open live source ↗</a></div></article>`;
+      const distance = route.mode === "drive" && route.distanceMiles ? `<div class="route-meta">${esc(`${route.distanceMiles} miles`)}</div>` : "";
+      const directionsLabel = route.mode === "drive" ? "View turn-by-turn directions" : "View transit directions";
+      return `<article class="route ${fastest ? "fast" : ""}"><div class="route-head">${fastest ? `<span class="badge">Fastest route</span>` : `<span class="badge" style="background:#eee7f3;color:#5b416e">Alternative</span>`}<div class="route-line"><div class="mode">${icon(route.mode)}</div><div class="route-copy"><div class="route-title">${esc(route.title)}</div><div class="time">${esc(route.durationText)}</div></div></div>${distance}</div><div class="steps">${route.steps.map((step, index) => `<div class="step"><span class="num">${index + 1}</span><div><b>${esc(step.instruction)}</b>${step.detail ? `<small>${esc(step.detail)}</small>` : ""}</div></div>`).join("")}<a class="source" href="${esc(route.sourceUrl)}" target="_blank" rel="noreferrer">${directionsLabel} ↗</a></div></article>`;
     }).join("");
     const eventImage = plan.event.imageUrl || new URL("/favicon.ico", plan.event.url).href;
-    root.querySelector<HTMLElement>(".body")!.innerHTML = `<div class="summary"><img src="${esc(eventImage)}" alt="${esc(`${plan.event.name} artwork`)}"><div class="summary-copy"><b>${esc(plan.event.name)}</b><span>${esc(plan.originLabel)} → ${esc(plan.destinationLabel)}</span></div></div>${routes ? `<div class="agent-note"><b>Your S’mile route agent mapped the handoffs.</b>Follow the street, stop, line, direction, and transfer details below. The fastest live option is first, with practical backups after it.</div>` : ""}${routes || `<div class="error">No route is available right now. ${esc(plan.messages.join(" "))}</div>`}${plan.messages.length && routes ? `<div class="note">${esc(plan.messages.join(" "))}</div>` : ""}<button id="again" class="primary again">Change trip details</button>${websiteLink()}`;
+    root.querySelector<HTMLElement>(".body")!.innerHTML = `<div class="summary"><img src="${esc(eventImage)}" alt="${esc(`${plan.event.name} artwork`)}"><div class="summary-copy"><b>${esc(plan.event.name)}</b><span>${esc(plan.originLabel)} → ${esc(plan.destinationLabel)}</span></div></div>${routes ? `<div class="agent-note"><b>Your S’mile route agent mapped the handoffs.</b>Follow the street, stop, line, direction, and transfer details below. The fastest option is first, with practical backups after it.</div>` : ""}${routes || `<div class="error">No route is available right now. ${esc(plan.messages.join(" "))}</div>`}${plan.messages.length && routes ? `<div class="note">${esc(plan.messages.join(" "))}</div>` : ""}<button id="again" class="primary again">Change trip details</button>${websiteLink()}`;
     if (shell) shell.scrollTop = 0;
     root.querySelector<HTMLButtonElement>("#again")!.onclick = renderForm;
   }

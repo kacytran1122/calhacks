@@ -15,7 +15,7 @@ export default function SupportPage() {
       <article style={{ maxWidth: 760, margin: "0 auto", lineHeight: 1.65 }}>
         <a href="/landing" style={{ color: "#29163d", fontWeight: 900, textDecoration: "none", fontSize: "1.2rem" }}>s’☺mile</a>
         <h1 style={{ fontSize: "clamp(2.4rem, 8vw, 4.8rem)", lineHeight: .96, letterSpacing: "-.055em", margin: "2rem 0 1rem" }}>Trip Planner support</h1>
-        <p style={{ color: "#6f6075", fontSize: "1.05rem" }}>Help with event detection, location access, and live route planning.</p>
+        <p style={{ color: "#6f6075", fontSize: "1.05rem" }}>Help with event detection, location access, and route planning.</p>
 
         <section style={sectionStyle}>
           <h2 style={headingStyle}>The event was not detected</h2>
