@@ -12,7 +12,7 @@ import { currentOfficialFares } from "../integrations/official-fares";
 import type { EventFacts } from "./scout";
 
 const agent = { kind: "agent" as const, id: "evidence" as const };
-const LIVE_SEARCH_TIMEOUT_MS = 8_000;
+const LIVE_SEARCH_TIMEOUT_MS = 10_000;
 
 function push(state: State, e: Omit<Evidence, "id" | "fetchedAt" | "provenance"> & { provenance?: Evidence["provenance"] }): Evidence {
   const full: Evidence = { id: newId(`EV-${e.kind}`), fetchedAt: new Date().toISOString(), provenance: "live", ...e };

@@ -134,7 +134,7 @@ export async function serp(query: string, attempts = 3, timeoutMs = 12_000): Pro
       }
     }
     if (last.status === "error" && last.error?.includes("not set")) break;
-    await sleep(1200);
+    if (i < attempts - 1) await sleep(1200);
   }
   return { status: last.status, attempts: used, ms: Date.now() - t0, errorCode: last.errorCode, error: last.error };
 }
