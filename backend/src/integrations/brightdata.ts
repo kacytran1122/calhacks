@@ -120,7 +120,7 @@ export async function scrapeDataset<T = unknown>(datasetId: string, input: Recor
       method: "POST",
       signal: ctrl.signal,
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify(input),
     });
     const text = await res.text();
     if (res.status === 202) {
@@ -155,12 +155,12 @@ export async function triggerDataset(datasetId: string, input: Record<string, un
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const params = new URLSearchParams({ dataset_id: datasetId, notify: "false", include_errors: "true" });
+    const params = new URLSearchParams({ dataset_id: datasetId, format: "json", notify: "false", include_errors: "true" });
     const res = await fetch(`${API}/datasets/v3/trigger?${params}`, {
       method: "POST",
       signal: ctrl.signal,
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify(input),
     });
     const text = await res.text();
     if (!res.ok) return { status: res.status === 403 || res.status === 429 ? "blocked" : "error", attempts: 1, ms: Date.now() - t0, error: `Bright Data trigger HTTP ${res.status}: ${text.slice(0, 240)}` };

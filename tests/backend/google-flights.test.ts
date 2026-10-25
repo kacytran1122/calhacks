@@ -63,6 +63,7 @@ test("non-Google source URLs are never fetched", async (t) => {
   assert.match(quote.sourceUrl, /^https:\/\/www\.google\.com\/travel\/flights\?/);
   assert.doesNotMatch(triggerBody, /example\.com/);
   assert.match(triggerBody, /google\.com\/travel\/flights/);
+  assert.ok(Array.isArray(JSON.parse(triggerBody)));
 });
 
 test("opaque booking URLs cannot silently replace the route being checked", async (t) => {
