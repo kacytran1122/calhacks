@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
-import { signedVisaHeaders } from "../../backend/src/integrations/visaAcceptance";
+import { signedVisaHeaders } from "../../backend/visa/visaAcceptance";
 
 test("Visa Acceptance signs the exact request body and required headers", () => {
   const body = JSON.stringify({ orderInformation: { amountDetails: { totalAmount: "12.00", currency: "USD" } } });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { trialBalance } from "../../backend/src/ledger";
+import { trialBalance } from "../../backend/hyphenate/ledger";
 import { buildSeed } from "../../backend/src/seed/trips";
 
 test("seeded double-entry books balance", () => {

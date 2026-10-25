@@ -1,4 +1,4 @@
-import { appendAudit } from "./audit";
+import { appendAudit } from "../hyphenate/audit";
 import { discoverCall, discoverEvents, type DiscoverOptions, type DiscoverResult } from "./agents/discover";
 import { heatCall, heatMapAround, type HeatMap } from "./agents/heat";
 import { checkFlightPrice, estimatePrices, flightPriceCall, pricingCall, type FlightPriceCheck, type PriceEstimate } from "./agents/pricing";

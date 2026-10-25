@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Cents, Mandate } from "../types";
+import type { Cents, Mandate } from "../src/types";
 
 export function createMandate(args: { tripId: string; maxCents: Cents; merchantCategory: string; requestedBy: string; ttlHours?: number }): Mandate {
   return {

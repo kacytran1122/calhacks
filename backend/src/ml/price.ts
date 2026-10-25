@@ -206,15 +206,18 @@ export function flightFactor(hour: number, dow: number): number {
 }
 
 /** Cheapest predicted airport pair between two points, with prices by departure hour; null when flying doesn't make sense. */
-export function estimateAirfare(args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; when: string; timeZone?: string }): AirfareEstimate | null {
+export function estimateAirfare(args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; when: string; timeZone?: string; fromAirport?: string; toAirport?: string }): AirfareEstimate | null {
   if (haversineMiles(args.from, args.to) < 150) return null;
   const when = new Date(args.when);
   const quarter = Math.floor(when.getUTCMonth() / 3) + 1;
   const year = Math.min(when.getUTCFullYear(), AIRFARE.latest_year); // trees can't see past their last training year
   let best: Omit<AirfareEstimate, "byHour" | "cheapestHour"> | null = null;
   let bestCost = Infinity;
-  for (const o of airportsNear(args.from))
-    for (const d of airportsNear(args.to)) {
+  const candidates = (point: { lat: number; lon: number }, airport?: string) => airport
+    ? AIRFARE.airports.filter((a) => a.code === airport.toUpperCase()).map((a) => ({ ...a, miles: haversineMiles(point, a) }))
+    : airportsNear(point);
+  for (const o of candidates(args.from, args.fromAirport))
+    for (const d of candidates(args.to, args.toAirport)) {
       if (o.code === d.code) continue;
       const miles = Math.round(haversineMiles(o, d));
       if (miles < 100) continue;

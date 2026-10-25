@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { capFor, isImmaterial, materialityFor } from "../../backend/src/policy";
+import { capFor, isImmaterial, materialityFor } from "../../backend/hyphenate/policy";
 
 test("distance caps stay on every policy boundary", () => {
   assert.equal(capFor(50), 4_000);

@@ -32,13 +32,19 @@ Only these product areas live at the repository root. Generated files, credentia
 |---|---|
 | `frontend/app` | Landing page, event search, traveler planning, chat, and organizer desk |
 | `frontend/extension` | Read-only Chrome extension for public event pages |
-| `backend/src/agents` | Scout, Evidence, Route, Policy, Payments, Reconciler, Auditor, Discover, Heat, Pricing, and the @smile Concierge |
+| `backend/src/agents` | Scout, Evidence, Route, Discover, Heat, Pricing, and the @smile Concierge |
 | `backend/src/scheduler.ts` | Wakes the agents on a timer: backlog, price, weather, and event-date checks |
 | `backend/src/carbon.ts` | CO₂e per traveler for every way to get there, from published emission factors |
-| `backend/src/integrations` | Bright Data, Google Flights live pricing, public transit, official fares, weather, geocoding, and Visa sandbox adapters |
-| `backend/src` | Policy, permissions, orchestration, authentication, ledger, and audit trail |
+| `backend/src/integrations` | Bright Data, Google Flights live pricing, public transit, official fares, weather, and geocoding |
+| `backend/src` | Shared permissions, orchestration, authentication, persistence, and runtime model inference |
 | `backend/photon` | Photon 2.0 iMessage transport |
+| `backend/visa` | Sandbox authorization, simulated mandates, and payment execution |
+| `backend/hyphenate` | Finance policy, approval controls, ledger, audit trail, reconciliation, and audit explanations |
+| `backend/ml` | Trained model artifacts and training notebooks |
+| `backend/scripts` | Setup, seed, discovery, evaluation, and scheduler entry points |
 | `backend/.data` | Local SQLite books, auth, and event snapshots; never committed |
+
+The chat concierge runs a bounded reasoning loop: it chooses a specialist tool, reads the result, and decides whether another step is needed. Its tools include event discovery, trip planning, current flight prices, historical price estimates, and venue heat. Tool calls run under separate permissions and enter the audit trail. The auditor also uses model reasoning over evidence. Routing scores, finance policy, payment controls, and ledger reconciliation use deterministic code, while scheduled jobs revisit prices, weather, and event changes. This is a hybrid agent system with specialist workers; the registered worker names do not mean every worker is an independent reasoning model.
 
 ## Local development
 
@@ -115,7 +121,7 @@ No production deployment occurs without an explicitly configured hosting environ
 
 Two planning aids in the trip pane: **a model produces evidence, plain code decides**.
 
-**Live flight price + forecast.** For domestic interstate trips, the Pricing agent sends the exact airport pair and travel date to Bright Data's maintained Google Flights scraper. A first request starts one asynchronous collection and returns its snapshot ID; the trip pane keeps checking that same snapshot until a current USD fare is ready, rather than starting duplicate paid jobs. It records the observed fare, provider, source link, and timestamp, then keeps that observation separate from the p10 / p50 / p90 range produced by the trained models. If collection cannot start, the agent can use a grounded public-page extraction, but it never invents a price. The scheduled price watcher also preserves a pending snapshot and later resumes it. No observation approves, books, or silently replaces a trip amount.
+**Live flight price + forecast.** For domestic interstate trips, the Pricing agent builds a new Google Flights search for the selected airport pair and travel date. A first request starts one asynchronous Bright Data collection and returns its snapshot ID; the trip pane keeps checking that same snapshot until a current USD fare is ready. It records the observed fare, provider, source link, and timestamp, alongside the p10 / p50 / p90 range from the trained models. If collection cannot start or its completed data has no verified fare, the agent can inspect the same public page and validate the extracted price against an exact quoted phrase. The chat concierge can invoke this worker and resume its pending search, and the scheduled price watcher revisits active trips. An unavailable source remains unavailable. No observation approves, books, or silently replaces a trip amount.
 
 **Price by time of day.** Gradient-boosted quantile models predict a p10 / p50 / p90 range, and the trip pane charts the same trip at every hour of the day with your departure and the cheapest hour that still arrives on time.
 

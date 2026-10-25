@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bindApproval, closeReadiness, paymentPreflight } from "../../backend/src/financeControls";
-import { createMandate } from "../../backend/src/integrations/visaSim";
+import { bindApproval, closeReadiness, paymentPreflight } from "../../backend/hyphenate/financeControls";
+import { createMandate } from "../../backend/visa/visaSim";
 import { buildSeed } from "../../backend/src/seed/trips";
 import type { Trip } from "../../backend/src/types";
-import { chargeTrip } from "../../backend/src/agents/payments";
+import { chargeTrip } from "../../backend/visa/payments";
 
 function fixture() {
   const { state } = buildSeed();

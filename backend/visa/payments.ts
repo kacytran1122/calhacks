@@ -1,12 +1,12 @@
-import { appendAudit } from "../audit";
-import { fmt } from "../money";
-import { authorize } from "../permissions";
-import type { State } from "../store";
-import { newId } from "../store";
-import type { Cents, Evidence } from "../types";
-import { checkMandate } from "../integrations/visaSim";
-import { authorizeVisaAcceptance, visaAcceptanceConfigured } from "../integrations/visaAcceptance";
-import { paymentPreflight } from "../financeControls";
+import { appendAudit } from "../hyphenate/audit";
+import { fmt } from "../src/money";
+import { authorize } from "../src/permissions";
+import type { State } from "../src/store";
+import { newId } from "../src/store";
+import type { Cents, Evidence } from "../src/types";
+import { checkMandate } from "./visaSim";
+import { authorizeVisaAcceptance, visaAcceptanceConfigured } from "./visaAcceptance";
+import { paymentPreflight } from "../hyphenate/financeControls";
 
 const agent = { kind: "agent" as const, id: "payments" as const };
 

@@ -136,5 +136,10 @@ jobs:
             frontend/.next
             frontend/extension/dist
             backend/src
+            backend/hyphenate
+            backend/visa
+            backend/photon
+            backend/scripts
+            backend/ml/models
             backend/package.json
             backend/package-lock.json

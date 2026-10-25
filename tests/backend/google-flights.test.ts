@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { googleFlightsUrl, liveGoogleFlightQuote } from "../../backend/src/integrations/googleFlights";
+import { googleFlightsUrl, liveGoogleFlightQuote, quoteContainsUsdAmount } from "../../backend/src/integrations/googleFlights";
+import { checkFlightPrice } from "../../backend/src/agents/pricing";
+import { AIRFARE, estimateAirfare } from "../../backend/src/ml/price";
 
 test("Google Flights URL fixes route, date, currency, and locale", () => {
   const url = new URL(googleFlightsUrl("sfo", "lax", "2027-01-16"));
@@ -199,4 +201,165 @@ test("resuming a running collection checks once instead of holding the request o
   assert.equal(quote.snapshotId, "s_running123");
   assert.equal(progressChecks, 1);
   assert.ok(Date.now() - started < 500);
+});
+
+test("airport and calendar validation prevents invalid searches before a collector request", async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => { requests += 1; throw new Error("Unexpected collection"); });
+  for (const [fromAirport, toAirport, departDate] of [["SFO", "SFO", "2027-01-16"], ["SFO", "LAX", "2027-02-30"], ["SFO", "LAX", "2027-02-29"], ["SFO", "LAX", "2027-13-01"], ["SFO", "LAX", "January 16"]]) {
+    assert.throws(() => googleFlightsUrl(fromAirport!, toAirport!, departDate!));
+    const quote = await liveGoogleFlightQuote({ fromAirport: fromAirport!, toAirport: toAirport!, departDate: departDate! });
+    assert.equal(quote.status, "error");
+    assert.equal(quote.via, "validation");
+  }
+  assert.doesNotThrow(() => googleFlightsUrl("ORD", "SEA", "2028-02-29"));
+  assert.equal(requests, 0);
+});
+
+test("grounded fare evidence requires the complete USD amount", () => {
+  assert.equal(quoteContainsUsdAmount("Current fare $109", 109), true);
+  assert.equal(quoteContainsUsdAmount("Current fare $109.", 109), true);
+  assert.equal(quoteContainsUsdAmount("Current fare USD 1,099.20", 1099.2), true);
+  assert.equal(quoteContainsUsdAmount("Current fare US$ 109.20", 109.2), true);
+  assert.equal(quoteContainsUsdAmount("Current fare $1090", 109), false);
+  assert.equal(quoteContainsUsdAmount("Current fare $109.20", 109), false);
+  assert.equal(quoteContainsUsdAmount("Current fare $109.201", 109.2), false);
+  assert.equal(quoteContainsUsdAmount("Current fare C$109", 109), false);
+});
+
+test("flight collection and matching model comparison work across varied airport pairs and travel seasons", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  const cases = [
+    { fromAirport: "ORD", toAirport: "SEA", fromState: "IL", toState: "WA", departDate: "2027-01-16", fare: 157 },
+    { fromAirport: "JFK", toAirport: "MIA", fromState: "NY", toState: "FL", departDate: "2027-05-12", fare: 213.4 },
+    { fromAirport: "ATL", toAirport: "DFW", fromState: "GA", toState: "TX", departDate: "2027-09-06", fare: 89 },
+  ];
+  let active = cases[0]!;
+  t.mock.method(globalThis, "fetch", async (input, init) => {
+    const url = String(input);
+    if (url.includes("/trigger?")) {
+      const body = JSON.parse(String(init?.body)) as { url: string }[];
+      const decoded = Buffer.from(new URL(body[0]!.url).searchParams.get("tfs")!, "base64url");
+      for (const expected of [active.fromAirport, active.toAirport, active.departDate]) assert.ok(decoded.includes(Buffer.from(expected)));
+      return new Response(JSON.stringify({ snapshot_id: `s_multi${active.fromAirport}${active.toAirport}` }), { status: 200 });
+    }
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    return new Response(JSON.stringify([{ url: googleFlightsUrl(active.fromAirport, active.toAirport, active.departDate), totalPrice: active.fare, currencyCode: "USD" }]), { status: 200 });
+  });
+  for (const example of cases) {
+    active = example;
+    const from = AIRFARE.airports.find((a) => a.code === example.fromAirport)!;
+    const to = AIRFARE.airports.find((a) => a.code === example.toAirport)!;
+    const check = await checkFlightPrice({ ...example, from, to, startsAt: "2027-10-01T17:00:00Z" });
+    assert.equal(check?.live.status, "ok");
+    assert.equal(check?.live.amountUsd, example.fare);
+    assert.equal(check?.live.departDate, example.departDate);
+    assert.equal(check?.prediction.from.code, example.fromAirport);
+    assert.equal(check?.prediction.to.code, example.toAirport);
+    const expected = estimateAirfare({ from, to, fromAirport: example.fromAirport, toAirport: example.toAirport, when: `${example.departDate}T12:00:00Z` });
+    assert.deepEqual(check?.prediction.range, expected?.range);
+  }
+});
+
+test("non-ticket charges and nested non-USD currencies never become the live fare", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  t.mock.method(globalThis, "fetch", async (input) => {
+    const url = String(input);
+    if (url.includes("/trigger?")) return new Response(JSON.stringify({ snapshot_id: "s_chargeguards" }), { status: 200 });
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    return new Response(JSON.stringify([{
+      baggage: { total_price: "$25" },
+      checkedBagFee: { price: "$30" },
+      typical_price: "$75",
+      pricing: { currency: "EUR", price: { value: 80 } },
+      itinerary: { totalPrice: "$219.50", currencyCode: "USD" },
+    }]), { status: 200 });
+  });
+  const quote = await liveGoogleFlightQuote({ fromAirport: "JFK", toAirport: "MIA", departDate: "2027-05-12" });
+  assert.equal(quote.status, "ok");
+  assert.equal(quote.amountUsd, 219.5);
+});
+
+test("a resumed snapshot requires matching airport and date metadata", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  process.env.BRIGHTDATA_UNLOCKER_ZONE = "test-unlocker";
+  let records: unknown = [];
+  t.mock.method(globalThis, "fetch", async (input) => {
+    const url = String(input);
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    if (url.includes("/snapshot/")) return new Response(JSON.stringify(records), { status: 200 });
+    return new Response("", { status: 403 });
+  });
+  for (const [id, record] of [
+    ["s_wrongairports", { url: googleFlightsUrl("ORD", "SEA", "2027-05-12"), price: "$1" }],
+    ["s_wrongdate", { from_airport: "JFK", to_airport: "MIA", departure_date: "2027-05-13", price: "$1" }],
+    ["s_nocontext", { price: "$1" }],
+    ["s_conflicting", { url: googleFlightsUrl("ORD", "SEA", "2027-05-12"), from_airport: "JFK", to_airport: "MIA", departure_date: "2027-05-12", price: "$1" }],
+  ] as const) {
+    records = [record];
+    const quote = await liveGoogleFlightQuote({ fromAirport: "JFK", toAirport: "MIA", departDate: "2027-05-12", snapshotId: id });
+    assert.notEqual(quote.status, "ok");
+    assert.equal(quote.amountUsd, undefined);
+  }
+  records = [{ url: googleFlightsUrl("JFK", "MIA", "2027-05-12"), pricing: { total_price: "$198.90" } }];
+  const quote = await liveGoogleFlightQuote({ fromAirport: "JFK", toAirport: "MIA", departDate: "2027-05-12", snapshotId: "s_matchedcontext" });
+  assert.equal(quote.status, "ok");
+  assert.equal(quote.amountUsd, 198.9);
+});
+
+test("a known snapshot cannot be reused for another flight query", async (t) => {
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async (input) => {
+    requests += 1;
+    const url = String(input);
+    if (url.includes("/trigger?")) return new Response(JSON.stringify({ snapshot_id: "s_boundroute" }), { status: 200 });
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    return new Response(JSON.stringify([{ price: "$129" }]), { status: 200 });
+  });
+  assert.equal((await liveGoogleFlightQuote({ fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16" })).status, "ok");
+  const before = requests;
+  const wrong = await liveGoogleFlightQuote({ fromAirport: "JFK", toAirport: "MIA", departDate: "2027-05-12", snapshotId: "s_boundroute" });
+  assert.equal(wrong.status, "error");
+  assert.equal(wrong.via, "validation");
+  assert.equal(requests, before);
+});
+
+test("price checking retains the domestic interstate policy", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Out-of-scope collection"); });
+  const from = { lat: 37.6, lon: -122.3 };
+  const to = { lat: 33.9, lon: -118.4 };
+  assert.equal(await checkFlightPrice({ from, to, startsAt: "2027-01-17T17:00:00Z", fromState: "CA", toState: "CA" }), null);
+  assert.equal(await checkFlightPrice({ from, to, startsAt: "2027-01-17T17:00:00Z" }), null);
+});
+
+test("page extraction verifies the route, date, and complete quoted price before publishing a fare", async (t) => {
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "test-api-key";
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  process.env.BRIGHTDATA_UNLOCKER_ZONE = "test-unlocker";
+  t.after(() => {
+    if (anthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = anthropic;
+  });
+  let extracted = { amountUsd: 109, exactQuote: "$1090", fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16", provider: "Example airline", scope: "One adult one-way economy" };
+  t.mock.method(globalThis, "fetch", async (input) => {
+    const url = String(input);
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    if (url.includes("/snapshot/")) return new Response("[]", { status: 200 });
+    if (url.endsWith("/request")) return new Response("Google Flights. ORD to SEA, January 16, 2027. One adult, economy, one-way. Lowest current bookable ticket $1090. Other flights $1990. ".repeat(3), { status: 200 });
+    if (url.includes("api.anthropic.com")) return new Response(JSON.stringify({ id: "msg_test", type: "message", role: "assistant", model: "test", content: [{ type: "text", text: JSON.stringify(extracted) }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 100, output_tokens: 100 } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    throw new Error(`Unexpected fetch ${url}`);
+  });
+  const args = { fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16", snapshotId: "s_groundedprice" };
+  assert.equal((await liveGoogleFlightQuote(args)).amountUsd, undefined);
+  extracted = { ...extracted, amountUsd: 1090, fromAirport: "JFK" };
+  assert.equal((await liveGoogleFlightQuote(args)).amountUsd, undefined);
+  extracted = { ...extracted, fromAirport: "ORD", departDate: "2027-01-17" };
+  assert.equal((await liveGoogleFlightQuote(args)).amountUsd, undefined);
+  extracted = { ...extracted, departDate: "2027-01-16" };
+  const accepted = await liveGoogleFlightQuote(args);
+  assert.equal(accepted.status, "ok");
+  assert.equal(accepted.amountUsd, 1090);
+  assert.match(accepted.via, /grounded extraction/);
 });

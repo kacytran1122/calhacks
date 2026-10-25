@@ -1,4 +1,4 @@
-import type { Cents } from "./types";
+import type { Cents } from "../src/types";
 
 export const RULES = {
   R1: "Caps by one-way distance from the traveler's home ZIP to the venue: ≤50 mi $40 · ≤150 mi $90 · ≤400 mi $200 · farther $400.",

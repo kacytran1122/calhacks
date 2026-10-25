@@ -14,5 +14,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src", "scripts", "photon"]
+  "include": ["src", "scripts", "photon", "visa", "hyphenate"]
 }

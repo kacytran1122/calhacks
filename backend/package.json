@@ -7,6 +7,10 @@
   "types": "src/index.ts",
   "files": [
     "src",
+    "hyphenate",
+    "visa",
+    "photon",
+    "scripts",
     "ml/models"
   ],
   "exports": {

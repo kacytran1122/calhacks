@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
-import type { Cents } from "../types";
+import type { Cents } from "../src/types";
 
 const HOST = "apitest.cybersource.com";
 const RESOURCE = "/pts/v2/payments/";

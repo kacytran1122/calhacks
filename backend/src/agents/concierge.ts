@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { appendAudit } from "../audit";
+import { appendAudit } from "../../hyphenate/audit";
 import type { EventListing } from "../eventStore";
 import { stateCodeFromLabel, zipToPoint } from "../integrations/geo";
 import { MODELS } from "../llm";
@@ -11,7 +11,7 @@ import { withState } from "../store";
 import type { Actor } from "../types";
 import { discoverCall, discoverEvents, type DiscoverOptions, type DiscoverResult } from "./discover";
 import { heatCall, heatMapAround, type HeatMap } from "./heat";
-import { estimatePrices, pricingCall, type PriceEstimate } from "./pricing";
+import { checkFlightPrice, estimatePrices, flightPriceCall, pricingCall, type PriceEstimate } from "./pricing";
 import { runAgent } from "./run";
 
 /**
@@ -61,6 +61,7 @@ export interface ConciergeDeps {
   create?: (params: CreateParams) => Promise<Anthropic.Beta.Messages.BetaMessage>;
   discover?: (opts: DiscoverOptions) => Promise<DiscoverResult>;
   prices?: (args: { from: { lat: number; lon: number }; to: { lat: number; lon: number }; startsAt: string; fromState?: string; toState?: string }) => Promise<PriceEstimate>;
+  flightPrices?: typeof checkFlightPrice;
   heat?: (args: { lat: number; lon: number; at: string }) => Promise<HeatMap>;
 }
 
@@ -110,6 +111,21 @@ export const TOOLS: Anthropic.Beta.Messages.BetaTool[] = [
     },
   },
   {
+    name: "check_flight_price",
+    description: "Check a current Google Flights fare for the sender's trip to an event and compare it with the trained historical range. Works for supported domestic interstate airport pairs. A pending collection returns a snapshot_id; reuse it to check progress. This tool reads prices and never approves or books travel.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        zip: { type: "string", description: "5-digit starting ZIP provided by the sender" },
+        event_key: { type: "string", description: "event_key from find_events or plan_trip" },
+        snapshot_id: nullable({ type: "string", description: "snapshot_id from this tool for this same trip; null to start" }),
+      },
+      required: ["zip", "event_key", "snapshot_id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "heat_at_venue",
     description: "Heat risk around an event's venue at its start time, from two weather models (or recent years when the event is more than two weeks out), using NWS heat-index bands.",
     strict: true,
@@ -126,6 +142,7 @@ const Inputs = {
   find_events: z.object({ zip: z.string(), radius_miles: z.number().int().nullable(), query: z.string().nullable() }),
   plan_trip: z.object({ zip: z.string(), event_key: z.string().nullable(), event_url: z.string().nullable() }),
   estimate_prices: z.object({ zip: z.string(), event_key: z.string() }),
+  check_flight_price: z.object({ zip: z.string().regex(/^\d{5}$/), event_key: z.string(), snapshot_id: z.string().regex(/^s(?:d)?_[A-Za-z0-9]+$/).nullable() }),
   heat_at_venue: z.object({ event_key: z.string() }),
 };
 
@@ -133,6 +150,7 @@ const SYSTEM = `You are S'mile (@smile), a travel helper in a group chat of stud
 
 Rules:
 - Money: never compute, round, convert, add or guess a dollar amount. Repeat dollar amounts exactly as a tool result writes them, and only those. If no tool result has the amount, don't state one.
+- For a current flight fare, use check_flight_price. Report its observed fare and historical forecast with their labels. A pending, blocked, empty or failed collection has no verified current fare. Reuse the same snapshot for progress; never claim a price will rise or fall from a seasonal or departure-hour estimate.
 - Emissions: kg CO₂e figures come only from tool results. When you call a route lowest-carbon, say it's an estimate from EPA emission factors.
 - Plan a trip only for the sender, and only once they have given a home ZIP and an event (a link they pasted, or one from find_events). If either is missing, ask for it in one short sentence.
 - Nothing is charged until the traveler approves the exact amount. Their approval link is sent to them privately; never write links, tokens or trip IDs.
@@ -164,6 +182,7 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
   const plans: ConciergePlan[] = [];
   const toolText: string[] = [];
   const tools: ConciergeOutput["tools"] = [];
+  const flightSnapshots = new Map<string, string>();
   const me = input.sender.initials;
   const allowedZips = new Set([input.memory.zip, ...(input.text.match(/\b\d{5}\b/g) ?? [])].filter(Boolean) as string[]);
   const allowedUrls = new Set([input.memory.url, ...(input.text.match(/https?:\/\/[^\s<>"]+/g) ?? []).map((u) => u.replace(/[).,!?]+$/, ""))].filter(Boolean) as string[]);
@@ -262,6 +281,36 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
           : null,
         flight: p.airfare ? { route: `${p.airfare.from.code}→${p.airfare.to.code}`, typical: usd(p.airfare.range.p50), likely_range: `${usd(p.airfare.range.p10)}–${usd(p.airfare.range.p90)}`, cheapest_departure_hour: p.airfare.cheapestHour ? `${hourLabel(p.airfare.cheapestHour.hour)} at about ${usd(p.airfare.cheapestHour.range.p50)}` : null } : null,
         note: p.scope.eligible ? "Model estimates for domestic interstate comparison, not fares. The approvable price comes from plan_trip." : p.scope.reason,
+      };
+    },
+
+    async check_flight_price(raw) {
+      const a = Inputs.check_flight_price.parse(raw);
+      if (!allowedZips.has(a.zip)) throw new ToolError("use the ZIP code the sender gave; ask them for it if they haven't");
+      const ev = listing(a.event_key);
+      const key = `${a.zip}:${ev.key}`;
+      const knownSnapshot = flightSnapshots.get(key);
+      if (a.snapshot_id && a.snapshot_id !== knownSnapshot) throw new ToolError("reuse only the snapshot_id returned for this trip in this conversation turn");
+      const snapshotId = a.snapshot_id ?? knownSnapshot;
+      const from = await zipPoint(a.zip);
+      const out = await runAgent(flightPriceCall(`event:${ev.key}`, { actor: concierge, cap: "price.estimate" }), () => (deps.flightPrices ?? checkFlightPrice)({ from, to: ev, startsAt: ev.startsAt, fromState: from.state, toState: stateCodeFromLabel(ev.city), snapshotId, timeoutMs: snapshotId ? 30_000 : 4_500 }));
+      if (!out) return { event: ev.name, status: "outside_scope", note: "No supported domestic interstate flight comparison is available for this trip." };
+      if (out.live.snapshotId) flightSnapshots.set(key, out.live.snapshotId);
+      const live = out.live;
+      return {
+        event: ev.name,
+        status: live.status,
+        route: `${live.fromAirport}→${live.toAirport}`,
+        depart_date: live.departDate,
+        current_fare: live.status === "ok" && live.amountUsd !== undefined ? usd(live.amountUsd) : null,
+        provider: live.provider ?? null,
+        fare_scope: live.scope ?? null,
+        observed_at: live.status === "ok" ? live.observedAt : null,
+        source: live.sourceUrl,
+        snapshot_id: live.snapshotId ?? null,
+        historical_forecast: { midpoint: usd(out.prediction.range.p50), range: `${usd(out.prediction.range.p10)}–${usd(out.prediction.range.p90)}` },
+        comparison: out.signal,
+        note: "The historical forecast is planning context. Only an observed fare is current price evidence; it may change before booking.",
       };
     },
 

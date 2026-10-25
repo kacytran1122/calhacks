@@ -1,7 +1,7 @@
 import { appendAudit } from "./audit";
-import { authorize } from "./permissions";
-import type { Actor, Cents } from "./types";
-import type { State } from "./store";
+import { authorize } from "../src/permissions";
+import type { Actor, Cents } from "../src/types";
+import type { State } from "../src/store";
 
 export const CHART = {
   "1000": { name: "Cash — Operating", type: "asset" },

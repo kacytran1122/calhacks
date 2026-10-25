@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Actor } from "./types";
+import type { Actor } from "../src/types";
 
 export interface AuditEvent {
   seq: number;

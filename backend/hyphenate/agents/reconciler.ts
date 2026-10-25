@@ -1,7 +1,7 @@
 import { capFor, isImmaterial, materialityFor, POLICY } from "../policy";
-import type { State } from "../store";
-import type { Cents, Decision, DecisionCode, Evidence, HumanRole, Trip } from "../types";
-import { fmt, sum } from "../money";
+import type { State } from "../../src/store";
+import type { Cents, Decision, DecisionCode, Evidence, HumanRole, Trip } from "../../src/types";
+import { fmt, sum } from "../../src/money";
 
 export interface ParsedReceipt {
   merchant?: string;

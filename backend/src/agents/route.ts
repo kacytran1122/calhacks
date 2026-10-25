@@ -1,6 +1,6 @@
 import { compareCarbon, estimateCarbon, type CarbonComparison, type CarbonContext } from "../carbon";
 import { fmt } from "../money";
-import { capFor, POLICY } from "../policy";
+import { capFor, POLICY } from "../../hyphenate/policy";
 import type { State } from "../store";
 import type { Cents, Trip } from "../types";
 

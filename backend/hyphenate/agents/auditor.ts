@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { fmt } from "../money";
+import { fmt } from "../../src/money";
 import { RULES, type RuleId } from "../policy";
-import type { State } from "../store";
-import type { Decision, Trip } from "../types";
-import { llmAvailable, structured } from "../llm";
+import type { State } from "../../src/store";
+import type { Decision, Trip } from "../../src/types";
+import { llmAvailable, structured } from "../../src/llm";
 
 export function traceFor(state: State, tripId: string) {
   const trip = state.trips.find((t) => t.id === tripId);

@@ -2,7 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { appendAudit } from "./audit";
+import { appendAudit } from "../hyphenate/audit";
 import { PermissionDenied } from "./permissions";
 import { TEST_USERS } from "./seed/users";
 import type { State } from "./store";

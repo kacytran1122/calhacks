@@ -1,4 +1,4 @@
-import { actorLabel, appendAudit } from "../audit";
+import { actorLabel, appendAudit } from "../../hyphenate/audit";
 import { authorize, can, type Capability } from "../permissions";
 import { withState, type State } from "../store";
 import type { Actor, AgentId } from "../types";

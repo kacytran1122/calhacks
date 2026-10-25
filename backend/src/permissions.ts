@@ -1,4 +1,4 @@
-import { appendAudit, actorLabel } from "./audit";
+import { appendAudit, actorLabel } from "../hyphenate/audit";
 import type { Actor, AgentId } from "./types";
 import type { State } from "./store";
 

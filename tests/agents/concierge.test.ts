@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { HeatMap } from "../../backend/src/agents/heat";
+import type { FlightPriceCheck } from "../../backend/src/agents/pricing";
 import type { EventListing } from "../../backend/src/eventStore";
 
 process.env.SMILE_DATA_DIR = mkdtempSync(path.join(tmpdir(), "smile-concierge-"));
@@ -67,6 +68,47 @@ test("a reply with a dollar amount no tool computed is replaced by a code-writte
 test("amounts that a tool returned may be repeated exactly", () => {
   assert.equal(core.amountsGrounded("@JP the train is $12.40, under the $40.00 cap.", ['{"price":"$12.40","organizer_cap":"$40.00"}']).ok, true);
   assert.deepEqual(core.amountsGrounded("@JP about $13", ['{"price":"$12.40"}']).stray, [1300]);
+});
+
+test("the concierge resumes its flight worker and grounds the observed fare", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ places: [{ latitude: "47.24", longitude: "-122.44", "place name": "Tacoma", "state abbreviation": "WA" }] }), { status: 200 }));
+  const ai = scripted(
+    toolUse("f1", "find_events", { zip: "98402", radius_miles: 1500, query: null }),
+    toolUse("f2", "check_flight_price", { zip: "98402", event_key: event.key, snapshot_id: null }),
+    toolUse("f3", "check_flight_price", { zip: "98402", event_key: event.key, snapshot_id: null }),
+    say("@JP the current flight fare is $109.00; the historical midpoint is $175.81."),
+  );
+  const snapshots: (string | undefined)[] = [];
+  const out = await core.converse(input("@smile 98402 what is the current flight price to this event?"), {
+    ...deps,
+    create: ai.create,
+    flightPrices: async (args) => {
+      snapshots.push(args.snapshotId);
+      return {
+        live: { status: args.snapshotId ? "ok" : "timeout", amountUsd: args.snapshotId ? 109 : undefined, fromAirport: "SEA", toAirport: "SFO", departDate: "2026-11-13", observedAt: "2026-10-25T07:33:19Z", sourceUrl: "https://www.google.com/travel/flights", snapshotId: "sd_chat123", provider: "Airline", currency: "USD", via: "Bright Data", ms: 200 },
+        prediction: { range: { p10: 161.89, p50: 175.81, p90: 195.57 } },
+        signal: args.snapshotId ? "below_prediction" : "unavailable",
+        differencePct: args.snapshotId ? -38 : null,
+      } as FlightPriceCheck;
+    },
+  });
+  assert.deepEqual(snapshots, [undefined, "sd_chat123"]);
+  assert.equal(out.by, "claude");
+  assert.match(out.reply, /current flight fare is \$109.00/);
+  const pending = JSON.parse((ai.calls[2]!.messages.at(-1)!.content as { content: string }[])[0]!.content);
+  assert.equal(pending.current_fare, null);
+  assert.equal(pending.observed_at, null);
+  assert.ok(core.loadState().audit.some((entry) => entry.action === "pricing.flight.checked" && /asked by agent:concierge/.test(entry.reason)));
+});
+
+test("the flight concierge rejects an unrelated snapshot before making a paid request", async () => {
+  const ai = scripted(toolUse("f1", "check_flight_price", { zip: "98402", event_key: event.key, snapshot_id: "sd_someoneelse" }), say("@JP I need to start a fresh search for your trip."));
+  const request = input("@smile 98402 check the flight");
+  request.listings.set(event.key, event);
+  let calls = 0;
+  const out = await core.converse(request, { create: ai.create, flightPrices: async () => { calls += 1; return null; } });
+  assert.equal(calls, 0);
+  assert.deepEqual(out.tools, [{ name: "check_flight_price", ok: false }]);
 });
 
 test("the concierge can only plan for the sender's own ZIP", async () => {

@@ -1,7 +1,7 @@
 import { haversineMiles } from "../integrations/geo";
 import { planDrivingRoutes } from "../integrations/osrm";
 import { dayBefore, liveGoogleFlightQuote, type LiveFlightQuote } from "../integrations/googleFlights";
-import { estimateAirfare, estimateRideshare, modelCard, type AirfareEstimate, type RideshareEstimate } from "../ml/price";
+import { AIRFARE, estimateAirfare, estimateRideshare, modelCard, type AirfareEstimate, type RideshareEstimate } from "../ml/price";
 import type { Actor } from "../types";
 import type { AgentCall } from "./run";
 
@@ -55,16 +55,22 @@ export async function estimatePrices(args: { from: Point; to: Point; startsAt: s
   };
 }
 
-export async function checkFlightPrice(args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; sourceUrl?: string; snapshotId?: string; timeoutMs?: number }): Promise<FlightPriceCheck | null> {
+export async function checkFlightPrice(args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; fromAirport?: string; toAirport?: string; departDate?: string; sourceUrl?: string; snapshotId?: string; timeoutMs?: number }): Promise<FlightPriceCheck | null> {
   const fromState = args.fromState?.trim().toUpperCase();
   const toState = args.toState?.trim().toUpperCase();
   if (!fromState || !toState || fromState === toState || !/^[A-Z]{2}$/.test(fromState) || !/^[A-Z]{2}$/.test(toState)) return null;
-  const prediction = estimateAirfare({ from: args.from, to: args.to, when: args.startsAt });
+  const fromAirport = args.fromAirport?.trim().toUpperCase();
+  const toAirport = args.toAirport?.trim().toUpperCase();
+  if (Boolean(fromAirport) !== Boolean(toAirport) || (fromAirport && (!AIRFARE.airports.some((a) => a.code === fromAirport) || !AIRFARE.airports.some((a) => a.code === toAirport) || fromAirport === toAirport))) throw new Error("Choose two distinct airports supported by the U.S. fare model.");
+  const departDate = args.departDate ?? dayBefore(args.startsAt);
+  const parsed = new Date(`${departDate}T12:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(departDate) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== departDate) throw new Error("A valid calendar departure date is required.");
+  const prediction = estimateAirfare({ from: args.from, to: args.to, when: parsed.toISOString(), fromAirport, toAirport });
   if (!prediction) return null;
   const live = await liveGoogleFlightQuote({
     fromAirport: prediction.from.code,
     toAirport: prediction.to.code,
-    departDate: dayBefore(args.startsAt),
+    departDate,
     sourceUrl: args.sourceUrl,
     snapshotId: args.snapshotId,
     timeoutMs: args.timeoutMs,

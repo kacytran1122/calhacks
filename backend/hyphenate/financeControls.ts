@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { trialBalance } from "./ledger";
-import type { State } from "./store";
-import type { Cents, Mandate, Trip } from "./types";
+import type { State } from "../src/store";
+import type { Cents, Mandate, Trip } from "../src/types";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
