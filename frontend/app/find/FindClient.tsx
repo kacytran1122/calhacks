@@ -542,6 +542,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
   const routeGuide = plan?.evidence.find((e) => e.kind === "route_guide");
   const constraint = plan?.evidence.find((e) => e.kind === "traveler_constraint");
   const fareItems = (Array.isArray(fare?.data.fares) ? fare.data.fares : []) as FareItem[];
+  const stopItems = (Array.isArray(stops?.data.results) ? stops.data.results : []) as { title: string; link: string }[];
   const routeGuides = (Array.isArray(routeGuide?.data.options) ? routeGuide.data.options : []) as RouteGuide[];
   const pickedRoute = plan?.routes?.options.find((option) => option.mode === plan.routes?.pick?.mode);
   const alternativeRoutes = plan?.routes?.options.filter((option) => option.mode !== plan.routes?.pick?.mode) ?? [];
@@ -663,21 +664,21 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
           )}
           {plan.routes.blockReason === "NO_VERIFIED_FARE" && <p className="dk-note">Live route instructions are ready, but S’mile is waiting for a verifiable fare before creating a payment approval.</p>}
           {plan.routes.blockReason === "ORGANIZER_CAP" && <p className="dk-note">No route fits organizer policy R1. The finance controller—not the traveler—receives the exception request.</p>}
-          {fare?.status !== "ok" && <p className="dk-note">Fares: {fare?.note ?? fare?.status}.{includeSelfDrive ? " Driving cost is the IRS mileage rate × distance." : " Self-drive is excluded from this plan."}</p>}
+          {fare?.status !== "ok" && plan.routes.blockReason !== "NO_VERIFIED_FARE" && <p className="dk-note">A verified live fare is not available for this route yet. S’mile will not estimate or invent a price.{includeSelfDrive ? " Driving cost uses the IRS mileage rate and the live route distance." : ""}</p>}
 
-          <h3>A stop on the way</h3>
-          {stops?.status === "ok" && Array.isArray(stops.data.results) && (stops.data.results as unknown[]).length ? (
-            <ul className="dk-ul">
-              {(stops.data.results as { title: string; link: string }[]).map((r) => (
+          {stops?.status === "ok" && stopItems.length > 0 && (
+            <section className="fd-stop-options">
+              <h3>A stop on the way</h3>
+              <ul className="dk-ul">
+              {stopItems.map((r) => (
                 <li key={r.link}>
                   <a href={r.link} target="_blank" rel="noreferrer">
                     {r.title}
                   </a>
                 </li>
               ))}
-            </ul>
-          ) : (
-            <p className="dk-note">{stops?.note ?? "No stop found yet."}</p>
+              </ul>
+            </section>
           )}
           {weather && <p className="dk-mut">Weather at kickoff: {weather.status === "ok" ? `${weather.data.summary}, ${weather.data.tempF}°F` : weather.note}</p>}
 

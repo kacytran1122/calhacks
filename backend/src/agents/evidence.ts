@@ -12,6 +12,7 @@ import { currentOfficialFares } from "../integrations/official-fares";
 import type { EventFacts } from "./scout";
 
 const agent = { kind: "agent" as const, id: "evidence" as const };
+const LIVE_SEARCH_TIMEOUT_MS = 8_000;
 
 function push(state: State, e: Omit<Evidence, "id" | "fetchedAt" | "provenance"> & { provenance?: Evidence["provenance"] }): Evidence {
   const full: Evidence = { id: newId(`EV-${e.kind}`), fetchedAt: new Date().toISOString(), provenance: "live", ...e };
@@ -146,9 +147,13 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const transitPromise = home.status === "ok" && home.lat !== undefined && home.lon !== undefined && event.lat !== undefined && event.lon !== undefined
     ? planPublicTransit({ from: { lat: home.lat, lon: home.lon }, to: { lat: event.lat, lon: event.lon }, startsAt: event.startsAt })
     : Promise.resolve({ status: "empty" as const, url: "https://transitous.org/sources/", options: [] as TransitOption[], ms: 0, error: "Coordinates were unavailable for live transit routing." });
-  const [stops, transit] = await Promise.all([
-    venueQ ? serp(`breakfast coffee near ${venueQ}`, 1, 6_000) : Promise.resolve(null),
+  const fareQuery = `${fromCity} to ${destination} ${event.startsAt ?? ""} exact total fare ticket price taxes mandatory fees official train bus flight${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
+  const directionsQuery = `${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`;
+  const [stops, transit, genericFareSerp, genericDirectionsSerp] = await Promise.all([
+    venueQ ? serp(`breakfast coffee near ${venueQ}`, 1, LIVE_SEARCH_TIMEOUT_MS) : Promise.resolve(null),
     transitPromise,
+    serp(fareQuery, 1, LIVE_SEARCH_TIMEOUT_MS),
+    serp(directionsQuery, 1, LIVE_SEARCH_TIMEOUT_MS),
   ]);
 
   if (stops) {
@@ -159,11 +164,9 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const targetedQuery = officialFareQuery(transit.options, event.startsAt);
   const officialFares = await currentOfficialFares(transit.options, event.startsAt);
   const needSearchFallback = officialFares.length === 0 && transit.options.every((option) => option.amountUsd === undefined);
-  const [fareSerp, directionsSerp, targetedFareSerp] = await Promise.all([
-    needSearchFallback ? serp(`${fromCity} to ${destination} ${event.startsAt ?? ""} exact total fare ticket price taxes mandatory fees official train bus flight${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1, 6_000) : Promise.resolve({ status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined }),
-    transit.options.length ? Promise.resolve({ status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined }) : serp(`${fromCity} to ${destination} public transit directions route stops transfers duration${args.travelConstraintSummary ? ` ${args.travelConstraintSummary}` : ""}`, 1, 6_000),
-    needSearchFallback && targetedQuery ? serp(targetedQuery, 1, 6_000) : Promise.resolve(null),
-  ]);
+  const fareSerp = needSearchFallback ? genericFareSerp : { status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined };
+  const directionsSerp = transit.options.length ? { status: "empty" as const, body: undefined, attempts: 0, ms: 0, error: undefined } : genericDirectionsSerp;
+  const targetedFareSerp = needSearchFallback && targetedQuery ? await serp(targetedQuery, 1, LIVE_SEARCH_TIMEOUT_MS) : null;
   const fareResults = [
     ...(targetedFareSerp?.status === "ok" && targetedFareSerp.body ? targetedFareSerp.body.slice(0, 8) : []),
     ...(fareSerp.status === "ok" && fareSerp.body ? fareSerp.body.slice(0, 8) : []),

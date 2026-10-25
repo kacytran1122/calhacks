@@ -321,7 +321,8 @@ test("keeps detailed live transit visible while its fare is being verified", asy
     trip: { id: "TR-2", mode: "train", quoteCents: 0, distanceMiles: 45, travelerId: "T-2" },
     event: { name: event.name, startsAt: event.startsAt },
     evidence: [
-      { id: "fare", kind: "fare", source: "Official fares", status: "empty", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", note: "Fare verification is still pending.", data: { fares: [] } },
+      { id: "fare", kind: "fare", source: "Official fares", status: "timeout", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", note: "Bright Data did not respond within 6 seconds", data: { fares: [] } },
+      { id: "stop", kind: "stop", source: "Live search", status: "timeout", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", note: "Bright Data did not respond within 6 seconds", data: { results: [] } },
       { id: "guide", kind: "route_guide", source: "Transitous", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "train", title: "Metro + Metrolink to Irvine", durationText: "2 hrs 20 min", sourceUrl: "https://transitous.org/sources/", sourceQuote: "Live GTFS itinerary.", steps: [{ instruction: "Take Metro from UCLA to Union Station.", detail: "Check the live platform." }, { instruction: "Take Metrolink to Tustin.", detail: "Transfer to the final local bus." }] }] } },
     ],
     routes: { options: [], cap: 4000, travelerBudgetCents: 10000, blockReason: "NO_VERIFIED_FARE" },
@@ -345,6 +346,8 @@ test("keeps detailed live transit visible while its fare is being verified", asy
   expect(await screen.findByText("Best live route")).toBeVisible();
   expect(screen.getByText("Take Metro from UCLA to Union Station.")).toBeVisible();
   expect(screen.getByText(/waiting for a verifiable fare/i)).toBeVisible();
+  expect(screen.queryByText(/Bright Data did not respond/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "A stop on the way" })).not.toBeInTheDocument();
   expect(screen.queryByText(/No route fits organizer policy/i)).not.toBeInTheDocument();
 });
 
