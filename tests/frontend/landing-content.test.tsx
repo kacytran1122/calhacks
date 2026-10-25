@@ -35,7 +35,7 @@ describe("landing story", () => {
     await user.click(screen.getByRole("button", { name: /no self-drive/i }));
     expect(screen.getByRole("button", { name: /no self-drive/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /yes, include driving/i })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("link", { name: "Plan your trip" })).toHaveAttribute("href", "/find");
+    expect(screen.getByRole("link", { name: "Plan your trip" })).toHaveAttribute("href", "/");
     expect(container.querySelector("img")).toBeNull();
   });
 

@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SmileWord } from "@/components/landing/Smile";
 import { stateCodeFrom } from "@/lib/usState";
 import { CarbonCompare, CarpoolCard, type CarbonComparison, type Carpool } from "./CarbonCompare";
 import { TripInsights } from "./TripInsights";
 import { VenueTourAction } from "./VenueTourAction";
+import type { TravelOrigin } from "@/lib/travelSession";
 
 type Listing = {
   key: string;
@@ -183,7 +184,7 @@ function UnpricedRouteGuide({ guide, origin, event, best = false }: { guide: Rou
   return <details className="fd-route-card alternative"><summary><span>{guide.title}</span><b>check fare</b></summary>{content}</details>;
 }
 
-export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }: { initialZip: string; initialOrigin?: string; initialLat?: number; initialLon?: number }) {
+export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, initialEnteredOrigin, initialNotice, onHome, onOriginChange }: { initialZip: string; initialOrigin?: string; initialLat?: number; initialLon?: number; initialEnteredOrigin?: { zip: string; label: string }; initialNotice?: string; onHome?: () => void; onOriginChange?: (origin: TravelOrigin) => void }) {
   const [locationInput, setLocationInput] = useState(initialOrigin || initialZip);
   const [resolvedInput, setResolvedInput] = useState(initialOrigin || initialZip);
   const [originCoordinates, setOriginCoordinates] = useState(initialLat !== undefined && initialLon !== undefined ? { lat: initialLat, lon: initialLon } : undefined);
@@ -198,6 +199,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
   const [err, setErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<Listing | null>(null);
   const [resolvingGpsLabel, setResolvingGpsLabel] = useState(initialOrigin === "Current location" && initialLat !== undefined && initialLon !== undefined);
+  const gpsFallback = useRef(initialEnteredOrigin);
 
   useEffect(() => {
     if (initialOrigin !== "Current location" || initialLat === undefined || initialLon === undefined) return;
@@ -213,7 +215,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
         setResolvedInput(location.label);
         setOriginCoordinates(coordinates);
         setRes((current) => current ? { ...current, origin: { ...current.origin, zip: location.zip!, label: location.label } } : current);
-        history.replaceState(null, "", `/find?zip=${location.zip}&origin=${encodeURIComponent(location.label)}&gps=1&lat=${initialLat}&lon=${initialLon}`);
+        onOriginChange?.({ zip: location.zip, label: location.label, coordinates, enteredOrigin: gpsFallback.current });
       } catch (error) {
         if ((error as Error).name !== "AbortError") setErr("Your GPS coordinates are available, but the nearby city name could not be loaded. You can still search from this location.");
       } finally {
@@ -241,7 +243,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
       setRes(await api<Discover>(`/api/events?${p}`));
       setActiveQuery(query);
       setZip(z);
-      history.replaceState(null, "", `/find?zip=${z}&origin=${encodeURIComponent(originLabel || z)}${coordinates ? `&gps=1&lat=${coordinates.lat}&lon=${coordinates.lon}` : ""}`);
+      onOriginChange?.({ zip: z, label: originLabel || z, coordinates, enteredOrigin: gpsFallback.current });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -290,7 +292,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
   return (
     <div className="dk">
       <header className="dk-top">
-        <a href="/" className="brand" aria-label="S’mile home">
+        <a href="/" className="brand" aria-label="S’mile home" onClick={onHome ? (event) => { event.preventDefault(); onHome(); } : undefined}>
           <SmileWord />
         </a>
         <span className="dk-desk">Find events</span>
@@ -318,6 +320,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
             onChange={(e) => {
               setLocationInput(e.target.value);
               setOriginCoordinates(undefined);
+              gpsFallback.current = undefined;
             }}
             autoComplete="address-level2"
             placeholder="ZIP, city, state, or city + state"
@@ -365,6 +368,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
         </button>
       </form>
 
+      {initialNotice && <div className="dk-toast" role="status">{initialNotice}</div>}
       {err && <div className="dk-toast err">{err}</div>}
 
       {res && (

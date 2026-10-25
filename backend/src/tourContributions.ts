@@ -35,10 +35,56 @@ export interface TourContributionReceipt {
   eventName: string;
   photoCount: number;
   status: "received";
+  storage: "tigerdata" | "sqlite";
   message: string;
 }
 
 type CleanPhoto = { bytes: Buffer; extension: "jpg" | "png" | "webp"; width: number; height: number };
+type PhotoManifest = { file: string; width: number; height: number; bytes: number };
+type ContributionRow = { id: string; event_name: string; event_url: string; location: string; received_at: string; status: string; bytes: number; photos: string };
+
+export interface TourContributionStorage {
+  readonly kind: "sqlite" | "tigerdata";
+  reserve(source: string): string | Promise<string>;
+  release(ticket: string): void | Promise<void>;
+  receive(ticket: string, input: TourContributionInput): Promise<TourContributionReceipt>;
+}
+
+function receipt(id: string, eventName: string, photoCount: number, storage: TourContributionReceipt["storage"]): TourContributionReceipt {
+  return { receiptId: id, eventName, photoCount, status: "received", storage, message: "Photos received for venue tour review. Uploading does not automatically create or publish a 3D tour." };
+}
+
+function contentType(file: string): string {
+  return file.endsWith(".jpg") ? "image/jpeg" : file.endsWith(".png") ? "image/png" : "image/webp";
+}
+
+function manifestFor(photos: CleanPhoto[]): PhotoManifest[] {
+  return photos.map((photo) => ({ file: `${randomUUID()}.${photo.extension}`, width: photo.width, height: photo.height, bytes: photo.bytes.byteLength }));
+}
+
+async function legacyPhotos(directory: string, row: ContributionRow): Promise<{ manifest: PhotoManifest[]; bytes: Buffer[] }> {
+  if (!/^[a-f0-9-]{36}$/.test(row.id)) throw new Error("Invalid legacy contribution");
+  const manifest: unknown = JSON.parse(row.photos);
+  if (!Array.isArray(manifest) || manifest.length < 1 || manifest.length > TOUR_UPLOAD_LIMITS.maxPhotos) throw new Error("Invalid legacy photos");
+  const folder = path.join(directory, row.id);
+  if (!fs.lstatSync(folder).isDirectory() || fs.lstatSync(folder).isSymbolicLink()) throw new Error("Invalid legacy folder");
+  const bytes = manifest.map((photo: PhotoManifest) => {
+    if (!photo || !/^[a-f0-9-]{36}\.(jpg|png|webp)$/.test(photo.file) || !Number.isSafeInteger(photo.bytes) || photo.bytes < 1 || !Number.isSafeInteger(photo.width) || !Number.isSafeInteger(photo.height) || photo.width < 1 || photo.height < 1 || photo.width * photo.height > TOUR_UPLOAD_LIMITS.maxPixels) throw new Error("Invalid legacy photo");
+    const file = path.join(folder, photo.file);
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== photo.bytes || stat.size > TOUR_UPLOAD_LIMITS.maxNormalizedBytes) throw new Error("Incomplete legacy photo");
+    const data = fs.readFileSync(file);
+    if (!imageFormat(data)) throw new Error("Invalid legacy image");
+    return data;
+  });
+  if (bytes.reduce((total, data) => total + data.byteLength, 0) !== Number(row.bytes)) throw new Error("Incomplete legacy contribution");
+  for (const [index, data] of bytes.entries()) {
+    const metadata = await sharp(data, { limitInputPixels: TOUR_UPLOAD_LIMITS.maxPixels, failOn: "error" }).metadata();
+    if (metadata.width !== manifest[index].width || metadata.height !== manifest[index].height || (metadata.pages ?? 1) > 1) throw new Error("Invalid legacy image dimensions");
+    await sharp(data, { limitInputPixels: TOUR_UPLOAD_LIMITS.maxPixels, failOn: "error" }).stats();
+  }
+  return { manifest, bytes };
+}
 
 export function tourContributionOriginAllowed(request: Request): boolean {
   const origin = request.headers.get("origin");
@@ -123,9 +169,11 @@ export async function normalizeTourPhotos(photos: TourContributionInput["photos"
   return cleaned;
 }
 
-export class TourContributionStore {
+export class TourContributionStore implements TourContributionStorage {
+  readonly kind = "sqlite" as const;
   readonly directory: string;
   readonly database: string;
+  private ready: Promise<void> | undefined;
 
   constructor(directory: string) {
     if (!path.isAbsolute(directory)) throw new TourContributionError("Photo storage is not available right now. Please try again later.", 503);
@@ -144,6 +192,7 @@ export class TourContributionStore {
           CREATE TABLE IF NOT EXISTS contribution_attempts (id TEXT PRIMARY KEY, source TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
           CREATE INDEX IF NOT EXISTS contribution_attempt_time ON contribution_attempts (created_at);
           CREATE TABLE IF NOT EXISTS tour_contributions (id TEXT PRIMARY KEY, event_name TEXT NOT NULL, event_url TEXT NOT NULL, location TEXT NOT NULL, received_at TEXT NOT NULL, status TEXT NOT NULL, bytes INTEGER NOT NULL, photos TEXT NOT NULL CHECK(json_valid(photos)));
+          CREATE TABLE IF NOT EXISTS tour_contribution_photos (contribution_id TEXT NOT NULL REFERENCES tour_contributions(id), position INTEGER NOT NULL, file TEXT NOT NULL, content_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, bytes INTEGER NOT NULL CHECK(bytes > 0), data BLOB NOT NULL CHECK(length(data) = bytes), PRIMARY KEY (contribution_id, position));
         `);
         db.prepare("INSERT OR IGNORE INTO contribution_settings (id, value) VALUES ('rate_salt', ?)").run(randomBytes(32).toString("hex"));
       } finally { db.close(); }
@@ -152,13 +201,43 @@ export class TourContributionStore {
     }
   }
 
+  async prepare(): Promise<void> {
+    this.ready ??= (async () => {
+      const db = this.open();
+      try {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const rows = db.prepare("SELECT * FROM tour_contributions").all() as ContributionRow[];
+          const insert = db.prepare("INSERT INTO tour_contribution_photos (contribution_id, position, file, content_type, width, height, bytes, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+          for (const row of rows) {
+            const stored = db.prepare("SELECT position, file, width, height, bytes, length(data) AS length FROM tour_contribution_photos WHERE contribution_id = ? ORDER BY position").all(row.id) as { position: number; file: string; width: number; height: number; bytes: number; length: number }[];
+            if (stored.length) {
+              const manifest = JSON.parse(row.photos) as PhotoManifest[];
+              if (!Array.isArray(manifest) || manifest.length !== stored.length || stored.reduce((sum, photo) => sum + photo.bytes, 0) !== Number(row.bytes) || stored.some((photo, index) => photo.position !== index || photo.file !== manifest[index]?.file || photo.width !== manifest[index]?.width || photo.height !== manifest[index]?.height || photo.bytes !== manifest[index]?.bytes || photo.length !== photo.bytes)) throw new Error("Incomplete database contribution");
+              continue;
+            }
+            const migrated = await legacyPhotos(this.directory, row);
+            migrated.manifest.forEach((photo, index) => insert.run(row.id, index, photo.file, contentType(photo.file), photo.width, photo.height, photo.bytes, migrated.bytes[index]!));
+          }
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      } finally { db.close(); }
+    })();
+    try { await this.ready; }
+    catch { this.ready = undefined; throw new TourContributionError("Photo storage could not be prepared safely. Please try again later.", 503); }
+  }
+
   private open(): DatabaseSync {
     const db = new DatabaseSync(this.database);
-    db.exec("PRAGMA busy_timeout = 1000; PRAGMA synchronous = FULL;");
+    db.exec("PRAGMA busy_timeout = 1000; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;");
     return db;
   }
 
-  reserve(source: string): string {
+  async reserve(source: string): Promise<string> {
+    await this.prepare();
     const db = this.open();
     try {
       db.exec("BEGIN IMMEDIATE");
@@ -184,7 +263,8 @@ export class TourContributionStore {
     } finally { db.close(); }
   }
 
-  release(ticket: string): void {
+  async release(ticket: string): Promise<void> {
+    await this.prepare();
     const db = this.open();
     try { db.prepare("UPDATE contribution_attempts SET expires_at = 0 WHERE id = ?").run(ticket); }
     finally { db.close(); }
@@ -193,12 +273,10 @@ export class TourContributionStore {
   async receive(ticket: string, input: TourContributionInput): Promise<TourContributionReceipt> {
     const fields = eventFields(input);
     const photos = await normalizeTourPhotos(input.photos);
+    await this.prepare();
     const id = randomUUID();
     const bytes = photos.reduce((sum, photo) => sum + photo.bytes.byteLength, 0);
-    const directory = path.join(this.directory, id);
     const db = this.open();
-    let created = false;
-    let persisted = false;
     try {
       db.exec("BEGIN IMMEDIATE");
       const reservation = db.prepare("SELECT expires_at FROM contribution_attempts WHERE id = ?").get(ticket) as { expires_at: number } | undefined;
@@ -206,39 +284,165 @@ export class TourContributionStore {
       const used = db.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(bytes), 0) AS bytes FROM tour_contributions").get() as { total: number; bytes: number };
       if (used.total >= TOUR_UPLOAD_LIMITS.maxContributions || used.bytes + bytes > TOUR_UPLOAD_LIMITS.maxStoredBytes)
         throw new TourContributionError("Photo contributions are temporarily full. Please try again later.", 503);
-      const manifest = photos.map((photo) => ({ file: `${randomUUID()}.${photo.extension}`, width: photo.width, height: photo.height, bytes: photo.bytes.byteLength }));
-      db.prepare("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)").run(id, fields.eventName, fields.eventUrl, fields.location, new Date().toISOString(), bytes, JSON.stringify(manifest));
-      db.exec("COMMIT");
-      persisted = true;
-      fs.mkdirSync(directory, { mode: 0o700 });
-      created = true;
-      photos.forEach((photo, index) => {
-        const file = fs.openSync(path.join(directory, manifest[index]!.file), "wx", 0o600);
-        try { fs.writeFileSync(file, photo.bytes); fs.fsyncSync(file); }
-        finally { fs.closeSync(file); }
-      });
-      const folder = fs.openSync(directory, "r");
-      try { fs.fsyncSync(folder); } finally { fs.closeSync(folder); }
-      const parent = fs.openSync(this.directory, "r");
-      try { fs.fsyncSync(parent); } finally { fs.closeSync(parent); }
-      db.exec("BEGIN IMMEDIATE");
-      db.prepare("UPDATE tour_contributions SET status = 'received' WHERE id = ?").run(id);
+      const manifest = manifestFor(photos);
+      db.prepare("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES (?, ?, ?, ?, ?, 'received', ?, ?)").run(id, fields.eventName, fields.eventUrl, fields.location, new Date().toISOString(), bytes, JSON.stringify(manifest));
+      const insert = db.prepare("INSERT INTO tour_contribution_photos (contribution_id, position, file, content_type, width, height, bytes, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      photos.forEach((photo, index) => insert.run(id, index, manifest[index]!.file, contentType(manifest[index]!.file), photo.width, photo.height, photo.bytes.byteLength, photo.bytes));
       db.prepare("UPDATE contribution_attempts SET expires_at = 0 WHERE id = ?").run(ticket);
       db.exec("COMMIT");
-      return { receiptId: id, eventName: fields.eventName, photoCount: photos.length, status: "received", message: "Photos received for venue tour review. Uploading does not automatically create or publish a 3D tour." };
+      return receipt(id, fields.eventName, photos.length, this.kind);
     } catch (error) {
       try { db.exec("ROLLBACK"); } catch {}
-      try {
-        if (created) fs.rmSync(directory, { recursive: true, force: true });
-        if (persisted) db.prepare("DELETE FROM tour_contributions WHERE id = ?").run(id);
-      } catch {}
       if (error instanceof TourContributionError) throw error;
       throw new TourContributionError("Your photos could not be saved. Please try again later.", 503);
     } finally { db.close(); }
   }
 }
 
-export function tourContributionStore(): TourContributionStore {
+type PgResult = { rows: Record<string, unknown>[] };
+export interface TourContributionPgClient {
+  query(sql: string, values?: unknown[]): Promise<PgResult>;
+  release(): void;
+}
+export interface TourContributionPgPool {
+  connect(): Promise<TourContributionPgClient>;
+}
+
+export class PostgresTourContributionStore implements TourContributionStorage {
+  readonly kind = "tigerdata" as const;
+  private ready: Promise<void> | undefined;
+
+  constructor(readonly directory: string, private readonly pool: () => Promise<TourContributionPgPool>) {
+    if (!path.isAbsolute(directory)) throw new TourContributionError("Photo storage is not available right now. Please try again later.", 503);
+  }
+
+  private async transaction<T>(work: (client: TourContributionPgClient) => Promise<T>): Promise<T> {
+    const client = await (await this.pool()).connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(1984326761)");
+      const value = await work(client);
+      await client.query("COMMIT");
+      return value;
+    } catch (error) {
+      try { await client.query("ROLLBACK"); } catch {}
+      throw error;
+    } finally { client.release(); }
+  }
+
+  private async initialize(): Promise<void> {
+    this.ready ??= this.transaction(async (client) => {
+      await client.query(`CREATE TABLE IF NOT EXISTS contribution_settings (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS contribution_attempts (id TEXT PRIMARY KEY, source TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL);
+        CREATE INDEX IF NOT EXISTS contribution_attempt_time ON contribution_attempts (created_at);
+        CREATE TABLE IF NOT EXISTS tour_contributions (id TEXT PRIMARY KEY, event_name TEXT NOT NULL, event_url TEXT NOT NULL, location TEXT NOT NULL, received_at TEXT NOT NULL, status TEXT NOT NULL, bytes BIGINT NOT NULL, photos JSONB NOT NULL);
+        CREATE TABLE IF NOT EXISTS tour_contribution_photos (contribution_id TEXT NOT NULL REFERENCES tour_contributions(id), position INTEGER NOT NULL, file TEXT NOT NULL, content_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, bytes BIGINT NOT NULL CHECK(bytes > 0), data BYTEA NOT NULL CHECK(octet_length(data) = bytes), PRIMARY KEY (contribution_id, position));`);
+      await client.query("INSERT INTO contribution_settings (id, value) VALUES ('rate_salt', $1) ON CONFLICT (id) DO NOTHING", [randomBytes(32).toString("hex")]);
+      await this.migrate(client);
+    });
+    try { await this.ready; }
+    catch { this.ready = undefined; throw new TourContributionError("Photo storage could not be prepared safely. Please try again later.", 503); }
+  }
+
+  private async migrate(client: TourContributionPgClient): Promise<void> {
+    if (!fs.existsSync(path.join(this.directory, "contributions.db"))) return;
+    const local = new TourContributionStore(this.directory);
+    await local.prepare();
+    const db = new DatabaseSync(local.database);
+    try {
+      const contributions = db.prepare("SELECT * FROM tour_contributions").all() as ContributionRow[];
+      for (const row of contributions) {
+        const photos = db.prepare("SELECT * FROM tour_contribution_photos WHERE contribution_id = ? ORDER BY position").all(row.id) as { position: number; file: string; content_type: string; width: number; height: number; bytes: number; data: Uint8Array }[];
+        const existing = (await client.query("SELECT * FROM tour_contributions WHERE id = $1", [row.id])).rows[0];
+        if (existing) {
+          const stored = (await client.query("SELECT * FROM tour_contribution_photos WHERE contribution_id = $1 ORDER BY position", [row.id])).rows;
+          if (["event_name", "event_url", "location", "received_at", "status"].some((key) => existing[key] !== row[key as keyof ContributionRow]) || Number(existing.bytes) !== Number(row.bytes) || stored.length !== photos.length || stored.some((photo, index) => Number(photo.position) !== photos[index]!.position || photo.file !== photos[index]!.file || photo.content_type !== photos[index]!.content_type || Number(photo.width) !== photos[index]!.width || Number(photo.height) !== photos[index]!.height || Number(photo.bytes) !== photos[index]!.bytes || !Buffer.from(photo.data as Uint8Array).equals(Buffer.from(photos[index]!.data)))) throw new Error("Conflicting legacy contribution");
+          continue;
+        }
+        await client.query("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)", [row.id, row.event_name, row.event_url, row.location, row.received_at, row.status, row.bytes, row.photos]);
+        for (const photo of photos) await client.query("INSERT INTO tour_contribution_photos (contribution_id, position, file, content_type, width, height, bytes, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [row.id, photo.position, photo.file, photo.content_type, photo.width, photo.height, photo.bytes, Buffer.from(photo.data)]);
+      }
+    } finally { db.close(); }
+  }
+
+  async reserve(source: string): Promise<string> {
+    await this.initialize();
+    try {
+      return await this.transaction(async (client) => {
+        const salt = (await client.query("SELECT value FROM contribution_settings WHERE id = 'rate_salt'")).rows[0]?.value;
+        if (typeof salt !== "string" || !salt) throw new Error("Missing storage settings");
+        const key = createHmac("sha256", salt).update(source.slice(0, 256) || "unknown").digest("hex");
+        const now = Date.now();
+        await client.query("DELETE FROM contribution_attempts WHERE created_at < $1", [now - 48 * 60 * 60 * 1000]);
+        const recent = (await client.query("SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE source = $1) AS own FROM contribution_attempts WHERE created_at > $2", [key, now - 60 * 60 * 1000])).rows[0]!;
+        const active = (await client.query("SELECT COUNT(*) AS total FROM contribution_attempts WHERE expires_at > $1", [now])).rows[0]!;
+        if (Number(recent.own) >= 5 || Number(recent.total) >= 50) throw new TourContributionError("We have received several uploads recently. Please try again in an hour.", 429, 3600);
+        if (Number(active.total) >= 3) throw new TourContributionError("Other photos are being processed. Please try again in a minute.", 429, 60);
+        const used = (await client.query("SELECT COUNT(*) AS total, COALESCE(SUM(bytes), 0) AS bytes FROM tour_contributions")).rows[0]!;
+        if (Number(used.total) >= TOUR_UPLOAD_LIMITS.maxContributions || Number(used.bytes) >= TOUR_UPLOAD_LIMITS.maxStoredBytes) throw new TourContributionError("Photo contributions are temporarily full. Please try again later.", 503);
+        const id = randomUUID();
+        await client.query("INSERT INTO contribution_attempts (id, source, created_at, expires_at) VALUES ($1, $2, $3, $4)", [id, key, now, now + 120_000]);
+        return id;
+      });
+    } catch (error) {
+      if (error instanceof TourContributionError) throw error;
+      throw new TourContributionError("Photo storage is busy. Please try again shortly.", 503);
+    }
+  }
+
+  async release(ticket: string): Promise<void> {
+    await this.initialize();
+    await this.transaction(async (client) => { await client.query("UPDATE contribution_attempts SET expires_at = 0 WHERE id = $1", [ticket]); });
+  }
+
+  async receive(ticket: string, input: TourContributionInput): Promise<TourContributionReceipt> {
+    const fields = eventFields(input);
+    const photos = await normalizeTourPhotos(input.photos);
+    await this.initialize();
+    try {
+      return await this.transaction(async (client) => {
+        const reservation = (await client.query("SELECT expires_at FROM contribution_attempts WHERE id = $1 FOR UPDATE", [ticket])).rows[0];
+        if (!reservation || Number(reservation.expires_at) <= Date.now()) throw new TourContributionError("The upload session expired. Please submit your photos again.", 409);
+        const bytes = photos.reduce((total, photo) => total + photo.bytes.byteLength, 0);
+        const used = (await client.query("SELECT COUNT(*) AS total, COALESCE(SUM(bytes), 0) AS bytes FROM tour_contributions")).rows[0]!;
+        if (Number(used.total) >= TOUR_UPLOAD_LIMITS.maxContributions || Number(used.bytes) + bytes > TOUR_UPLOAD_LIMITS.maxStoredBytes) throw new TourContributionError("Photo contributions are temporarily full. Please try again later.", 503);
+        const id = randomUUID();
+        const manifest = manifestFor(photos);
+        await client.query("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES ($1, $2, $3, $4, $5, 'received', $6, $7::jsonb)", [id, fields.eventName, fields.eventUrl, fields.location, new Date().toISOString(), bytes, JSON.stringify(manifest)]);
+        for (const [index, photo] of photos.entries()) await client.query("INSERT INTO tour_contribution_photos (contribution_id, position, file, content_type, width, height, bytes, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id, index, manifest[index]!.file, contentType(manifest[index]!.file), photo.width, photo.height, photo.bytes.byteLength, photo.bytes]);
+        await client.query("UPDATE contribution_attempts SET expires_at = 0 WHERE id = $1", [ticket]);
+        return receipt(id, fields.eventName, photos.length, this.kind);
+      });
+    } catch (error) {
+      if (error instanceof TourContributionError) throw error;
+      throw new TourContributionError("Your photos could not be saved. Please try again later.", 503);
+    }
+  }
+}
+
+const postgresStores = new Map<string, PostgresTourContributionStore>();
+
+export function tourContributionPgOptions(url: string) {
+  const connection = new URL(url);
+  const mode = connection.searchParams.get("sslmode");
+  if (!["postgres:", "postgresql:"].includes(connection.protocol) || (mode !== null && !["prefer", "require", "verify-ca", "verify-full"].includes(mode))) throw new TourContributionError("Photo database connection settings must use verified TLS.", 503);
+  connection.searchParams.set("sslmode", "verify-full");
+  return { connectionString: connection.toString(), ssl: { rejectUnauthorized: true }, max: 3, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000, statement_timeout: 30_000 };
+}
+
+export function tourContributionStore(): TourContributionStorage {
   if (process.env.VERCEL) throw new TourContributionError("Photo uploads need the persistent application service. Please try again later.", 503);
-  return new TourContributionStore(path.join(DATA_DIR, "tour-contributions"));
+  const directory = path.join(DATA_DIR, "tour-contributions");
+  const url = process.env.TIGER_DATABASE_URL;
+  if (!url) return new TourContributionStore(directory);
+  let store = postgresStores.get(url);
+  if (!store) {
+    let pool: Promise<TourContributionPgPool> | undefined;
+    store = new PostgresTourContributionStore(directory, () => pool ??= (async () => {
+      const { default: pg } = await import("pg");
+      return new pg.Pool(tourContributionPgOptions(url));
+    })());
+    postgresStores.set(url, store);
+  }
+  return store;
 }

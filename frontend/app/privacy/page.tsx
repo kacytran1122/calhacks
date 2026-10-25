@@ -27,6 +27,7 @@ export default function PrivacyPage() {
         <section style={sectionStyle}>
           <h2 style={headingStyle}>Storage and retention</h2>
           <p>The extension stores only the starting text you entered and your self-drive preference in Chrome local storage so the next plan is faster. It does not store precise GPS coordinates. The route endpoint does not intentionally persist your route request. Hosting providers may retain ordinary security logs such as IP address, request time, and error details for limited operational purposes.</p>
+          <p>On the website, nearby-event searches stay at the root address without adding your starting point to the URL. Your typed starting place and whether the event view is open may be remembered in this tab’s session storage. Precise GPS coordinates remain in page memory only and are not saved there or in browser history state. After a full refresh, please allow location access again if you want to use your precise location instead of your typed starting point. Older links may already contain location details; opening one removes those details from the current address, but cannot remove earlier copies, logs, or history entries elsewhere.</p>
         </section>
 
         <section style={sectionStyle}>
@@ -42,7 +43,7 @@ export default function PrivacyPage() {
 
         <section style={sectionStyle}>
           <h2 style={headingStyle}>Optional venue photo contributions</h2>
-          <p>If you choose to contribute venue photos, S’mile uploads the selected images, event name, public event website, and any venue location you enter to its persistent server. We remove embedded image metadata before saving the images privately for review and possible venue modelling. We do not automatically publish the photos or create a 3D tour from an upload, and these contributions are not automatically sent to a model-training service.</p>
+          <p>If you choose to contribute venue photos, S’mile uploads the selected images, event name, public event website, and any venue location you enter to its persistent server. We remove embedded image metadata and store both the image data and submission details in a private database for review and possible venue modelling. Earlier file-based submissions may retain a private original copy during migration to database storage. We do not automatically publish the photos or create a 3D tour from an upload, and these contributions are not automatically sent to a model-training service.</p>
           <p>Please share only photos you own or have permission to use, without faces, private information, or restricted areas. Photos and submission records remain until removed by an administrator. Keep the submission reference and contact us below if you want your contribution deleted. For abuse prevention, a short-lived hash of the connection identifier is used to limit uploads; we do not store the raw identifier in contribution records.</p>
         </section>
 
@@ -53,7 +54,7 @@ export default function PrivacyPage() {
 
         <section style={sectionStyle}>
           <h2 style={headingStyle}>Your choices</h2>
-          <p>You can deny the browser location prompt and use a typed starting point. You can clear locally stored preferences by removing the extension or clearing its extension data. You can stop page access by closing the panel or uninstalling the extension.</p>
+          <p>You can deny the browser location prompt and use a typed starting point. You can clear the website’s saved starting place by clearing its session storage, and clear extension preferences by removing the extension or clearing its extension data. You can stop extension page access by closing the panel or uninstalling the extension.</p>
         </section>
 
         <section style={sectionStyle}>

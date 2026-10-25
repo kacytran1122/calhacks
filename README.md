@@ -26,6 +26,8 @@ Only these product areas live at the repository root. Generated files, credentia
 5. Send the trip, evidence, and consent trail to the organizer desk.
 6. Reconcile receipts, settlements, check-ins, and policy into balanced books.
 
+The public traveler entry point is `https://smilefromhereto.work/`. Finding nearby events changes the view at that same address instead of putting a ZIP code, starting place, or GPS coordinates in the URL. The typed starting point is remembered in tab-scoped session storage; precise coordinates remain only in page memory and are not retained after a full refresh. Older `/find` links still open, then normalize to the root address.
+
 ## Architecture
 
 | Area | Responsibility |
@@ -111,7 +113,7 @@ No production deployment occurs without an explicitly configured hosting environ
 | Bright Data | Live logged-out event, route, fare, and stop pages |
 | Hyphenate track | Our organizer finance implementation: evidence matching, exception routing, control totals, and close readiness; not a Hyphenate API integration |
 | Photon 2.0 | `@smile` group conversation and private trip-scoped approval links |
-| TigerData | Time-series snapshots for event date and venue changes |
+| TigerData | Time-series event snapshots and private venue-photo submissions, including the image bytes |
 | Visa | Traveler-approved fare binding, category and expiry controls, replay protection, and signed sandbox authorization with capture disabled |
 | Open-Meteo | Live forecast and ERA5 history for the venue heat map (no key) |
 | OpenStreetMap | Map tiles for the heat map; OSRM road distance and drive time |
@@ -133,7 +135,9 @@ Automated tests exercise group routing, mention filtering, private approvals, re
 
 LA Hacks opens the James West Alumni Center concept at `/tour`. Cal Hacks opens the Palace of Fine Arts concept at `/venue`. These are approximate visualizations, not verified current floor plans, event assignments, or accessible-navigation instructions. Other event cards link to `/tours/contribute` with the selected event prefilled instead of implying a tour is available.
 
-The contribution form accepts one to six JPEG, PNG, or WebP photos, with a combined input limit of 3 MiB. `/api/tours/contributions` validates and decodes the images, removes embedded metadata, and saves them privately on the persistent Railway volume under `SMILE_DATA_DIR`. The response confirms a submission reference, not a generated model. Material needs manual review and a separate modelling workflow before a tour can be published. Requests require explicit consent, pass an origin check, and are subject to storage and rate limits. This endpoint must not run on an ephemeral Vercel filesystem.
+The contribution form accepts one to six JPEG, PNG, or WebP photos, with a combined input limit of 3 MiB. `/api/tours/contributions` validates and decodes the images and removes embedded metadata. When `TIGER_DATABASE_URL` is configured, it commits the submission details and the actual image bytes together in private PostgreSQL tables. A failed database connection fails the upload rather than silently saving somewhere else. Local development without that connection uses a private SQLite database under `SMILE_DATA_DIR`, with image bytes stored as BLOBs rather than separate image files. Legacy file-based submissions are imported without deleting their originals; incomplete legacy material stops the migration instead of losing a photo.
+
+The response confirms a durable submission reference, not a generated model. Material needs manual review and a separate modelling workflow before a tour can be published. Requests require explicit consent, pass an origin check, and are subject to shared storage, concurrency, and rate limits. There is no public image-download endpoint. Route `/api` to the persistent Railway service rather than an ephemeral Vercel filesystem.
 
 `npm run dev --prefix frontend` and `npm run build --prefix frontend` build the local Three.js viewer automatically. The LA Hacks model is a checked-in GLB; the Cal Hacks walkthrough generates its scene in code. Runtime scripts and model files are served locally rather than loaded from a third-party script CDN.
 

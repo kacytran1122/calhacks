@@ -6,10 +6,16 @@ import { HowItWorks } from "@/components/landing/HowItWorks";
 import { LensDemo } from "@/components/landing/LensDemo";
 import { RevealObserver } from "@/components/landing/Reveal";
 import { Why } from "@/components/landing/Why";
+import { TravelHome } from "@/components/travel/TravelHome";
+import type { Metadata } from "next";
+import "./desk/desk.css";
+import "./find/find.css";
+
+export const metadata: Metadata = { alternates: { canonical: "/" } };
 
 export default function Landing() {
   return (
-    <>
+    <TravelHome>
       <Header />
       <Hero />
       <Why />
@@ -19,6 +25,6 @@ export default function Landing() {
       <Cta />
       <Footer />
       <RevealObserver />
-    </>
+    </TravelHome>
   );
 }

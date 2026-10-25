@@ -14,6 +14,9 @@ test("multipart API validates real uploaded bytes, permission, origins, duplicat
   const script = `
     import assert from "node:assert/strict";
     import { createRequire } from "node:module";
+    import { DatabaseSync } from "node:sqlite";
+    import fs from "node:fs";
+    import path from "node:path";
     import { POST } from ${JSON.stringify(route)};
     const sharp = createRequire(${JSON.stringify(packageFile)})("sharp");
     const png = await sharp({ create: { width: 8, height: 6, channels: 3, background: "#fff" } }).png().toBuffer();
@@ -36,13 +39,23 @@ test("multipart API validates real uploaded bytes, permission, origins, duplicat
       const body = await response.json();
       assert.equal(response.status, expected, JSON.stringify(body));
       assert.equal(JSON.stringify(body).includes(process.env.SMILE_DATA_DIR), false);
-      if (expected === 201) assert.equal(body.status, "received");
+      if (expected === 201) {
+        assert.equal(body.status, "received");
+        assert.equal(body.storage, "sqlite");
+        const db = new DatabaseSync(path.join(process.env.SMILE_DATA_DIR, "tour-contributions", "contributions.db"));
+        const photos = db.prepare("SELECT data, bytes FROM tour_contribution_photos WHERE contribution_id = ?").all(body.receiptId);
+        assert.equal(photos.length, 1);
+        assert.equal(photos[0].data.byteLength, photos[0].bytes);
+        assert.equal((await sharp(Buffer.from(photos[0].data)).metadata()).format, "png");
+        db.close();
+        assert.equal(fs.existsSync(path.join(process.env.SMILE_DATA_DIR, "tour-contributions", body.receiptId)), false);
+      }
     }
     for (const [kind, status] of [["valid", 201], ["local-bind", 201], ["foreign", 403], ["no-origin", 403], ["empty", 400], ["disguised", 415], ["no-consent", 400], ["duplicate", 400], ["unknown", 400], ["oversize", 413], ["oversize-body", 413]]) await send(kind, status);
   `;
   execFileSync(process.execPath, ["--conditions=react-server", "--import", path.join(root, "backend/node_modules/tsx/dist/loader.mjs"), "--input-type=module", "-e", script], {
     cwd: root,
-    env: { ...process.env, NODE_ENV: "production", VERCEL: "", SMILE_DATA_DIR: directory, TSX_TSCONFIG_PATH: path.join(root, "frontend/tsconfig.json") },
+    env: { ...process.env, NODE_ENV: "production", VERCEL: "", TIGER_DATABASE_URL: "", SMILE_DATA_DIR: directory, TSX_TSCONFIG_PATH: path.join(root, "frontend/tsconfig.json") },
     timeout: 30_000,
     stdio: "pipe",
   });

@@ -9,7 +9,7 @@ export function Cta() {
         <h2 className="disp" style={{ fontSize: "clamp(56px,8.5vw,128px)" }}>
           Add <Smile /> to <em>your trip.</em>
         </h2>
-        <a className="cta-btn" href="/find">
+        <a className="cta-btn" href="/">
           Get started
         </a>
       </div>

@@ -52,7 +52,7 @@ export async function POST(request: Request) {
   try {
     store = tourContributionStore();
     const source = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
-    ticket = store.reserve(source);
+    ticket = await store.reserve(source);
     const form = await boundedForm(request);
     const allowed = new Set(["eventName", "eventUrl", "location", "consent", "photos"]);
     if ([...form.keys()].some((key) => !allowed.has(key)) || ["eventName", "eventUrl", "location", "consent"].some((key) => form.getAll(key).length > 1))
@@ -80,6 +80,6 @@ export async function POST(request: Request) {
       headers: { "Cache-Control": "no-store", ...(known && error.retryAfter ? { "Retry-After": String(error.retryAfter) } : {}) },
     });
   } finally {
-    if (store && ticket) { try { store.release(ticket); } catch {} }
+    if (store && ticket) { try { await store.release(ticket); } catch {} }
   }
 }

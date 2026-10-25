@@ -3,11 +3,12 @@
 import { useState, type FormEvent } from "react";
 import { PhoneChat } from "./PhoneChat";
 import { Smile } from "./Smile";
+import type { TravelOrigin } from "@/lib/travelSession";
 
 type OriginMode = "zip" | "city";
 type PendingOrigin = { zip: string; label: string };
 
-export function HeroView({ onNavigate }: { onNavigate: (href: string) => void }) {
+export function HeroView({ onNavigate }: { onNavigate: (origin: TravelOrigin) => void }) {
   const [mode, setMode] = useState<OriginMode>("zip");
   const [zip, setZip] = useState("");
   const [city, setCity] = useState("");
@@ -16,8 +17,6 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
   const [pendingOrigin, setPendingOrigin] = useState<PendingOrigin | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: "hint" | "error"; text: string } | null>(null);
-
-  const findUrl = (origin: PendingOrigin, coordinates?: { lat: number; lon: number }) => `/find?zip=${origin.zip}&origin=${encodeURIComponent(origin.label)}${coordinates ? `&gps=1&lat=${coordinates.lat}&lon=${coordinates.lon}` : ""}`;
 
   const selectMode = (next: OriginMode) => {
     setMode(next);
@@ -61,7 +60,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
   };
 
   const continueWithEnteredLocation = () => {
-    if (pendingOrigin) onNavigate(findUrl(pendingOrigin));
+    if (pendingOrigin) onNavigate(pendingOrigin);
   };
 
   const allowCurrentLocation = async () => {
@@ -76,7 +75,7 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
         navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 20_000, maximumAge: 300_000 }),
       );
       const coordinates = { lat: position.coords.latitude, lon: position.coords.longitude };
-      if (pendingOrigin) onNavigate(findUrl({ ...pendingOrigin, label: "Current location" }, coordinates));
+      if (pendingOrigin) onNavigate({ ...pendingOrigin, label: "Current location", coordinates, enteredOrigin: pendingOrigin });
     } catch (error) {
       const code = (error as GeolocationPositionError).code;
       setLocationError(code === 1 ? "Location access is blocked in the browser. Allow it and try again, or use the location you entered." : "We couldn’t get a location from this device. Check that Location Services are on, then try again or use the location you entered.");

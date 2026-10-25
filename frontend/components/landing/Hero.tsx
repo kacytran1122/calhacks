@@ -1,9 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useTravelNavigation } from "@/components/travel/TravelHome";
 import { HeroView } from "./HeroView";
 
 export function Hero() {
-  const router = useRouter();
-  return <HeroView onNavigate={(href) => router.push(href)} />;
+  const navigate = useTravelNavigation();
+  return <HeroView onNavigate={navigate} />;
 }

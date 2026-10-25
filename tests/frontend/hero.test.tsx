@@ -16,7 +16,7 @@ describe("landing origin picker", () => {
     expect(screen.getByRole("dialog", { name: "Allow location access?" })).toBeVisible();
     expect(push).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Use 61401 instead" }));
-    expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=61401");
+    expect(push).toHaveBeenCalledWith({ zip: "61401", label: "61401" });
   });
 
   test("shows an inline error for an incomplete ZIP", async () => {
@@ -36,7 +36,7 @@ describe("landing origin picker", () => {
     await user.click(screen.getByRole("button", { name: /find trips/i }));
     expect(await screen.findByRole("dialog", { name: "Allow location access?" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Use Galesburg, IL instead" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=Galesburg%2C%20IL"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith({ zip: "61401", label: "Galesburg, IL" }));
   });
 
   test("accepts a city without requiring a state", async () => {
@@ -58,7 +58,7 @@ describe("landing origin picker", () => {
     await user.click(screen.getByRole("button", { name: /find trips/i }));
     expect(getCurrentPosition).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Allow location" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=60601&origin=Current%20location&gps=1&lat=40.95&lon=-90.37"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith({ zip: "60601", label: "Current location", coordinates: { lat: 40.95, lon: -90.37 }, enteredOrigin: { zip: "60601", label: "60601" } }));
     expect(getCurrentPosition).toHaveBeenCalledWith(expect.any(Function), expect.any(Function), { enableHighAccuracy: true, timeout: 20_000, maximumAge: 300_000 });
   });
 
@@ -84,7 +84,7 @@ describe("landing origin picker", () => {
     await user.type(screen.getByLabelText("Home ZIP code"), "61401");
     await user.click(screen.getByRole("button", { name: /find trips/i }));
     await user.click(screen.getByRole("button", { name: "Allow location" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=Current%20location&gps=1&lat=33.6405&lon=-117.8443"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith({ zip: "61401", label: "Current location", coordinates: { lat: 33.6405, lon: -117.8443 }, enteredOrigin: { zip: "61401", label: "61401" } }));
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

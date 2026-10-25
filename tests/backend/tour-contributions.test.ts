@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { TOUR_UPLOAD_LIMITS, TourContributionError, TourContributionStore, normalizeTourPhotos, tourContributionOriginAllowed, tourContributionStore, type TourContributionInput } from "../../backend/src/tourContributions";
+import { TOUR_UPLOAD_LIMITS, PostgresTourContributionStore, TourContributionError, TourContributionStore, normalizeTourPhotos, tourContributionOriginAllowed, tourContributionPgOptions, tourContributionStore, type TourContributionInput, type TourContributionPgClient, type TourContributionPgPool } from "../../backend/src/tourContributions";
 
 const sharp = createRequire(new URL("../../backend/package.json", import.meta.url))("sharp");
 
@@ -24,9 +24,9 @@ async function input(overrides: Partial<TourContributionInput> = {}): Promise<To
 }
 
 async function submit(store: TourContributionStore, value: TourContributionInput, source = "192.0.2.1") {
-  const ticket = store.reserve(source);
+  const ticket = await store.reserve(source);
   try { return await store.receive(ticket, value); }
-  finally { store.release(ticket); }
+  finally { await store.release(ticket); }
 }
 
 function status(expected: number) {
@@ -38,12 +38,14 @@ test("stores actual photos privately and persists a safe receipt across restarts
   const value = await input();
   const receipt = await submit(store, value);
   assert.equal(receipt.status, "received");
+  assert.equal(receipt.storage, "sqlite");
   assert.equal(receipt.photoCount, 1);
   assert.equal(receipt.eventName, value.eventName);
   assert.match(receipt.message, /does not automatically create or publish/);
   assert.match(receipt.receiptId, /^[a-f0-9-]{36}$/);
   assert.equal(JSON.stringify(receipt).includes(store.directory), false);
   const restarted = new TourContributionStore(store.directory);
+  await restarted.prepare();
   const db = new DatabaseSync(restarted.database);
   const row = db.prepare("SELECT * FROM tour_contributions WHERE id = ?").get(receipt.receiptId) as { photos: string; status: string; location: string };
   const manifest = JSON.parse(row.photos) as { file: string; width: number; height: number }[];
@@ -51,10 +53,12 @@ test("stores actual photos privately and persists a safe receipt across restarts
   assert.equal(row.location, value.location);
   assert.equal(manifest[0]!.width, 12);
   assert.equal(manifest[0]!.height, 8);
-  const file = path.join(store.directory, receipt.receiptId, manifest[0]!.file);
-  assert.equal((await sharp(file).metadata()).format, "png");
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(path.dirname(file)).mode & 0o777, 0o700);
+  const photo = db.prepare("SELECT data, content_type, bytes FROM tour_contribution_photos WHERE contribution_id = ?").get(receipt.receiptId) as { data: Uint8Array; content_type: string; bytes: number };
+  assert.equal((await sharp(Buffer.from(photo.data)).metadata()).format, "png");
+  assert.equal(photo.content_type, "image/png");
+  assert.equal(photo.data.byteLength, photo.bytes);
+  assert.equal(fs.existsSync(path.join(store.directory, receipt.receiptId)), false);
+  assert.equal(fs.statSync(store.directory).mode & 0o777, 0o700);
   assert.equal(fs.statSync(store.database).mode & 0o777, 0o600);
   db.close();
 });
@@ -106,22 +110,24 @@ test("rejects compressed images above the decoded pixel safety limit", async () 
   await assert.rejects(normalizeTourPhotos([{ bytes: oversized, contentType: "image/png" }]), status(415));
 });
 
-test("uses generated paths, not event names or contributor-supplied file paths", async (t) => {
+test("uses generated database identifiers, not contributor-supplied file paths", async (t) => {
   const store = fixture(t);
   const receipt = await submit(store, await input({ eventName: "../../untrusted-folder" }));
-  assert.equal(fs.existsSync(path.join(store.directory, receipt.receiptId)), true);
+  assert.equal(fs.existsSync(path.join(store.directory, receipt.receiptId)), false);
   assert.equal(fs.existsSync(path.join(path.dirname(store.directory), "untrusted-folder")), false);
-  const files = fs.readdirSync(path.join(store.directory, receipt.receiptId));
+  const db = new DatabaseSync(store.database);
+  const files = db.prepare("SELECT file FROM tour_contribution_photos WHERE contribution_id = ?").all(receipt.receiptId) as { file: string }[];
   assert.equal(files.length, 1);
-  assert.match(files[0]!, /^[a-f0-9-]{36}\.png$/);
+  assert.match(files[0]!.file, /^[a-f0-9-]{36}\.png$/);
+  db.close();
 });
 
-test("rate limits survive a restart and do not retain the raw source address", (t) => {
+test("rate limits survive a restart and do not retain the raw source address", async (t) => {
   const store = fixture(t);
   const source = "192.0.2.123";
-  for (let count = 0; count < 5; count++) store.release(store.reserve(source));
+  for (let count = 0; count < 5; count++) await store.release(await store.reserve(source));
   const restarted = new TourContributionStore(store.directory);
-  assert.throws(() => restarted.reserve(source), status(429));
+  await assert.rejects(restarted.reserve(source), status(429));
   const db = new DatabaseSync(store.database);
   const row = db.prepare("SELECT source FROM contribution_attempts LIMIT 1").get() as { source: string };
   assert.match(row.source, /^[a-f0-9]{64}$/);
@@ -131,26 +137,232 @@ test("rate limits survive a restart and do not retain the raw source address", (
 
 test("limits concurrent uploads and requires a live, unused upload reservation", async (t) => {
   const store = fixture(t);
-  const reservations = [store.reserve("one"), store.reserve("two"), store.reserve("three")];
-  assert.throws(() => store.reserve("four"), status(429));
-  store.release(reservations[0]!);
-  const replacement = store.reserve("four");
+  const reservations = [await store.reserve("one"), await store.reserve("two"), await store.reserve("three")];
+  await assert.rejects(store.reserve("four"), status(429));
+  await store.release(reservations[0]!);
+  const replacement = await store.reserve("four");
   await assert.rejects(store.receive(reservations[0]!, await input()), status(409));
   await store.receive(replacement, await input());
   await assert.rejects(store.receive(replacement, await input()), status(409));
-  reservations.forEach((ticket) => store.release(ticket));
+  for (const ticket of reservations) await store.release(ticket);
 });
 
 test("fails closed at the durable disk quota instead of silently accepting files", async (t) => {
   const store = fixture(t);
-  const ticket = store.reserve("one");
+  const ticket = await store.reserve("one");
   const db = new DatabaseSync(store.database);
   db.prepare("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES ('full', 'Event', 'https://example.edu', '', '', 'pending', ?, '[]')").run(TOUR_UPLOAD_LIMITS.maxStoredBytes);
   db.close();
   await assert.rejects(store.receive(ticket, await input()), status(503));
-  store.release(ticket);
-  assert.throws(() => store.reserve("two"), status(503));
+  await store.release(ticket);
+  await assert.rejects(store.reserve("two"), status(503));
   assert.deepEqual(fs.readdirSync(store.directory).filter((file) => /^[a-f0-9-]{36}$/.test(file)), []);
+});
+
+test("commits image bytes, metadata and consumed reservation together or rolls everything back", async (t) => {
+  const store = fixture(t);
+  const ticket = await store.reserve("one");
+  const db = new DatabaseSync(store.database);
+  db.exec("CREATE TRIGGER reject_second_photo BEFORE INSERT ON tour_contribution_photos WHEN NEW.position = 1 BEGIN SELECT RAISE(ABORT, 'storage unavailable'); END");
+  await assert.rejects(store.receive(ticket, await input({ photos: [{ bytes: await image() }, { bytes: await image() }] })), status(503));
+  assert.equal((db.prepare("SELECT COUNT(*) AS total FROM tour_contributions").get() as { total: number }).total, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS total FROM tour_contribution_photos").get() as { total: number }).total, 0);
+  assert.ok((db.prepare("SELECT expires_at FROM contribution_attempts WHERE id = ?").get(ticket) as { expires_at: number }).expires_at > Date.now());
+  db.exec("DROP TRIGGER reject_second_photo");
+  const receipt = await store.receive(ticket, await input());
+  assert.equal(receipt.status, "received");
+  db.close();
+});
+
+async function legacyContribution(store: TourContributionStore, id: string, missing = false) {
+  const bytes = await image();
+  const file = "11111111-1111-4111-8111-111111111111.png";
+  const directory = path.join(store.directory, id);
+  fs.mkdirSync(directory, { mode: 0o700 });
+  if (!missing) fs.writeFileSync(path.join(directory, file), bytes, { mode: 0o600 });
+  const db = new DatabaseSync(store.database);
+  db.prepare("INSERT INTO tour_contributions (id, event_name, event_url, location, received_at, status, bytes, photos) VALUES (?, 'Legacy event', 'https://events.example.edu/', 'Venue', ?, 'received', ?, ?)").run(id, new Date().toISOString(), bytes.byteLength, JSON.stringify([{ file, width: 12, height: 8, bytes: bytes.byteLength }]));
+  db.close();
+  return { bytes, file: path.join(directory, file) };
+}
+
+test("imports legacy disk photos into database BLOBs without removing the original files", async (t) => {
+  const store = fixture(t);
+  const id = "22222222-2222-4222-8222-222222222222";
+  const original = await legacyContribution(store, id);
+  await new TourContributionStore(store.directory).prepare();
+  await new TourContributionStore(store.directory).prepare();
+  const db = new DatabaseSync(store.database);
+  const saved = db.prepare("SELECT data FROM tour_contribution_photos WHERE contribution_id = ?").get(id) as { data: Uint8Array };
+  assert.deepEqual(Buffer.from(saved.data), original.bytes);
+  assert.deepEqual(fs.readFileSync(original.file), original.bytes);
+  assert.equal((db.prepare("SELECT COUNT(*) AS total FROM tour_contribution_photos").get() as { total: number }).total, 1);
+  db.close();
+});
+
+test("does not partially migrate or accept new uploads when a legacy image is missing", async (t) => {
+  const store = fixture(t);
+  const original = await legacyContribution(store, "22222222-2222-4222-8222-222222222222");
+  await legacyContribution(store, "33333333-3333-4333-8333-333333333333", true);
+  await assert.rejects(new TourContributionStore(store.directory).prepare(), status(503));
+  const db = new DatabaseSync(store.database);
+  assert.equal((db.prepare("SELECT COUNT(*) AS total FROM tour_contribution_photos").get() as { total: number }).total, 0);
+  assert.deepEqual(fs.readFileSync(original.file), original.bytes);
+  db.close();
+});
+
+test("rejects same-length corrupted legacy photos even when their image signature is intact", async (t) => {
+  const store = fixture(t);
+  const original = await legacyContribution(store, "22222222-2222-4222-8222-222222222222");
+  const corrupted = Buffer.from(original.bytes);
+  const dataOffset = corrupted.indexOf(Buffer.from("IDAT"));
+  assert.ok(dataOffset > 0);
+  corrupted[dataOffset + 6] = corrupted[dataOffset + 6]! ^ 0xff;
+  fs.writeFileSync(original.file, corrupted);
+  await assert.rejects(new TourContributionStore(store.directory).prepare(), status(503));
+  const db = new DatabaseSync(store.database);
+  assert.equal((db.prepare("SELECT COUNT(*) AS total FROM tour_contribution_photos").get() as { total: number }).total, 0);
+  assert.deepEqual(fs.readFileSync(original.file), corrupted);
+  db.close();
+});
+
+test("refuses a partial existing database image set instead of ignoring missing photos", async (t) => {
+  const store = fixture(t);
+  const receipt = await submit(store, await input({ photos: [{ bytes: await image() }, { bytes: await image() }] }));
+  const db = new DatabaseSync(store.database);
+  db.prepare("DELETE FROM tour_contribution_photos WHERE contribution_id = ? AND position = 1").run(receipt.receiptId);
+  db.close();
+  await assert.rejects(new TourContributionStore(store.directory).prepare(), status(503));
+});
+
+function fakePostgres() {
+  let contributions = new Map<string, Record<string, unknown>>();
+  let photos = new Map<string, Record<string, unknown>>();
+  let attempts = new Map<string, Record<string, unknown>>();
+  let snapshot: { contributions: typeof contributions; photos: typeof photos; attempts: typeof attempts } | undefined;
+  const calls: { sql: string; values: unknown[] }[] = [];
+  let failPhotoAt = -1;
+  let unavailable = false;
+  let released = 0;
+  const client: TourContributionPgClient = {
+    async query(sql, values = []) {
+      calls.push({ sql, values });
+      let rows: Record<string, unknown>[] = [];
+      if (sql === "BEGIN") snapshot = { contributions: new Map(contributions), photos: new Map(photos), attempts: new Map([...attempts].map(([key, row]) => [key, { ...row }])) };
+      else if (sql === "ROLLBACK" && snapshot) ({ contributions, photos, attempts } = snapshot);
+      else if (sql === "COMMIT" || sql.startsWith("SELECT pg_advisory") || sql.startsWith("CREATE TABLE") || sql.startsWith("INSERT INTO contribution_settings")) {}
+      else if (sql.startsWith("SELECT value FROM contribution_settings")) rows = [{ value: "a".repeat(64) }];
+      else if (sql.startsWith("DELETE FROM contribution_attempts")) { for (const [key, row] of attempts) if (Number(row.created_at) < Number(values[0])) attempts.delete(key); }
+      else if (sql.includes("COUNT(*) FILTER")) { const recent = [...attempts.values()].filter((row) => Number(row.created_at) > Number(values[1])); rows = [{ total: String(recent.length), own: String(recent.filter((row) => row.source === values[0]).length) }]; }
+      else if (sql.startsWith("SELECT COUNT(*) AS total FROM contribution_attempts")) rows = [{ total: String([...attempts.values()].filter((row) => Number(row.expires_at) > Number(values[0])).length) }];
+      else if (sql.startsWith("SELECT COUNT(*) AS total, COALESCE(SUM(bytes)")) rows = [{ total: String(contributions.size), bytes: String([...contributions.values()].reduce((sum, row) => sum + Number(row.bytes), 0)) }];
+      else if (sql.startsWith("INSERT INTO contribution_attempts")) attempts.set(String(values[0]), { id: values[0], source: values[1], created_at: values[2], expires_at: values[3] });
+      else if (sql.startsWith("SELECT expires_at FROM contribution_attempts")) { const row = attempts.get(String(values[0])); if (row) rows = [row]; }
+      else if (sql.startsWith("UPDATE contribution_attempts")) { const row = attempts.get(String(values[0])); if (row) row.expires_at = 0; }
+      else if (sql.startsWith("INSERT INTO tour_contributions")) contributions.set(String(values[0]), { id: values[0], event_name: values[1], event_url: values[2], location: values[3], received_at: values[4], status: values.length === 8 ? values[5] : "received", bytes: values.at(-2), photos: JSON.parse(String(values.at(-1))) });
+      else if (sql.startsWith("INSERT INTO tour_contribution_photos")) { if (values[1] === failPhotoAt) throw new Error("private database error"); photos.set(`${values[0]}:${values[1]}`, { contribution_id: values[0], position: values[1], file: values[2], content_type: values[3], width: values[4], height: values[5], bytes: values[6], data: Buffer.from(values[7] as Uint8Array) }); }
+      else if (sql.startsWith("SELECT * FROM tour_contributions")) { const row = contributions.get(String(values[0])); if (row) rows = [row]; }
+      else if (sql.startsWith("SELECT * FROM tour_contribution_photos")) rows = [...photos.values()].filter((row) => row.contribution_id === values[0]).sort((a, b) => Number(a.position) - Number(b.position));
+      else throw new Error(`Unexpected query: ${sql}`);
+      return { rows };
+    },
+    release() { released++; },
+  };
+  const pool: TourContributionPgPool = { async connect() { if (unavailable) throw new Error("postgresql://private:password@database"); return client; } };
+  return { pool, calls, contributions: () => contributions, photos: () => photos, attempts: () => attempts, released: () => released, failPhoto: (position: number) => { failPhotoAt = position; }, failConnection: () => { unavailable = true; } };
+}
+
+test("stores PostgreSQL BYTEA images and their receipt in one locked transaction", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-tour-pg-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(directory, async () => database.pool);
+  const ticket = await store.reserve("192.0.2.99");
+  const receipt = await store.receive(ticket, await input());
+  assert.equal(receipt.storage, "tigerdata");
+  assert.equal(database.contributions().size, 1);
+  assert.equal(database.photos().size, 1);
+  const saved = [...database.photos().values()][0]!;
+  assert.equal((await sharp(saved.data).metadata()).format, "png");
+  assert.equal(database.attempts().get(ticket)?.expires_at, 0);
+  assert.notEqual(database.attempts().get(ticket)?.source, "192.0.2.99");
+  assert.ok(database.calls.some((call) => call.sql.includes("data BYTEA NOT NULL CHECK(octet_length(data) = bytes)")));
+  assert.ok(database.calls.some((call) => call.sql.includes("pg_advisory_xact_lock")));
+  assert.equal(database.calls.at(-1)?.sql, "COMMIT");
+  assert.ok(database.released() >= 3);
+  assert.deepEqual(fs.readdirSync(directory), []);
+  await assert.rejects(store.receive(ticket, await input()), status(409));
+});
+
+test("rolls PostgreSQL image failures back and never silently switches to disk storage", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smile-tour-pg-fail-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(directory, async () => database.pool);
+  const ticket = await store.reserve("one");
+  database.failPhoto(1);
+  await assert.rejects(store.receive(ticket, await input({ photos: [{ bytes: await image() }, { bytes: await image() }] })), status(503));
+  assert.equal(database.contributions().size, 0);
+  assert.equal(database.photos().size, 0);
+  assert.ok(Number(database.attempts().get(ticket)?.expires_at) > Date.now());
+  assert.equal(database.calls.at(-1)?.sql, "ROLLBACK");
+  database.failConnection();
+  await assert.rejects(store.reserve("two"), (error: unknown) => status(503)(error) && !(error as Error).message.includes("password"));
+  assert.deepEqual(fs.readdirSync(directory), []);
+});
+
+test("copies existing SQLite and legacy photos into PostgreSQL without deleting either backup", async (t) => {
+  const local = fixture(t);
+  const id = "22222222-2222-4222-8222-222222222222";
+  const original = await legacyContribution(local, id);
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(local.directory, async () => database.pool);
+  const ticket = await store.reserve("one");
+  await store.release(ticket);
+  assert.deepEqual(database.photos().get(`${id}:0`)?.data, original.bytes);
+  assert.deepEqual(fs.readFileSync(original.file), original.bytes);
+  assert.equal(fs.existsSync(local.database), true);
+  const restarted = new PostgresTourContributionStore(local.directory, async () => database.pool);
+  const next = await restarted.reserve("two");
+  await restarted.release(next);
+  assert.equal(database.contributions().size, 1);
+  assert.equal(database.photos().size, 1);
+});
+
+test("keeps PostgreSQL empty if any legacy contribution is incomplete", async (t) => {
+  const local = fixture(t);
+  const original = await legacyContribution(local, "22222222-2222-4222-8222-222222222222");
+  await legacyContribution(local, "33333333-3333-4333-8333-333333333333", true);
+  const database = fakePostgres();
+  const store = new PostgresTourContributionStore(local.directory, async () => database.pool);
+  await assert.rejects(store.reserve("one"), status(503));
+  assert.equal(database.photos().size, 0);
+  assert.equal(database.contributions().size, 0);
+  assert.deepEqual(fs.readFileSync(original.file), original.bytes);
+});
+
+test("selects the configured TigerData database before receiving uploads", () => {
+  const before = process.env.TIGER_DATABASE_URL;
+  process.env.TIGER_DATABASE_URL = "postgresql://user:unused@database.example/test?sslmode=require";
+  try { assert.equal(tourContributionStore().kind, "tigerdata"); }
+  finally { if (before === undefined) delete process.env.TIGER_DATABASE_URL; else process.env.TIGER_DATABASE_URL = before; }
+});
+
+test("keeps certificate and hostname verification for every supported PostgreSQL TLS mode", () => {
+  const { Client } = createRequire(new URL("../../backend/package.json", import.meta.url))("pg");
+  for (const mode of [undefined, "prefer", "require", "verify-ca", "verify-full"]) {
+    const options = tourContributionPgOptions(`postgresql://user:unused@database.example/test${mode ? `?sslmode=${mode}` : ""}`);
+    assert.equal(new URL(options.connectionString).searchParams.get("sslmode"), "verify-full");
+    assert.equal(options.ssl.rejectUnauthorized, true);
+    const actual = new Client(options).connectionParameters.ssl;
+    assert.ok(actual);
+    assert.notEqual(actual.rejectUnauthorized, false);
+    assert.equal(actual.checkServerIdentity, undefined);
+  }
+  const options = tourContributionPgOptions("postgresql://user:unused@database.example/test?sslmode=require&sslrootcert=%2Fprivate%2Fca.pem&uselibpqcompat=true");
+  assert.equal(new URL(options.connectionString).searchParams.get("sslrootcert"), "/private/ca.pem");
+  for (const mode of ["disable", "no-verify", "allow", ""]) assert.throws(() => tourContributionPgOptions(`postgresql://user:unused@database.example/test?sslmode=${mode}`), status(503));
+  assert.throws(() => tourContributionPgOptions("https://database.example/test?sslmode=require"), status(503));
 });
 
 test("allows the real production origin through the backend proxy and rejects foreign or missing origins", () => {
