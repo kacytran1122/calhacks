@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { predictTrees } from "../../backend/src/ml/gbdt";
-import { AIRFARE, FLIGHT_TIME, PERIODS, RIDESHARE, airportsNear, estimateAirfare, estimateRideshare, flightFactor, periodOf, predictRange, type PriceModelFile } from "../../backend/src/ml/price";
+import { AIRFARE, FLIGHT_TIME, HISTORY, PERIODS, RIDESHARE, airportsNear, estimateAirfare, estimateRideshare, flightFactor, pastFarePerMile, periodOf, predictRange, type PriceModelFile } from "../../backend/src/ml/price";
 
 for (const model of [RIDESHARE, AIRFARE, FLIGHT_TIME] as PriceModelFile[]) {
   test(`${model.name}: TypeScript trees reproduce the notebook's XGBoost predictions`, () => {
@@ -83,4 +83,25 @@ test("flights: price by departure hour around the route-level fare", () => {
   assert.ok(Math.abs(avg - 1) < 0.01, "factors describe the shape of the day around the route fare");
   assert.ok(trip.cheapestHour && trip.byHour.every((h) => h.range.p50 >= trip.cheapestHour!.range.p50));
   assert.equal(flightFactor(9, 2), flightFactor(9, 2));
+});
+
+test("past pattern: real hourly history sits next to the prediction", () => {
+  const est = estimateRideshare({ miles: 8, minutes: 25, arriveBy: "2026-11-11T17:00:00Z" });
+  assert.equal(est.pastByHour.length, 24);
+  const known = est.pastByHour.filter((v): v is number => typeof v === "number");
+  assert.equal(known.length, 24, "every hour has at least 30 past trips for an 8-mile weekday ride");
+  est.byHour.forEach((h, i) => {
+    const past = est.pastByHour[i]!;
+    assert.ok(past > h.uber.p50 * 0.5 && past < h.uber.p50 * 2, `hour ${i}: past ${past} vs predicted ${h.uber.p50}`);
+  });
+  // Weekday rush hour cost more per mile than the middle of the night in the past data.
+  const fpm = pastFarePerMile(8, false);
+  assert.ok(fpm[17]! > fpm[3]!);
+});
+
+test("past pattern for flights follows departure hours and leaves gaps instead of guessing", () => {
+  const trip = estimateAirfare({ from: { lat: 38.5449, lon: -121.7405 }, to: { lat: 30.2672, lon: -97.7431 }, when: "2026-11-11T17:00:00Z" })!;
+  const past = trip.byHour.map((h) => h.past);
+  assert.ok(past.filter((v) => v !== null).length >= 15);
+  assert.equal(HISTORY.flights.hours.length, HISTORY.flights.factor.weekday.length);
 });

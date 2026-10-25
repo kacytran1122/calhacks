@@ -13,6 +13,7 @@
 import rideshareJson from "../../ml/models/rideshare_fare.json";
 import airfareJson from "../../ml/models/airfare.json";
 import flightTimeJson from "../../ml/models/flight_time_of_day.json";
+import historyJson from "../../ml/models/price_history.json";
 import { haversineMiles } from "../integrations/geo";
 import { predictTrees, type CompactModel } from "./gbdt";
 
@@ -49,6 +50,21 @@ type AirfareFile = PriceModelFile & { airports: Airport[]; airport_defaults: { l
 export const RIDESHARE = rideshareJson as unknown as PriceModelFile;
 export const AIRFARE = airfareJson as unknown as AirfareFile;
 export const FLIGHT_TIME = flightTimeJson as unknown as PriceModelFile;
+
+/** What travelers actually paid by hour (backend/ml/notebooks/smile_price_history.ipynb). */
+interface PriceHistory {
+  rideshare: { bands_miles: number[]; fare_per_mile: Record<string, (number | null)[]> };
+  flights: { hours: number[]; factor: { weekday: (number | null)[]; weekend: (number | null)[] } };
+}
+export const HISTORY = historyJson as unknown as PriceHistory;
+
+/** Past fare per mile for a trip of this length on this kind of day, for each hour 0-23. */
+export function pastFarePerMile(miles: number, weekend: boolean): (number | null)[] {
+  const bands = HISTORY.rideshare.bands_miles;
+  let band = bands.findIndex((b, i) => miles >= b && miles < (bands[i + 1] ?? Infinity));
+  if (band < 0 || band >= bands.length - 1) band = bands.length - 2;
+  return HISTORY.rideshare.fare_per_mile[`${band}:${weekend ? "weekend" : "weekday"}`] ?? Array(24).fill(null);
+}
 
 export const PERIODS: DayPeriod[] = RIDESHARE.periods ?? [];
 
@@ -110,6 +126,7 @@ export interface RideshareEstimate {
   departHour: number;
   period: string;
   byHour: HourPrice[]; // the same ride requested at every hour of that day
+  pastByHour: (number | null)[]; // what riders actually paid at each hour, scaled to this distance
   cheapestOnTime: HourPrice | null; // cheapest hour that still arrives before the event starts
   caveat: string;
 }
@@ -145,6 +162,7 @@ export function estimateRideshare(args: { miles: number; minutes: number; arrive
     period: periodOf(dep.hour).name,
     byHour,
     cheapestOnTime,
+    pastByHour: pastFarePerMile(args.miles, dep.dow >= 5).map((fpm) => (fpm === null ? null : round2(fpm * args.miles))),
     caveat: "Base fare before tax, tolls, booking fees and tip, learned from New York City Uber and Lyft trips. Prices elsewhere can differ.",
   };
 }
@@ -155,6 +173,7 @@ export interface FlightHour {
   period: string;
   factor: number; // relative to the day's average departure on this route (average = 1.0)
   range: PriceRange;
+  past: number | null; // past departure-hour pattern applied to this route's fare
 }
 
 export interface AirfareEstimate {
@@ -223,9 +242,18 @@ export function estimateAirfare(args: { from: { lat: number; lon: number }; to: 
   const hours = Array.from({ length: 18 }, (_, i) => i + 5);
   const raw = hours.map((h) => flightFactor(h, dow));
   const mean = raw.reduce((a, b) => a + b, 0) / raw.length;
+  const pastFactor = HISTORY.flights.factor[dow >= 5 ? "weekend" : "weekday"];
   const byHour: FlightHour[] = hours.map((hour, i) => {
     const factor = Math.round((raw[i]! / mean) * 1000) / 1000;
-    return { hour, period: periodOf(hour).name, factor, range: { p10: round2(best.range.p10 * factor), p50: round2(best.range.p50 * factor), p90: round2(best.range.p90 * factor) } };
+    const k = HISTORY.flights.hours.indexOf(hour);
+    const past = k >= 0 ? pastFactor[k] ?? null : null;
+    return {
+      hour,
+      period: periodOf(hour).name,
+      factor,
+      range: { p10: round2(best.range.p10 * factor), p50: round2(best.range.p50 * factor), p90: round2(best.range.p90 * factor) },
+      past: past === null ? null : round2(best.range.p50 * past),
+    };
   });
   const cheapestHour = byHour.reduce<FlightHour | null>((a, b) => (!a || b.range.p50 < a.range.p50 ? b : a), null);
   return { ...best, byHour, cheapestHour };

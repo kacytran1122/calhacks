@@ -54,7 +54,7 @@
 .ti-legend span{display:inline-flex;align-items:center;gap:5px}
 .ti-legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
 .ti-method summary{cursor:pointer;font:700 13px var(--font-heading);margin-top:6px}
-/* Price by time of day (HourChart) — palette validated: line #E0604F, yours #6D4CFF, cheapest #1F9E72 */
+/* Price by time of day (HourChart) — palette validated: predicted #E0604F, past #2F7FB8 (dashed), yours #6D4CFF, cheapest #1F9E72 */
 .hc{margin:10px 0 4px}
 .hc-title{font:800 14px var(--font-heading);margin-bottom:4px}
 .hc-svg{width:100%;height:auto;display:block}
@@ -64,11 +64,14 @@
 .hc-dot{fill:#E0604F;stroke:#fff;stroke-width:2}
 .hc-dot.mine{fill:#6D4CFF}
 .hc-dot.best{fill:#1F9E72}
+.hc-past{fill:none;stroke:#2F7FB8;stroke-width:2;stroke-dasharray:6 4;stroke-linejoin:round}
+.hc-past-dot{fill:#2F7FB8}
 .hc-cross{stroke:var(--color-neutral-400);stroke-width:1;stroke-dasharray:3 3}
 .hc-key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--mut);margin-top:4px}
 .hc-key span{display:inline-flex;align-items:center;gap:5px}
 .hc-key i{display:inline-block;width:12px;height:12px;border-radius:3px}
 .hc-key i.mine{background:#6D4CFF}.hc-key i.best{background:#1F9E72}
 .hc-key i.dot{background:#E0604F;border-radius:50%}
+.hc-key i.past{width:18px;height:0;border-top:2px dashed #2F7FB8;border-radius:0}
 .hc-focus{margin:6px 0;font-size:13px}
 .hc-periods{margin-top:6px;font-size:13px}
