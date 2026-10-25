@@ -34,7 +34,7 @@ test("the chat concierge and the scheduler hold no money capabilities", () => {
 test("discovery, heat and pricing are registered with only what their work needs", () => {
   assert.deepEqual([...AGENT_CAPS.discover].sort(), ["events.snapshot", "feeds.read", "web.read"]);
   assert.deepEqual([...AGENT_CAPS.heat], ["feeds.read"]);
-  assert.deepEqual([...AGENT_CAPS.pricing].sort(), ["feeds.read", "model.predict"]);
+  assert.deepEqual([...AGENT_CAPS.pricing].sort(), ["feeds.read", "model.predict", "web.read"]);
   for (const id of ["discover", "heat", "pricing", "scheduler", "concierge"] as const) assert.ok(AGENT_NEVER[id].length > 0);
 });
 

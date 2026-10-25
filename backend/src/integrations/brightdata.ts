@@ -108,6 +108,46 @@ export function unlock(url: string, format: "html" | "markdown" = "html", option
   return request(url, format === "markdown" ? { data_format: "markdown" } : {}, options);
 }
 
+export async function scrapeDataset<T = unknown>(datasetId: string, input: Record<string, unknown>[], timeoutMs = 12_000): Promise<BdResult<T>> {
+  const key = brightDataKey();
+  const t0 = Date.now();
+  if (!key) return { status: "error", attempts: 0, ms: 0, error: "BRIGHTDATA_API_TOKEN is not set" };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const params = new URLSearchParams({ dataset_id: datasetId, format: "json", include_errors: "true" });
+    const res = await fetch(`${API}/datasets/v3/scrape?${params}`, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    const text = await res.text();
+    if (res.status === 202) {
+      let snapshotId: string | undefined;
+      try {
+        snapshotId = (JSON.parse(text) as { snapshot_id?: string }).snapshot_id;
+      } catch {
+        snapshotId = undefined;
+      }
+      return { status: "timeout", attempts: 1, ms: Date.now() - t0, error: snapshotId ? `Bright Data is still collecting snapshot ${snapshotId}` : "Bright Data is still collecting this result" };
+    }
+    if (!res.ok) return { status: res.status === 403 || res.status === 429 ? "blocked" : "error", attempts: 1, ms: Date.now() - t0, error: `Bright Data scraper HTTP ${res.status}: ${text.slice(0, 240)}` };
+    try {
+      const body = JSON.parse(text) as T;
+      const empty = Array.isArray(body) && body.length === 0;
+      return { status: empty ? "empty" : "ok", body, attempts: 1, ms: Date.now() - t0 };
+    } catch {
+      return { status: "error", attempts: 1, ms: Date.now() - t0, error: "Bright Data scraper response was not JSON" };
+    }
+  } catch (e) {
+    const timedOut = (e as Error).name === "AbortError" || (e as Error).name === "TimeoutError";
+    return { status: timedOut ? "timeout" : "error", attempts: 1, ms: Date.now() - t0, error: timedOut ? `Bright Data did not return Google Flights data within ${Math.round(timeoutMs / 1000)} seconds` : (e as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface SerpOrganic {
   link: string;
   title: string;

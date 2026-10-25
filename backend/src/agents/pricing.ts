@@ -1,5 +1,6 @@
 import { haversineMiles } from "../integrations/geo";
 import { planDrivingRoutes } from "../integrations/osrm";
+import { dayBefore, liveGoogleFlightQuote, type LiveFlightQuote } from "../integrations/googleFlights";
 import { estimateAirfare, estimateRideshare, modelCard, type AirfareEstimate, type RideshareEstimate } from "../ml/price";
 import type { Actor } from "../types";
 import type { AgentCall } from "./run";
@@ -12,6 +13,13 @@ export interface PriceEstimate {
   airfare: AirfareEstimate | null;
   drive: { status: string; source: string; miles: number; minutes: number };
   models: ReturnType<typeof modelCard>;
+}
+
+export interface FlightPriceCheck {
+  live: LiveFlightQuote;
+  prediction: AirfareEstimate;
+  signal: "below_prediction" | "within_prediction" | "above_prediction" | "unavailable";
+  differencePct: number | null;
 }
 
 /**
@@ -47,6 +55,25 @@ export async function estimatePrices(args: { from: Point; to: Point; startsAt: s
   };
 }
 
+export async function checkFlightPrice(args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; sourceUrl?: string; timeoutMs?: number }): Promise<FlightPriceCheck | null> {
+  const fromState = args.fromState?.trim().toUpperCase();
+  const toState = args.toState?.trim().toUpperCase();
+  if (!fromState || !toState || fromState === toState || !/^[A-Z]{2}$/.test(fromState) || !/^[A-Z]{2}$/.test(toState)) return null;
+  const prediction = estimateAirfare({ from: args.from, to: args.to, when: args.startsAt });
+  if (!prediction) return null;
+  const live = await liveGoogleFlightQuote({
+    fromAirport: prediction.from.code,
+    toAirport: prediction.to.code,
+    departDate: dayBefore(args.startsAt),
+    sourceUrl: args.sourceUrl,
+    timeoutMs: args.timeoutMs,
+  });
+  if (live.status !== "ok" || live.amountUsd === undefined) return { live, prediction, signal: "unavailable", differencePct: null };
+  const differencePct = Math.round(((live.amountUsd - prediction.range.p50) / prediction.range.p50) * 100);
+  const signal = live.amountUsd < prediction.range.p10 ? "below_prediction" : live.amountUsd > prediction.range.p90 ? "above_prediction" : "within_prediction";
+  return { live, prediction, signal, differencePct };
+}
+
 const usd = (v: number) => `$${v.toFixed(2)}`;
 
 /** The registered call: pricing reads the road network and runs the trained models. */
@@ -63,5 +90,17 @@ export function pricingCall(subject: string, on?: { actor: Actor; cap: "price.es
         p.rideshare ? `rideshare p50 ${usd(Math.min(p.rideshare.uber.p50, p.rideshare.lyft.p50))}` : "no rideshare estimate",
         p.airfare ? `flight ${p.airfare.from.code}→${p.airfare.to.code} p50 ${usd(p.airfare.range.p50)}` : "no flight estimate",
       ].join("; "),
+  };
+}
+
+export function flightPriceCall(subject: string, on?: { actor: Actor; cap: "price.estimate" }): AgentCall<FlightPriceCheck | null> {
+  return {
+    agent: "pricing",
+    needs: ["web.read", "feeds.read", "model.predict"],
+    action: "pricing.flight.checked",
+    subject,
+    on,
+    summarize: (out) => !out ? "flight comparison outside scope" : out.live.amountUsd === undefined ? `Google Flights ${out.live.status}; trained forecast ${usd(out.prediction.range.p50)}` : `Google Flights ${usd(out.live.amountUsd)}; trained forecast ${usd(out.prediction.range.p50)}; ${out.signal.replace(/_/g, " ")}`,
+    refs: (out) => out ? [out.live.sourceUrl] : [],
   };
 }

@@ -15,6 +15,12 @@ type PriceOut = {
   drive: { status: string; source: string; miles: number; minutes: number };
   models: { rideshare: { metrics: Record<string, number>; data: Record<string, unknown> }; airfare: { metrics: Record<string, number>; data: Record<string, unknown> } };
 };
+type FlightCheck = {
+  live: { status: string; amountUsd?: number; currency: "USD"; fromAirport: string; toAirport: string; departDate: string; observedAt: string; sourceUrl: string; bookingUrl?: string; provider?: string; scope?: string; via: string; note?: string };
+  prediction: { range: Range };
+  signal: "below_prediction" | "within_prediction" | "above_prediction" | "unavailable";
+  differencePct: number | null;
+};
 type Cell = { lat: number; lon: number; feelsLikeF: number; airTempF: number; anomalyF: number; modelSpreadF: number | null; severity: number; confidence: number; rank: number };
 type Heat = {
   status: string;
@@ -101,6 +107,7 @@ function HeatMapView({ heat }: { heat: Heat }) {
 
 export function TripInsights({ from, to, startsAt, timeZone, fromState, toState }: { from?: Point; to?: Point; startsAt?: string; timeZone?: string; fromState?: string; toState?: string }) {
   const [price, setPrice] = useState<PriceOut | null>(null);
+  const [flight, setFlight] = useState<FlightCheck | null | undefined>(undefined);
   const [heat, setHeat] = useState<Heat | null>(null);
   const [err, setErr] = useState<{ price?: string; heat?: string }>({});
   const [brand, setBrand] = useState<"uber" | "lyft">("uber");
@@ -108,9 +115,11 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
   useEffect(() => {
     if (!from || !to || !startsAt) return;
     setPrice(null);
+    setFlight(undefined);
     setHeat(null);
     setErr({});
     call<PriceOut>("/api/price-estimate", { from, to, startsAt, timeZone, fromState, toState }).then(setPrice, (e) => setErr((x) => ({ ...x, price: (e as Error).message })));
+    call<FlightCheck | null>("/api/live-flight-price", { from, to, startsAt, fromState, toState }).then(setFlight, () => setFlight(null));
     call<Heat>(`/api/heat?lat=${to.lat}&lon=${to.lon}&at=${encodeURIComponent(startsAt)}`).then(setHeat, (e) => setErr((x) => ({ ...x, heat: (e as Error).message })));
   }, [from?.lat, from?.lon, to?.lat, to?.lon, startsAt, timeZone, fromState, toState]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -127,7 +136,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
   return (
     <div className="ti">
       <h3>Price outlook</h3>
-      <p className="dk-mut">Predicted ranges are available only for domestic trips between different U.S. states. These estimates help with planning; an exact live price still requires your approval.</p>
+      <p className="dk-mut">For domestic trips between different U.S. states, the pricing agent checks a current Google Flights fare and keeps it separate from the trained forecast. A live fare can change and still requires your approval.</p>
       {err.price && <p className="dk-note">Price outlook unavailable: {err.price}</p>}
       {!price && !err.price && <p className="dk-mut">Running the price models…</p>}
       {price && !price.scope.eligible && <p className="dk-note">{price.scope.reason} Live route evidence above is still used for planning.</p>}
@@ -154,6 +163,28 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
             ))}
           </tbody>
         </table>
+      )}
+      {price?.airfare && flight === undefined && <p className="dk-mut">Checking the current Google Flights fare in the background…</p>}
+      {flight && (
+        <div className={`ti-live ${flight.live.status === "ok" ? "ok" : "waiting"}`}>
+          <div>
+            <span className="ti-live-kicker">Live Google Flights check</span>
+            <b>{flight.live.fromAirport} → {flight.live.toAirport} · {flight.live.departDate}</b>
+            {flight.live.amountUsd !== undefined ? (
+              <p>
+                <strong>{usd(flight.live.amountUsd)}</strong> observed now · forecast midpoint {usd(flight.prediction.range.p50)}
+                {flight.differencePct !== null ? ` · ${Math.abs(flight.differencePct)}% ${flight.differencePct < 0 ? "below" : flight.differencePct > 0 ? "above" : "at"} the midpoint` : ""}
+              </p>
+            ) : (
+              <p>No exact live fare was verified in this check. The forecast remains planning evidence, not a quoted price.</p>
+            )}
+            <span className="dk-mut ti-small">
+              {flight.live.amountUsd !== undefined ? `${flight.live.scope ?? "Lowest visible fare"}. ` : ""}
+              {flight.live.via} · checked {new Date(flight.live.observedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+            </span>
+          </div>
+          <a href={flight.live.bookingUrl ?? flight.live.sourceUrl} target="_blank" rel="noreferrer">Open Google Flights ↗</a>
+        </div>
       )}
       {price?.rideshare && price.rideshare.byHour.length > 0 && (
         <>

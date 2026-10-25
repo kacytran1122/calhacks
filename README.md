@@ -35,7 +35,7 @@ Only these product areas live at the repository root. Generated files, credentia
 | `backend/src/agents` | Scout, Evidence, Route, Policy, Payments, Reconciler, Auditor, Discover, Heat, Pricing, and the @smile Concierge |
 | `backend/src/scheduler.ts` | Wakes the agents on a timer: backlog, price, weather, and event-date checks |
 | `backend/src/carbon.ts` | CO₂e per traveler for every way to get there, from published emission factors |
-| `backend/src/integrations` | Bright Data, public transit, official fares, weather, geocoding, and Visa sandbox adapters |
+| `backend/src/integrations` | Bright Data, Google Flights live pricing, public transit, official fares, weather, geocoding, and Visa sandbox adapters |
 | `backend/src` | Policy, permissions, orchestration, authentication, ledger, and audit trail |
 | `backend/photon` | Photon 2.0 iMessage transport |
 | `backend/.data` | Local SQLite books, auth, and event snapshots; never committed |
@@ -115,7 +115,9 @@ No production deployment occurs without an explicitly configured hosting environ
 
 Two planning aids in the trip pane: **a model produces evidence, plain code decides**.
 
-**Price outlook — each time of day has its own price.** Gradient-boosted quantile models predict a p10 / p50 / p90 range, and the trip pane charts the same trip at every hour of the day with your departure and the cheapest hour that still arrives on time.
+**Live flight price + forecast.** For domestic interstate trips, the Pricing agent sends the route and travel date to Bright Data's maintained Google Flights scraper, records the observed USD fare, provider, booking URL, and timestamp, then keeps that observation separate from the p10 / p50 / p90 range produced by the trained models. The live call has a ten-second deadline and falls back to a grounded public-page extraction without inventing a price. The trip pane shows both signals and links back to Google Flights. No observation approves or books anything.
+
+**Price by time of day.** Gradient-boosted quantile models predict a p10 / p50 / p90 range, and the trip pane charts the same trip at every hour of the day with your departure and the cheapest hour that still arrives on time.
 
 | Model | Trained on (public data) | Held-out test | Typical error (p50) | Baseline | p10–p90 holds |
 |---|---|---|---|---|---|
@@ -149,7 +151,7 @@ Every agent acts through `runAgent` (`backend/src/agents/run.ts`): the caller mu
 |---|---|---|
 | Discover | read public listings, save event snapshots | sign in, register, or RSVP |
 | Heat | read public weather models | change a plan or a price |
-| Pricing | read the road network, run the trained models | set an approvable amount |
+| Pricing | read public Google Flights fares and the road network, run the trained models | approve, book, charge, or silently replace a price |
 | Scheduler | wake agents, send notices | approve, charge, or change an amount |
 | Concierge (@smile) | find events, plan a trip, estimate prices, check heat | charge, approve, request a mandate, or post to the ledger |
 
@@ -158,7 +160,7 @@ Every agent acts through `runAgent` (`backend/src/agents/run.ts`): the caller mu
 | Job | Every | What it does |
 |---|---|---|
 | `reconcile` | 15 min | Re-runs the reimbursement backlog |
-| `price_watch` | 6 h | Re-prices rideshare and flight trips in the next 7 days; a notice when the prediction moves 15% or more from the trip’s price |
+| `price_watch` | 6 h | Re-checks live Google Flights fares and trained forecasts for trips in the next 120 days; a notice when the observed fare moves 15% or more from its prior live observation (or the trip reference on the first check) |
 | `weather_watch` | 3 h | Heat at the venue for trips in the next 3 days; a notice at NWS Caution or worse |
 | `event_watch` | 12 h | Re-reads listings; when an event’s date or venue changed, updates it, records the change, and tells each traveler |
 

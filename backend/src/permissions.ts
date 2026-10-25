@@ -32,7 +32,7 @@ export const AGENT_CAPS: Record<AgentId, readonly Capability[]> = {
   orchestrator: ["inbox.ask"],
   discover: ["web.read", "feeds.read", "events.snapshot"],
   heat: ["feeds.read"],
-  pricing: ["feeds.read", "model.predict"],
+  pricing: ["web.read", "feeds.read", "model.predict"],
   scheduler: ["schedule.run", "events.search", "price.estimate", "heat.read", "inbox.ask"],
   concierge: ["events.search", "trip.plan", "price.estimate", "heat.read"],
 };
@@ -48,7 +48,7 @@ export const AGENT_NEVER: Record<AgentId, string> = {
   orchestrator: "Routes work and asks humans. Holds no money capabilities.",
   discover: "Reads public, logged-out event listings. Never signs in, registers, or RSVPs.",
   heat: "Reads public weather models and reports heat risk. Never changes a plan or a price.",
-  pricing: "Predicts price ranges for comparison. Never sets an approvable amount; that comes from a live, quoted fare.",
+  pricing: "Reads public live fares and predicts price ranges for comparison. Never approves, books, or charges a fare.",
   scheduler: "Wakes the other agents on a timer and sends notices. Never approves, charges, or changes an amount.",
   concierge: "Picks which tools to call for a chat message. Holds no money capabilities and never states a dollar amount that code didn't compute.",
 };

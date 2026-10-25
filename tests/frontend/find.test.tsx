@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
 import { FindClient } from "../../frontend/app/find/FindClient";
+import { TripInsights } from "../../frontend/app/find/TripInsights";
 
 const response = (body: unknown) => Promise.resolve({ ok: true, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) } as Response);
 
@@ -15,6 +16,30 @@ const result = {
   store: "local",
   classifiedBy: "keywords",
 };
+
+test("shows a live Google Flights observation beside the trained forecast", async () => {
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("live-flight-price")) return response({
+      live: { status: "ok", amountUsd: 219, currency: "USD", fromAirport: "SFO", toAirport: "LAX", departDate: "2027-01-16", observedAt: "2026-10-24T19:00:00Z", sourceUrl: "https://www.google.com/travel/flights?q=SFO+LAX", via: "Bright Data Google Flights scraper", scope: "Lowest USD fare returned for this airport pair and date" },
+      prediction: { range: { p10: 180, p50: 230, p90: 310 } },
+      signal: "within_prediction",
+      differencePct: -5,
+    });
+    if (url.includes("price-estimate")) return response({
+      scope: { eligible: true, fromState: "CA", toState: "NV", reason: "Domestic interstate trip from CA to NV." },
+      rideshare: null,
+      airfare: { from: { code: "SFO", city: "San Francisco" }, to: { code: "LAX", city: "Los Angeles" }, miles: 340, range: { p10: 180, p50: 230, p90: 310 }, byHour: [], cheapestHour: null, caveat: "Forecast only." },
+      drive: { status: "ok", source: "test", miles: 380, minutes: 360 },
+      models: { rideshare: { metrics: {}, data: {} }, airfare: { metrics: {}, data: {} } },
+    });
+    return response({ status: "empty", basis: "forecast", center: { lat: 34, lon: -118 }, radiusMiles: 5, cells: [], hotspots: [], regionMedianF: null, band: "Unavailable", summary: "", method: [], sources: [] });
+  }));
+  render(<TripInsights from={{ lat: 37.6, lon: -122.3 }} to={{ lat: 34.1, lon: -118.2 }} startsAt="2027-01-17T17:00:00Z" fromState="CA" toState="NV" />);
+  expect(await screen.findByText("$219")).toBeVisible();
+  expect(screen.getByText(/forecast midpoint \$230/)).toBeVisible();
+  expect(screen.getByRole("link", { name: /Open Google Flights/ })).toHaveAttribute("href", expect.stringContaining("google.com/travel/flights"));
+});
 
 test("shows branded event type icons without the old header description", () => {
   vi.stubGlobal("fetch", vi.fn(() => response(result)));

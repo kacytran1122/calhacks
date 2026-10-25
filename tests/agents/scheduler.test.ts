@@ -14,6 +14,7 @@ const core = await import("../../backend/src/index");
 const NOW = new Date("2026-11-12T17:00:00Z"); // two days before Golden Gate Hack 2026 (E-main)
 const range = (p50: number) => ({ p10: p50 * 0.8, p50, p90: p50 * 1.3 });
 const prices = (p50: number) => async () => ({ scope: { eligible: true, fromState: "IL", toState: "CA", reason: "Domestic interstate trip from IL to CA." }, rideshare: { uber: range(p50), lyft: range(p50 + 2) }, airfare: null, drive: { status: "ok", source: "test", miles: 12, minutes: 25 }, models: {} }) as unknown as PriceEstimate;
+const flightEstimate = (p50: number) => async () => ({ scope: { eligible: true, fromState: "IL", toState: "CA", reason: "Domestic interstate trip from IL to CA." }, rideshare: null, airfare: { from: { code: "PIA" }, to: { code: "SFO" }, range: range(p50) }, drive: { status: "ok", source: "test", miles: 2_000, minutes: 2_000 }, models: {} }) as unknown as PriceEstimate;
 const heat = (band: string, feelsLikeF: number) => async () => ({ status: "ok", basis: "forecast", band, summary: `feels like ${feelsLikeF}°F`, cells: [{ feelsLikeF }], hotspots: [] }) as unknown as HeatMap;
 
 async function seedWithLiveTrip() {
@@ -45,6 +46,29 @@ test("price_watch re-prices upcoming trips and sends one notice per 15% move", a
   assert.ok(audit.some((e) => e.action === "pricing.estimated" && /asked by agent:scheduler/.test(e.reason)));
   assert.ok(audit.some((e) => e.action === "scheduler.price_watch"));
   assert.ok(core.verifyChain(audit).ok);
+});
+
+test("price_watch compares a live Google Flights fare with the trained forecast without changing the trip", async () => {
+  await seedWithLiveTrip();
+  await core.withState((s) => {
+    const trip = s.trips.find((item) => item.id === "TR-L-test")!;
+    trip.mode = "flight";
+    trip.quoteCents = 20_000;
+  });
+  const flightPrices = async () => ({
+    live: { status: "ok", amountUsd: 150, currency: "USD", fromAirport: "PIA", toAirport: "SFO", departDate: "2026-11-13", observedAt: NOW.toISOString(), sourceUrl: "https://www.google.com/travel/flights?q=PIA+SFO", via: "Bright Data Google Flights scraper", ms: 800 },
+    prediction: { range: range(190) },
+    signal: "below_prediction" as const,
+    differencePct: -21,
+  }) as any;
+  const result = await core.runJob("price_watch", { now: NOW, prices: flightEstimate(190), flightPrices });
+  assert.equal(result.notices, 1);
+  const state = core.loadState();
+  assert.equal(state.trips.find((item) => item.id === "TR-L-test")?.quoteCents, 20_000);
+  const evidence = state.evidence.find((item) => item.tripId === "TR-L-test" && item.kind === "price_watch")!;
+  assert.equal(evidence.data.liveCents, 15_000);
+  assert.equal(evidence.data.predictedCents, 19_000);
+  assert.match(notices()[0]!.question, /Live Google Flights check.*\$150\.00.*forecast is \$152\.00–\$247\.00/);
 });
 
 test("weather_watch warns travelers about heat at the venue in the next 3 days", async () => {

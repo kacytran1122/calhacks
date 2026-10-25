@@ -1,7 +1,7 @@
 import { appendAudit } from "./audit";
 import { discoverCall, discoverEvents, type DiscoverOptions, type DiscoverResult } from "./agents/discover";
 import { heatCall, heatMapAround, type HeatMap } from "./agents/heat";
-import { estimatePrices, pricingCall, type PriceEstimate } from "./agents/pricing";
+import { checkFlightPrice, estimatePrices, flightPriceCall, pricingCall, type FlightPriceCheck, type PriceEstimate } from "./agents/pricing";
 import { runAgent } from "./agents/run";
 import type { EventListing } from "./eventStore";
 import { stateCodeFromLabel } from "./integrations/geo";
@@ -22,13 +22,13 @@ export type JobId = "reconcile" | "price_watch" | "weather_watch" | "event_watch
 
 export const JOBS: Record<JobId, { everyMinutes: number; what: string }> = {
   reconcile: { everyMinutes: 15, what: "Re-run the reimbursement backlog" },
-  price_watch: { everyMinutes: 360, what: "Re-check predicted prices for trips in the next 7 days" },
+  price_watch: { everyMinutes: 360, what: "Re-check live Google Flights fares and trained forecasts" },
   weather_watch: { everyMinutes: 180, what: "Re-check heat at the venue for trips in the next 3 days" },
   event_watch: { everyMinutes: 720, what: "Re-read event listings and flag date or venue changes" },
 };
 
 export const PRICE_MOVE_PCT = 15;
-const PRICE_DAYS = 7;
+const PRICE_DAYS = 120;
 const HEAT_DAYS = 3;
 const EVENT_DAYS = 120;
 const HEAT_ALERT_BANDS = ["Caution", "Extreme caution", "Danger", "Extreme danger"];
@@ -39,6 +39,7 @@ const DAY = 86_400_000;
 export interface SchedulerDeps {
   now?: Date;
   prices?: (args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string }) => Promise<PriceEstimate>;
+  flightPrices?: (args: { from: Point; to: Point; startsAt: string; fromState?: string; toState?: string; timeoutMs?: number }) => Promise<FlightPriceCheck | null>;
   heat?: (args: { lat: number; lon: number; at: string }) => Promise<HeatMap>;
   discover?: (opts: DiscoverOptions) => Promise<DiscoverResult>;
 }
@@ -93,24 +94,47 @@ export function predictedCents(mode: Trip["mode"], p: PriceEstimate): { cents: n
   return null;
 }
 
-export function applyPriceWatch(state: State, results: { tripId: string; estimate: PriceEstimate }[]): number {
+export function applyPriceWatch(state: State, results: { tripId: string; estimate: PriceEstimate; flight?: FlightPriceCheck | null }[]): number {
   authorize(state, scheduler, "inbox.ask", "price_watch");
   let sent = 0;
-  for (const { tripId, estimate } of results) {
+  for (const { tripId, estimate, flight } of results) {
     const trip = state.trips.find((t) => t.id === tripId);
     const event = trip && state.events.find((e) => e.id === trip.eventId);
     const predicted = trip && predictedCents(trip.mode, estimate);
     if (!trip || !event || !predicted) continue;
-    const movePct = Math.round(((predicted.cents - trip.quoteCents) / trip.quoteCents) * 100);
-    evidence(state, trip.id, "price_watch", "S'mile Pricing agent (trained quantile models)", { mode: trip.mode, quoteCents: trip.quoteCents, predictedCents: predicted.cents, range: predicted.range, movePct });
+    const previousLive = [...state.evidence].reverse().find((e) => e.tripId === tripId && e.kind === "price_watch" && typeof e.data.liveCents === "number");
+    const liveCents = flight?.live.amountUsd === undefined ? undefined : Math.round(flight.live.amountUsd * 100);
+    const baselineCents = Number(previousLive?.data.liveCents ?? trip.quoteCents);
+    const comparisonCents = liveCents ?? predicted.cents;
+    const movePct = Math.round(((comparisonCents - baselineCents) / baselineCents) * 100);
+    const source = liveCents === undefined ? "S'mile Pricing agent (live fare unavailable; trained forecast retained)" : "Bright Data Google Flights scraper + S'mile trained forecast";
+    evidence(state, trip.id, "price_watch", source, {
+      mode: trip.mode,
+      quoteCents: trip.quoteCents,
+      baselineCents,
+      liveCents,
+      liveStatus: flight?.live.status,
+      observedAt: flight?.live.observedAt,
+      sourceUrl: flight?.live.sourceUrl,
+      bookingUrl: flight?.live.bookingUrl,
+      predictedCents: predicted.cents,
+      range: predicted.range,
+      signal: flight?.signal,
+      movePct,
+    });
     if (Math.abs(movePct) < PRICE_MOVE_PCT) continue;
     const dir = movePct > 0 ? "above" : "below";
+    const message = trip.mode !== "flight"
+      ? `Price check for ${event.name}: the ${trip.mode} is now predicted at about ${fmt(predicted.cents)} (likely ${predicted.range}), ${Math.abs(movePct)}% ${dir} the ${fmt(trip.quoteCents)} on your trip. This is a model estimate, not a fare. ${movePct > 0 ? "If the fare at booking is higher, you'll be asked to approve the exact new amount (R7)." : "Nothing changes unless you re-plan."}`
+      : liveCents === undefined
+      ? `Price check for ${event.name}: no exact live fare was verified, while the trained flight forecast is about ${fmt(predicted.cents)} (likely ${predicted.range}), ${Math.abs(movePct)}% ${dir} the ${fmt(baselineCents)} reference. This is a model estimate, not a fare. Nothing changes unless you re-plan.`
+      : `Live Google Flights check for ${event.name}: ${fmt(liveCents)} was observed for ${flight!.live.fromAirport}→${flight!.live.toAirport} on ${flight!.live.departDate}, ${Math.abs(movePct)}% ${dir} the previous ${fmt(baselineCents)} reference. The trained forecast is ${predicted.range}. The observed fare can change; open the source and approve the exact current amount before booking.`;
     const n = notify(
       state,
       trip,
       "traveler",
-      `price:${Math.sign(movePct)}:${Math.floor(Math.abs(movePct) / PRICE_MOVE_PCT)}`,
-      `Price check for ${event.name}: the ${trip.mode} is now predicted at about ${fmt(predicted.cents)} (likely ${predicted.range}), ${Math.abs(movePct)}% ${dir} the ${fmt(trip.quoteCents)} on your trip. This is a model estimate, not a fare. ${movePct > 0 ? "If the fare at booking is higher, you'll be asked to approve the exact new amount (R7)." : "Nothing changes unless you re-plan."}`,
+      `${liveCents === undefined ? "forecast" : "live-flight"}:${Math.sign(movePct)}:${Math.floor(Math.abs(movePct) / PRICE_MOVE_PCT)}`,
+      message,
     );
     if (n) sent++;
   }
@@ -203,17 +227,21 @@ async function reconcileJob(): Promise<Omit<JobResult, "job">> {
 
 async function priceWatchJob(deps: SchedulerDeps, now: Date): Promise<Omit<JobResult, "job">> {
   const targets = priceWatchTargets(loadState(), now);
-  const results: { tripId: string; estimate: PriceEstimate }[] = [];
+  const results: { tripId: string; estimate: PriceEstimate; flight?: FlightPriceCheck | null }[] = [];
   for (const t of targets) {
     try {
-      const estimate = await runAgent(pricingCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)({ from: t.from, to: t.to, startsAt: t.event.startsAt, fromState: t.from.state, toState: stateCodeFromLabel(t.event.city) }));
-      results.push({ tripId: t.trip.id, estimate });
+      const args = { from: t.from, to: t.to, startsAt: t.event.startsAt, fromState: t.from.state, toState: stateCodeFromLabel(t.event.city) };
+      const estimate = await runAgent(pricingCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.prices ?? estimatePrices)(args));
+      const flight = t.trip.mode === "flight"
+        ? await runAgent(flightPriceCall(t.trip.id, { actor: scheduler, cap: "price.estimate" }), () => (deps.flightPrices ?? checkFlightPrice)({ ...args, timeoutMs: 10_000 }))
+        : undefined;
+      results.push({ tripId: t.trip.id, estimate, flight });
     } catch {
       // recorded as pricing.estimated.failed; the next pass tries again
     }
   }
   const notices = await withState((s) => applyPriceWatch(s, results));
-  return { checked: results.length, notices, summary: `Re-priced ${results.length} of ${targets.length} upcoming rideshare or flight trip(s); ${notices} price notice(s)` };
+  return { checked: results.length, notices, summary: `Checked live fares and forecasts for ${results.length} of ${targets.length} upcoming rideshare or flight trip(s); ${notices} price notice(s)` };
 }
 
 async function weatherWatchJob(deps: SchedulerDeps, now: Date): Promise<Omit<JobResult, "job">> {

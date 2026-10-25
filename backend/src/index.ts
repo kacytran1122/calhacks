@@ -22,6 +22,7 @@ export { chargeTrip } from "./agents/payments";
 export { tick, answer, applyDecision, planTrip, bookTrip, buddiesFor, carpoolFor, notify, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";
+export { liveGoogleFlightQuote, googleFlightsUrl, dayBefore, type LiveFlightQuote } from "./integrations/googleFlights";
 export { cityToPoint, coordinatesToPoint, globalPlaceToPoint, haversineMiles, isLikelyUsLocation, placeToPoint, stateCodeFromLabel, zipToPoint, type GeoResult } from "./integrations/geo";
 export { driveRoutesFrom, planDrivingRoutes, type DriveRoute, type OsrmPayload } from "./integrations/osrm";
 export { planExtensionRoute, type ExtensionEvent, type ExtensionRoute, type ExtensionRoutePlan } from "./extension-route";
@@ -29,7 +30,7 @@ export { authorizeVisaAcceptance, signedVisaHeaders, visaAcceptanceConfigured, t
 export { predictTrees, type CompactModel, type CompactTree } from "./ml/gbdt";
 export { estimateRideshare, estimateAirfare, airportsNear, modelCard, predictRange, RIDESHARE, AIRFARE, type PriceRange, type RideshareEstimate, type AirfareEstimate } from "./ml/price";
 export { heatMapAround, heatCall, scoreCells, severityFor, confidenceFor, gridAround, ANOMALY_THRESHOLD_F, type HeatMap, type HeatCell } from "./agents/heat";
-export { estimatePrices, pricingCall, type PriceEstimate } from "./agents/pricing";
+export { estimatePrices, checkFlightPrice, pricingCall, flightPriceCall, type PriceEstimate, type FlightPriceCheck } from "./agents/pricing";
 export { runAgent, runAgentIn, type AgentCall } from "./agents/run";
 export { converse, amountsGrounded, TOOLS as CONCIERGE_TOOLS, type ConciergeInput, type ConciergeOutput, type ConciergePlan, type ConciergeDeps } from "./agents/concierge";
 export { runDue, runJob, dueJobs, JOBS, type JobId, type JobResult, type SchedulerDeps } from "./scheduler";
