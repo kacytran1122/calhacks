@@ -314,7 +314,7 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
         rideshare: ride && p.rideshare
           ? { cheaper_app: ride.by, typical: usd(ride.r.p50), likely_range: `${usd(ride.r.p10)}–${usd(ride.r.p90)}`, leaving_at: hourLabel(p.rideshare.departHour), cheapest_hour_that_arrives_on_time: cheap ? `${hourLabel(cheap.hour)} at about ${usd(Math.min(cheap.uber.p50, cheap.lyft.p50))}` : null }
           : null,
-        flight: p.airfare ? { route: `${p.airfare.from.code}→${p.airfare.to.code}`, typical: usd(p.airfare.range.p50), likely_range: `${usd(p.airfare.range.p10)}–${usd(p.airfare.range.p90)}`, cheapest_departure_hour: p.airfare.cheapestHour ? `${hourLabel(p.airfare.cheapestHour.hour)} at about ${usd(p.airfare.cheapestHour.range.p50)}` : null } : null,
+        flight: p.airfare ? { route: `${p.airfare.from.code} to ${p.airfare.to.code}`, typical: usd(p.airfare.range.p50), likely_range: `${usd(p.airfare.range.p10)}–${usd(p.airfare.range.p90)}`, cheapest_departure_hour: p.airfare.cheapestHour ? `${hourLabel(p.airfare.cheapestHour.hour)} at about ${usd(p.airfare.cheapestHour.range.p50)}` : null } : null,
         note: p.scope.eligible ? "Model estimates for domestic interstate comparison, not fares. The approvable price comes from plan_trip." : p.scope.reason,
       };
     },
@@ -335,7 +335,7 @@ export async function converse(input: ConciergeInput, deps: ConciergeDeps = {}):
       return {
         event: ev.name,
         status: live.status,
-        route: `${live.fromAirport}→${live.toAirport}`,
+        route: `${live.fromAirport} to ${live.toAirport}`,
         depart_date: live.departDate,
         current_fare: live.status === "ok" && live.amountUsd !== undefined ? usd(live.amountUsd) : null,
         provider: live.provider ?? null,

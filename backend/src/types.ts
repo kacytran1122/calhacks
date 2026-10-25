@@ -46,7 +46,8 @@ export type EvidenceKind =
   | "refund"
   | "price_watch"
   | "heat_watch"
-  | "event_change";
+  | "event_change"
+  | "trip_completion";
 
 export interface Evidence {
   id: string;
@@ -135,6 +136,7 @@ export type DecisionCode =
   | "reimburse_capped"
   | "deny_no_show"
   | "require_checkin"
+  | "require_payment_evidence"
   | "convert_currency"
   | "match_split_charge"
   | "trust_bank_over_receipt"

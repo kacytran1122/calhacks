@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const expected = [".github", ".gitignore", "README.md", "backend", "frontend", "tests"];
+const expected = [".github", ".gitignore", "README.md", "backend", "docs", "frontend", "tests"];
 
 test("repository root stays intentionally small", async () => {
   const actual = (await readdir(root)).filter((name) => name !== ".git" && name !== ".DS_Store").sort();
@@ -74,4 +74,19 @@ test("deployable authored source never contains a local URL", async () => {
     if (containsForbiddenUrl(source)) violations.push(path.relative(root, file));
   }
   assert.deepEqual(violations, [], `Local URLs are forbidden in deployable source: ${violations.join(", ")}`);
+});
+
+test("authored screens do not render generic arrow glyphs", async () => {
+  const files = (await authoredFiles(path.join(root, "frontend"))).filter((file) => !file.endsWith("leaflet.js") && !file.endsWith("leaflet.css"));
+  const genericArrow = /[→←↑↓↗↘↖↙➜➝➞➡⟶⟵]/u;
+  const violations = [];
+  for (const file of files) {
+    if (genericArrow.test(await readFile(file, "utf8"))) violations.push(path.relative(root, file));
+  }
+  assert.deepEqual(violations, [], `Generic arrows are forbidden in authored screens: ${violations.join(", ")}`);
+});
+
+test("README keeps the requested plain voice and avoids dash or arrow glyphs", async () => {
+  const source = await readFile(path.join(root, "README.md"), "utf8");
+  assert.equal(/[—–→←↑↓↗↘↖↙➜➝➞➡⟶⟵]/u.test(source), false);
 });

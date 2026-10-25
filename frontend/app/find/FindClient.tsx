@@ -216,7 +216,7 @@ function RouteInstructions({ option, guide, fare, origin, event, tripId, tripTok
       )}
       <div className="dk-row fd-route-links">
         <PhotonJoinDialog tripId={tripId} tripToken={tripToken} eventName={event.name} triggerLabel="Open step-by-step route" triggerClassName="dk-btn primary" />
-        {checkFareUrl && <a className="dk-btn ghost" href={checkFareUrl} target="_blank" rel="noreferrer">Check Fare ↗</a>}
+        {checkFareUrl && <a className="dk-btn ghost" href={checkFareUrl} target="_blank" rel="noreferrer">Check Fare</a>}
       </div>
       {!option.withinCap && <div className="dk-warn">This option is over the organizer cap.</div>}
       {!option.withinBudget && <div className="dk-warn">This option is over your travel budget.</div>}
@@ -241,7 +241,7 @@ function UnpricedRouteGuide({ guide, event, tripId, tripToken, best = false, tag
         </ol>
         <div className="dk-row fd-route-links">
           <PhotonJoinDialog tripId={tripId} tripToken={tripToken} eventName={event.name} triggerLabel="Open step-by-step route" triggerClassName="dk-btn primary" />
-          {checkFareUrl && <a className="dk-btn ghost" href={checkFareUrl} target="_blank" rel="noreferrer">Check Fare ↗</a>}
+          {checkFareUrl && <a className="dk-btn ghost" href={checkFareUrl} target="_blank" rel="noreferrer">Check Fare</a>}
         </div>
       </div>
   );
@@ -362,9 +362,6 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, 
         </a>
         <span className="dk-desk">Find events</span>
         <div className="dk-co" />
-        <a className="dk-btn ghost" href="/chat">
-          Message @smile
-        </a>
         <a className="dk-btn ghost" href="/desk">
           Organizer finance desk
         </a>
@@ -465,7 +462,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, 
               <p>The closest matching event is in {event.city ?? event.venue ?? "another city"}, about <b>{displayDistance(distance, distanceUnit).toLocaleString()} {distanceUnit}</b> from {res.origin.label ?? res.origin.zip}. Expand your distance to include it, or keep your limit and explore closer events.</p>
               <div className="dk-row">
                 <button className="dk-btn primary" onClick={() => { setRadius(expandedRadius); search(zip, expandedRadius, activeQuery); }}>Expand to {displayDistance(expandedRadius, distanceUnit).toLocaleString()} {distanceUnit}</button>
-                <a className="dk-btn ghost" href={event.url} target="_blank" rel="noreferrer">View event page ↗</a>
+                <a className="dk-btn ghost" href={event.url} target="_blank" rel="noreferrer">View event page</a>
               </div>
               <VenueTourAction event={event} />
             </div>
@@ -509,7 +506,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon, 
                       Plan my trip
                     </button>
                     <a className="dk-link" href={e.url} target="_blank" rel="noreferrer">
-                      event page ↗
+                      event page
                     </a>
                   </div>
                   <VenueTourAction event={e} />
@@ -763,13 +760,13 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
           {pickedRoute && <RouteInstructions option={pickedRoute} guide={guideFor(pickedRoute)} fare={fareFor(pickedRoute)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} best ambiguous={ambiguousPickedFare} tags={tagsFor(pickedRoute)} why={plan.routes.pickReason} />}
           {unpricedPrimary && <UnpricedRouteGuide guide={unpricedPrimary} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} best tags={tagsForGuide(unpricedPrimary)} />}
           {(alternativeRoutes.length > 0 || unpricedAlternatives.length > 0) && <section className="fd-alternatives"><div className="fd-section-title"><span>Other ways to get there</span></div>{alternativeRoutes.map((option, index) => <RouteInstructions key={`${option.mode}-${option.routeTitle ?? option.costCents}-${index}`} option={option} guide={guideFor(option)} fare={fareFor(option)} origin={originText || zip} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} ambiguous={matchingGuidesFor(option).length > 1} tags={tagsFor(option)} />)}{unpricedAlternatives.map((guide, index) => <UnpricedRouteGuide key={`${guide.title}-${index}`} guide={guide} event={event} tripId={plan.trip.id} tripToken={plan.approvalToken} tags={tagsForGuide(guide)} />)}</section>}
-          {alternativeRoutes.length === 0 && unpricedAlternatives.length === 0 && <section className="fd-alternatives"><div className="fd-section-title"><span>Looking for another option?</span><small>No additional itinerary was verified in this search. Check current departures with another planner.</small></div><a className="dk-link" href={transitSearchUrl(originText || zip, event)} target="_blank" rel="noreferrer">Search public-transit alternatives ↗</a></section>}
+          {alternativeRoutes.length === 0 && unpricedAlternatives.length === 0 && <section className="fd-alternatives"><div className="fd-section-title"><span>Looking for another option?</span><small>No additional itinerary was verified in this search. Check current departures with another planner.</small></div><a className="dk-link" href={transitSearchUrl(originText || zip, event)} target="_blank" rel="noreferrer">Search public-transit alternatives</a></section>}
           {plan.routes.carbon && <CarbonCompare carbon={{ ...plan.routes.carbon, estimates: plan.routes.carbon.estimates.filter((estimate) => includeSelfDrive || estimate.mode !== "drive") }} pick={pickedRoute?.mode} fastest={fastestGuide?.mode} carpool={plan.carpool ?? null} />}
           <div className="fd-handoff">
             <div><span>Your choice</span><b>{fmt(plan.routes.travelerBudgetCents ?? 0)} budget</b></div>
-            <i aria-hidden="true">→</i>
+            <i aria-hidden="true">•</i>
             <div><span>Organizer policy</span><b>{fmt(plan.routes.cap)} cap · R1</b></div>
-            <i aria-hidden="true">→</i>
+            <i aria-hidden="true">•</i>
             <div><span>Finance desk</span><b>{hasActionableQuote ? `${fmt(plan.trip.reimbursementEligibleCents ?? 0)} eligible` : "No approval yet"}</b></div>
           </div>
           {plan.routes.blockReason === "TRAVELER_BUDGET" && (
@@ -851,7 +848,7 @@ function PlanPane({ zip, originText, originState, originCoordinates, maxDistance
             <div className="fd-booked">
               <p className="dk-ok">Booked. Nothing more will be charged without asking you.</p>
               <p><b>Finance handoff created.</b> Booking evidence is now visible to the organizer. Reimbursement still waits for the receipt, check-in and bank settlement.</p>
-              <a className="dk-btn ghost" href="/desk">View organizer reimbursement desk →</a>
+              <a className="dk-btn ghost" href="/desk">View organizer reimbursement desk</a>
             </div>
           )}
         </>

@@ -478,7 +478,7 @@ export function PlanPanel({ initialZip, busy, run }: { initialZip: string; busy:
     <div className="dk-panel dk-wide" id="plan">
       <div className="dk-ph">
         <h2>Plan a live trip</h2>
-        <span className="dk-mut">Scout → Evidence → Route → Policy → mandate → Payments</span>
+        <span className="dk-mut">Scout · Evidence · Route · Policy · Mandate · Payments</span>
       </div>
       <p className="dk-mut">Live public data only: Bright Data for the event page and the open web, NWS and Census for official facts. Pages can take 2–40 s; blocked or empty sources are shown, never filled in.</p>
       <div className="dk-row">
@@ -714,7 +714,7 @@ function TraceDrawer({ tripId, onClose, claude }: { tripId: string; onClose: () 
         ) : (
           <>
             <p>
-              {t.traveler?.initials} · {t.traveler?.school} → {t.event?.name} · {t.trip.mode}, {t.trip.distanceMiles} mi · approved quote <b>{fmt(t.trip.quoteCents)}</b>
+              {t.traveler?.initials} · {t.traveler?.school} attending {t.event?.name} · {t.trip.mode}, {t.trip.distanceMiles} mi · approved quote <b>{fmt(t.trip.quoteCents)}</b>
             </p>
             {t.trip.travelerBudgetCents !== undefined && (
               <div className="dk-note">

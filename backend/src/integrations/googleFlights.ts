@@ -182,7 +182,7 @@ function queryContext(record: Record<string, unknown>, parent: Partial<FlightQue
     if (/^(?:to_airport|destination_airport|arrival_airport|destination|to)$/i.test(key)) apply("toAirport", code(value));
     if (/^(?:depart_date|departure_date|outbound_date|travel_date)$/i.test(key) && typeof value === "string" && isoDate(value.slice(0, 10))) apply("departDate", value.slice(0, 10));
     if (key === "route" && typeof value === "string") {
-      const pair = value.trim().match(/^([A-Z]{3})\s*(?:→|->|-|to)\s*([A-Z]{3})$/i);
+      const pair = value.trim().match(/^([A-Z]{3})\s*(?:\u2192|->|-|to)\s*([A-Z]{3})$/i);
       if (pair) {
         apply("fromAirport", pair[1]!.toUpperCase());
         apply("toAirport", pair[2]!.toUpperCase());
@@ -338,7 +338,7 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
         effort: "low",
       });
       if (extracted.amountUsd && extracted.exactQuote && extracted.fromAirport === fromAirport && extracted.toAirport === toAirport && extracted.departDate === departDate && quoteContainsUsdAmount(extracted.exactQuote, extracted.amountUsd) && text.toLowerCase().includes(extracted.exactQuote.toLowerCase())) {
-        return { ...base, status: "ok", amountUsd: extracted.amountUsd, provider: extracted.provider ?? "Google Flights", scope: extracted.scope ?? "Lowest visible fare for this route and date", via: "Bright Data Web Unlocker → grounded extraction", ms: Date.now() - started, snapshotId, collectionState: "ready" };
+        return { ...base, status: "ok", amountUsd: extracted.amountUsd, provider: extracted.provider ?? "Google Flights", scope: extracted.scope ?? "Lowest visible fare for this route and date", via: "Bright Data Web Unlocker with grounded extraction", ms: Date.now() - started, snapshotId, collectionState: "ready" };
       }
     } catch {
       // The result below preserves the source failure without inventing a price.

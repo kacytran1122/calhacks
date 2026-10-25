@@ -61,7 +61,7 @@ line("Trip token can't answer another trip", wrongTok.status !== 200, `HTTP ${wr
 const okTok = await call("/api/desk/answer", { itemId: qp, option: "approve", tripToken: plan.json.approvalToken });
 line("Trip token approves its own mandate", okTok.status === 200, okTok.json?.outcome);
 const book = await call("/api/plan/book", { tripId: plan.json.trip.id, fareDeltaCents: 350, tripToken: plan.json.approvalToken });
-line("Fare moved at checkout → declined, re-approval asked", book.status === 200 && book.json?.ok === false, book.json?.detail);
+line("Fare moved at checkout, declined, and re-approval asked", book.status === 200 && book.json?.ok === false, book.json?.detail);
 
 await call("/api/desk/reset", {}, maya);
 await call("/api/auth/logout", {}, maya);

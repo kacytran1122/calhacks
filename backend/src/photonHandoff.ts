@@ -410,3 +410,4 @@ export function photonHandoffFingerprint(value: string): string {
 }
 
 export const PHOTON_HANDOFF_MAP_TOKEN_PATTERN = MAP_TOKEN_PATTERN;
+export const PHOTON_MAP_COMPLETION_COOKIE = "smile_photon_map_handoff";

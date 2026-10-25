@@ -62,6 +62,7 @@ button { color: inherit; }
 .row-action.active { color: #11140f; background: var(--accent); }
 .waypoint-actions { display: flex; gap: 3px; }
 .waypoint-actions button { width: 25px; height: 32px; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: 8px; cursor: pointer; }
+.waypoint-actions button[data-action="up"] { width: auto; padding: 0 5px; font-size: 9px; font-weight: 800; }
 .waypoint-actions button:hover { color: var(--ink); background: rgba(255,255,255,.08); }
 .planner-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; }
 .planner-tools > button { height: 36px; padding: 0 12px; color: var(--accent); background: rgba(223,255,130,.08); border: 1px solid rgba(223,255,130,.22); border-radius: 11px; font-weight: 750; cursor: pointer; }
@@ -76,6 +77,7 @@ button { color: inherit; }
 .search-icon, .icon-button svg, .round-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
 .search-icon { color: var(--muted); }
 .icon-button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; display: grid; place-items: center; cursor: pointer; }
+.icon-button, .round-button > span { font-size: 10px; font-weight: 850; letter-spacing: .02em; }
 .icon-button:hover { background: rgba(255,255,255,.09); }
 .map-hint { margin: 9px auto 0; width: max-content; max-width: calc(100% - 24px); padding: 7px 12px; color: #d9ddd6; background: rgba(16,19,15,.78); border-radius: 999px; font-size: 12px; text-align: center; backdrop-filter: blur(8px); }
 .search-results { margin-top: 10px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }

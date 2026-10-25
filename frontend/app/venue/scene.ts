@@ -241,7 +241,7 @@ export class VenueScene {
         this.place(start.at, start.facing);
         const el = this.renderer.domElement;
         el.tabIndex = 0;
-        el.setAttribute("aria-label", "Inside the hall. Drag to look around, arrow keys or W A S D to walk.");
+        el.setAttribute("aria-label", "Inside the hall. Drag to look around, direction keys or W A S D to walk.");
         el.addEventListener("pointerdown", this.down);
         el.addEventListener("pointermove", this.moveLook);
         el.addEventListener("pointerup", this.up);

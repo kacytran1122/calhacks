@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   ensureState();
   try {
     // The subject is rounded to about a kilometer so the audit trail doesn't keep a precise home location.
-    return NextResponse.json(await runAgent(pricingCall(`route:${b.from.lat.toFixed(2)},${b.from.lon.toFixed(2)}→${b.to.lat.toFixed(3)},${b.to.lon.toFixed(3)}`), () => estimatePrices(args)));
+    return NextResponse.json(await runAgent(pricingCall(`route:${b.from.lat.toFixed(2)},${b.from.lon.toFixed(2)}:${b.to.lat.toFixed(3)},${b.to.lon.toFixed(3)}`), () => estimatePrices(args)));
   } catch (e) {
     return fail(e);
   }

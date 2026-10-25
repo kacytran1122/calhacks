@@ -146,7 +146,7 @@ test("returns to the route on an error without marking the trip finished and saf
   const from = '<img src=x onerror="alert(1)">';
   const { controller, onContinue, onDismiss } = openSummary(fetcher, { from });
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Summary service is unavailable"));
-  expect(screen.getByText(`${from} → ${context.to}`)).toBeVisible();
+  expect(screen.getByText(`${from} to ${context.to}`)).toBeVisible();
   expect(document.querySelector("#trip-receipt-journey img")).toBeNull();
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   expect(controller.isOpen()).toBe(false);

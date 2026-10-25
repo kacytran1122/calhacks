@@ -219,7 +219,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   if (stops) {
     const top = usefulStopResults(stops.body ?? []).slice(0, 3).map((r) => ({ title: r.title, link: r.link }));
     const stopStatus = stops.status === "ok" && top.length === 0 ? "empty" : stops.status;
-    out.push(push(state, { tripId, kind: "stop", source: "Bright Data SERP API → Google", status: stopStatus, data: { query: venueQ, results: top, attempts: stops.attempts, ms: stops.ms }, note: stops.error ?? (stops.errorCode ? `x-brd-error-code=${stops.errorCode}` : top.length === 0 && stops.status === "ok" ? "Live search returned only general search pages, so S’mile did not present them as specific places." : undefined) }));
+    out.push(push(state, { tripId, kind: "stop", source: "Bright Data SERP API with Google", status: stopStatus, data: { query: venueQ, results: top, attempts: stops.attempts, ms: stops.ms }, note: stops.error ?? (stops.errorCode ? `x-brd-error-code=${stops.errorCode}` : top.length === 0 && stops.status === "ok" ? "Live search returned only general search pages, so S’mile did not present them as specific places." : undefined) }));
   }
 
   const targetedQuery = officialFareQuery(transit.options, event.startsAt);
@@ -264,7 +264,7 @@ export async function gatherEvidence(state: State, args: { tripId: string; homeZ
   const flightGuide: RouteGuide[] = airfare && flightMinutes && event.startsAt
     ? [{
         mode: "flight",
-        title: `Combined trip via ${airfare.from.code} → ${airfare.to.code}`,
+        title: `Combined trip via ${airfare.from.code} to ${airfare.to.code}`,
         durationText: `About ${Math.floor(flightMinutes / 60)} hr ${flightMinutes % 60} min door to door`,
         durationMinutes: flightMinutes,
         sourceUrl: flightDatePassed || !flightDepartDate ? "https://www.google.com/travel/flights/" : googleFlightsUrl(airfare.from.code, airfare.to.code, flightDepartDate),

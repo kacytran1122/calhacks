@@ -114,7 +114,7 @@ export function pricingCall(subject: string, on?: { actor: Actor; cap: "price.es
       [
         p.scope.eligible ? `${p.drive.miles} mi by road` : p.scope.reason,
         p.rideshare ? `rideshare p50 ${usd(Math.min(p.rideshare.uber.p50, p.rideshare.lyft.p50))}` : "no rideshare estimate",
-        p.airfare ? `flight ${p.airfare.from.code}→${p.airfare.to.code} p50 ${usd(p.airfare.range.p50)}` : "no flight estimate",
+        p.airfare ? `flight ${p.airfare.from.code} to ${p.airfare.to.code} p50 ${usd(p.airfare.range.p50)}` : "no flight estimate",
       ].join("; "),
   };
 }

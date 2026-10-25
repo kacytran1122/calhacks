@@ -156,7 +156,7 @@ export async function scoutEvent(state: State, url: string, hints?: LensHints): 
   const evidence: Evidence = {
     id: newId("EV-scout"),
     kind: "event_page",
-    source: `Bright Data Web Unlocker → ${host}`,
+    source: `Bright Data Web Unlocker with ${host}`,
     url,
     fetchedAt: new Date().toISOString(),
     status: facts ? "ok" : status === "ok" ? "empty" : status,

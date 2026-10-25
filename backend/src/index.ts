@@ -21,7 +21,7 @@ export { discoverEvents, discoverCall, type DiscoverResult, type DiscoverOptions
 export { eventStore, type EventListing } from "./eventStore";
 export { chargeTrip } from "../visa/payments";
 export { createRideDemoOwner, createRidePayment, createTripDemoReceipt, listRidePayments, listTripDemoReceipts, parseRidePaymentInput, parseTripDemoReceiptInput, requireRideDemoStorage, RidePaymentError, RIDE_DEMO_COOKIE, RIDE_DEMO_LIMITS, RIDE_DEMO_SESSION_SECONDS, type RideDemoReceipt, type TripDemoReceipt, type RidePaymentState } from "../visa/ridePayments";
-export { tick, answer, applyDecision, planTrip, cachedTripPlan, bookTrip, buddiesFor, carpoolFor, notify, PlanRequestConflict, type PlanTripArgs, type PlanTripResult, type PickedEvent } from "./orchestrator";
+export { tick, answer, applyDecision, completeTripFromMap, planTrip, cachedTripPlan, bookTrip, buddiesFor, carpoolFor, notify, PlanRequestConflict, type MapTripCompletionScope, type PlanTripArgs, type PlanTripResult, type PickedEvent } from "./orchestrator";
 export { runEval } from "./eval";
 export { brightDataKey } from "./integrations/brightdata";
 export { liveGoogleFlightQuote, googleFlightsUrl, dayBefore, type LiveFlightQuote } from "./integrations/googleFlights";
@@ -45,6 +45,7 @@ export {
   photonTripBinding,
   resolvePhotonMapHandoff,
   PHOTON_HANDOFF_MAP_TOKEN_PATTERN,
+  PHOTON_MAP_COMPLETION_COOKIE,
   PhotonHandoffError,
   PhotonHandoffStorageUnavailable,
   type PhotonHandoffClaim,

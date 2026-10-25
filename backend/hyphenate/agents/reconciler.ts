@@ -13,6 +13,24 @@ export interface ParsedReceipt {
   parsedBy: "rules" | "claude";
 }
 
+const SUPPORTED_RECEIPT_CURRENCIES = new Set(["USD", "CAD"]);
+const validCents = (value: unknown): value is Cents => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+function validReceiptDate(value: string | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function sumSafePositive(values: Cents[]): Cents | undefined {
+  let total = 0;
+  for (const value of values) {
+    if (!validCents(value) || !Number.isSafeInteger(total + value)) return undefined;
+    total += value;
+  }
+  return total > 0 ? total : undefined;
+}
+
 export function parseReceipt(text: string): ParsedReceipt {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const amt = text.match(/(?:total charged|air total|total|amount)\s*:?\s*(CAD|USD)?\s*\$?\s*([\d,]+\.\d{2})/i);
@@ -26,7 +44,7 @@ export function parseReceipt(text: string): ParsedReceipt {
     currency: (amt?.[1] ?? "USD").toUpperCase(),
     parsedBy: "rules",
   };
-  if (out.merchant && out.amountCents !== undefined && out.date && out.ref)
+  if (out.merchant && validCents(out.amountCents) && SUPPORTED_RECEIPT_CURRENCIES.has(out.currency) && validReceiptDate(out.date) && out.ref)
     out.fingerprint = [out.merchant.toLowerCase(), out.amountCents, out.date, out.ref.toUpperCase()].join("|");
   return out;
 }
@@ -42,15 +60,23 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
   const ev = state.evidence.filter((e) => e.tripId === trip.id);
   const one = (kind: Evidence["kind"]) => ev.find((e) => e.kind === kind);
   const many = (kind: Evidence["kind"]) => ev.filter((e) => e.kind === kind);
+  const validUsdBankLine = (e: Evidence) => e.status === "ok"
+    && String(e.data.currency ?? "").toUpperCase() === "USD"
+    && validCents(e.data.amountCents);
   const event = state.events.find((e) => e.id === trip.eventId)!;
   const traveler = state.travelers.find((t) => t.id === trip.travelerId)!;
   const quote = one("quote");
-  const receiptEv = one("receipt");
+  const receiptEv = ev.find((e) => e.kind === "receipt" && e.status === "ok");
   const receipt = receiptEv ? parseReceipt(String(receiptEv.data.text ?? "")) : undefined;
-  const bankLines = many("bank_line");
-  const auth = one("card_auth");
-  const checkin = one("checkin");
-  const refund = one("refund");
+  const bankEvidence = many("bank_line");
+  const bankLines = bankEvidence.filter(validUsdBankLine);
+  const invalidBankLines = bankEvidence.filter((e) => e.status === "ok" && !validUsdBankLine(e));
+  const auth = ev.find((e) => e.kind === "card_auth" && e.status === "ok" && validCents(e.data.amountCents));
+  const checkin = ev.find((e) => e.kind === "checkin" && e.status === "ok" && ["present", "checked_in", "absent"].includes(String(e.data.result)));
+  const pendingRefunds = many("refund").filter((e) => e.data.processed === false);
+  const validPendingRefund = pendingRefunds.find((e) => e.status === "ok"
+    && String(e.data.currency ?? "").toUpperCase() === "USD"
+    && validCents(e.data.amountCents));
   const cap = capFor(trip.distanceMiles);
   const tol = materialityFor(trip.quoteCents);
   const who = `${traveler.initials} (${traveler.school})`;
@@ -89,17 +115,30 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     };
   };
 
-  if (refund && trip.state === "reimbursed" && refund.data.processed === false) {
-    const amt = Number(refund.data.amountCents);
+  if (trip.state === "reimbursed" && pendingRefunds.length) {
+    if (!validPendingRefund) {
+      return make(
+        "require_payment_evidence",
+        0,
+        ["One or more pending refund records are blocked, non-USD, or have an invalid amount. No refund can be posted until finance supplies valid evidence."],
+        pendingRefunds.map((e) => e.id),
+        {
+          askedOf: "controller",
+          question: `${who} has a pending refund with invalid evidence. Keep it unposted until finance replaces the record?`,
+          options: [{ id: "reject", label: "Do not post the invalid refund" }],
+        },
+      );
+    }
+    const amt = validPendingRefund.data.amountCents as Cents;
     return make(
       "recover_refund",
       -amt,
       [
         `${who} was already reimbursed ${fmt(trip.decision?.payCents ?? trip.quoteCents)} for this trip.`,
-        `A ${fmt(amt)} credit "${refund.data.descriptor}" then posted to the virtual card.`,
+        `A ${fmt(amt)} credit "${validPendingRefund.data.descriptor}" then posted to the virtual card.`,
         `The refund reverses the grant expense instead of sitting as unexplained card credit (R11).`,
       ],
-      [refund.id, ...bankLines.map((b) => b.id), "R11"],
+      [validPendingRefund.id, ...bankLines.map((b) => b.id), "R11"],
     );
   }
 
@@ -130,7 +169,7 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     const earlier = state.trips.find((o) => {
       if (o.id === trip.id || !o.submittedAt || !trip.submittedAt || o.submittedAt >= trip.submittedAt) return false;
       if (o.decision?.code === "reject_duplicate") return false;
-      const r = state.evidence.find((e) => e.tripId === o.id && e.kind === "receipt");
+      const r = state.evidence.find((e) => e.tripId === o.id && e.kind === "receipt" && e.status === "ok");
       return r ? parseReceipt(String(r.data.text ?? "")).fingerprint === receipt.fingerprint : false;
     });
     if (earlier) {
@@ -183,15 +222,37 @@ export function decide(state: State, trip: Trip, now = new Date()): Decision & D
     );
   }
 
-  const bankUsd = bankLines.length ? sum(bankLines.map((b) => Number(b.data.amountCents))) : undefined;
-  const receiptUsd = receipt?.currency === "USD" ? receipt.amountCents : undefined;
+  if (invalidBankLines.length) {
+    return make("require_payment_evidence", 0, ["A bank settlement record has an unsupported currency or invalid amount, so finance must replace it with a valid USD settlement before reconciliation."], invalidBankLines.map((e) => e.id), {
+      askedOf: "controller",
+      question: `${who} has an invalid bank settlement record. Keep this trip unpaid until finance attaches a valid USD settlement?`,
+      options: [{ id: "reject", label: "Do not reimburse without evidence" }],
+    });
+  }
+
+  const bankUsd = bankLines.length ? sumSafePositive(bankLines.map((b) => b.data.amountCents as Cents)) : undefined;
+  if (bankLines.length && bankUsd === undefined) {
+    return make("require_payment_evidence", 0, ["The USD bank lines do not add to a safe whole-cent amount, so finance must replace or split the settlement evidence before reconciliation."], bankLines.map((e) => e.id), {
+      askedOf: "controller",
+      question: `${who} has bank lines whose total cannot be represented safely. Keep this trip unpaid until finance corrects the settlement?`,
+      options: [{ id: "reject", label: "Do not reimburse without valid evidence" }],
+    });
+  }
+  const receiptUsd = receipt?.currency === "USD" && validCents(receipt.amountCents) ? receipt.amountCents : undefined;
+  if (trip.method === "virtual_card" && bankUsd === undefined && receiptUsd !== undefined) {
+    return make("require_payment_evidence", 0, ["A readable operator receipt is available, but a virtual-card trip still needs a valid USD bank settlement before finance can post the card liability."], [receiptEv?.id, "R6"], {
+      askedOf: "controller",
+      question: `${who} has a receipt but no valid virtual-card settlement. Keep this trip unpaid until the USD bank settlement arrives?`,
+      options: [{ id: "reject", label: "Do not reimburse without settlement" }],
+    });
+  }
   const settled = bankUsd ?? receiptUsd;
   const settledSource = bankUsd !== undefined ? "bank settlement" : "receipt";
   if (settled === undefined) {
-    return make("require_checkin", 0, ["No bank line and no readable USD receipt — nothing to reconcile against."], [receiptEv?.id, "R6"], {
-      askedOf: "organizer",
-      question: `${who} has no settled amount on record. Ask them for a receipt?`,
-      options: [{ id: "reject", label: "Ask traveler for receipt" }],
+    return make("require_payment_evidence", 0, ["No bank settlement and no readable USD operator receipt are available, so there is no amount to reconcile."], [receiptEv?.id, "R6"], {
+      askedOf: "controller",
+      question: `${who} has no settled amount or readable operator receipt on record. Keep this trip unpaid unless valid evidence is attached?`,
+      options: [{ id: "reject", label: "Do not reimburse without evidence" }],
     });
   }
 

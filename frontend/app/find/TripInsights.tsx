@@ -47,7 +47,7 @@ async function call<T>(url: string, body?: unknown): Promise<T> {
   return json as T;
 }
 
-/** Feels-like °F → color, using the NWS heat-index bands so a color means the same thing everywhere. */
+/** Maps feels-like °F to color using the NWS heat-index bands, so a color means the same thing everywhere. */
 function heatColor(f: number) {
   if (f >= 103) return "#7f1d1d";
   if (f >= 90) return "#dc2626";
@@ -160,7 +160,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
   const rows = price
     ? [
         ...(price.rideshare ? [{ label: "Uber", sub: `${price.rideshare.miles} mi · ${price.rideshare.minutes} min`, r: price.rideshare.uber }, { label: "Lyft", sub: `${price.rideshare.miles} mi · ${price.rideshare.minutes} min`, r: price.rideshare.lyft }] : []),
-        ...(price.airfare ? [{ label: `Flight ${price.airfare.from.code} → ${price.airfare.to.code}`, sub: `${price.airfare.miles} mi between airports`, r: price.airfare.range }] : []),
+        ...(price.airfare ? [{ label: `Flight ${price.airfare.from.code} to ${price.airfare.to.code}`, sub: `${price.airfare.miles} mi between airports`, r: price.airfare.range }] : []),
       ]
     : [];
   const max = Math.max(1, ...rows.map((x) => x.r.p90)) * 1.05;
@@ -202,7 +202,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
         <div className={`ti-live ${flight.live.status === "ok" ? "ok" : "waiting"}`}>
           <div>
             <span className="ti-live-kicker">Google Flights price check</span>
-            <b>{flight.live.fromAirport} → {flight.live.toAirport} · {flight.live.departDate}</b>
+            <b>{flight.live.fromAirport} to {flight.live.toAirport} · {flight.live.departDate}</b>
             {flight.live.amountUsd !== undefined ? (
               <p>
                 <strong>{usd(flight.live.amountUsd)}</strong> observed now · forecast midpoint {usd(flight.prediction.range.p50)}
@@ -218,7 +218,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
               {flight.live.via} · checked {new Date(flight.live.observedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
             </span>
           </div>
-          <a href={flight.live.bookingUrl ?? flight.live.sourceUrl} target="_blank" rel="noreferrer">Open Google Flights ↗</a>
+          <a href={flight.live.bookingUrl ?? flight.live.sourceUrl} target="_blank" rel="noreferrer">Open Google Flights</a>
         </div>
       )}
       {price?.rideshare && price.rideshare.byHour.length > 0 && (
@@ -251,7 +251,7 @@ export function TripInsights({ from, to, startsAt, timeZone, fromState, toState 
       )}
       {price?.airfare && price.airfare.byHour.length > 0 && (
         <HourChart
-          title={`Flight ${price.airfare.from.code} → ${price.airfare.to.code} by departure hour: past pattern vs predicted`}
+          title={`Flight ${price.airfare.from.code} to ${price.airfare.to.code} by departure hour: past pattern vs predicted`}
           past={price.airfare.byHour.map((h) => h.past)}
           pastLabel="past: how nonstop fares varied by departure hour, × this route's fare"
           bars={price.airfare.byHour.map((h) => ({ hour: h.hour, period: h.period, ...h.range }))}

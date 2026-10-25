@@ -110,10 +110,7 @@ export function HeroView({ onNavigate }: { onNavigate: (origin: TravelOrigin) =>
                 <input key="city" inputMode="text" autoComplete="address-level2" maxLength={100} placeholder="City, state, or city + state" aria-label="Home city or state" value={city} onChange={(e) => setCity(e.target.value)} autoFocus />
               )}
               <button type="submit" disabled={busy}>
-                {busy ? "Locating…" : "Find trips"}{" "}
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
+                {busy ? "Locating…" : "Find trips"}
               </button>
             </form>
             <p className={`note origin-note${message?.kind === "error" ? " error" : ""}`} aria-live="polite">

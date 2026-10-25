@@ -126,7 +126,7 @@ export function MapClient() {
         setPreparing(false);
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
         if (!window.L) await load("/map-assets/leaflet.js");
-        if (!cancelled) await load(`/map-assets/map.js?v=9`, true);
+        if (!cancelled) await load(`/map-assets/map.js?v=11`, true);
       } catch (cause) {
         if (!cancelled) {
           setPreparing(false);
@@ -142,7 +142,7 @@ export function MapClient() {
   }, []);
 
   if (preparing) {
-    return <main id="app" className="map-app"><section className="permission-card"><div className="permission-icon" aria-hidden="true">↗</div><div><b>Opening your route</b><span>Verifying the private @smile handoff…</span></div></section></main>;
+    return <main id="app" className="map-app"><section className="permission-card"><div className="permission-icon" aria-hidden="true">•</div><div><b>Opening your route</b><span>Verifying the private @smile handoff…</span></div></section></main>;
   }
 
   if (runtimeError) {
@@ -158,7 +158,7 @@ export function MapClient() {
           <div className="planner-head">
             <div><span>Route</span><b id="planner-title">Choose start and destination</b></div>
             <button id="toggle-planner" className="icon-button" type="button" aria-label="Collapse route planner" aria-expanded="true">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6" /></svg>
+              Hide
             </button>
           </div>
           <div id="planner-summary" className="planner-summary hidden"><span id="summary-text" /><button id="edit-route" type="button">Edit</button></div>
@@ -200,7 +200,7 @@ export function MapClient() {
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>
         </button>
         <button id="orientation" className="round-button" type="button" aria-label="Point map in travel direction" title="Follow heading">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 6 16-6-3-6 3 6-16Z"/></svg>
+          <span aria-hidden="true">N</span>
         </button>
       </div>
 
@@ -211,7 +211,7 @@ export function MapClient() {
           <button id="close-route" className="icon-button" type="button" aria-label="Close route"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
         </div>
         <div className="mode-tabs" role="tablist" aria-label="Travel mode">
-          <button className="mode-tab" data-mode="drive" role="tab" aria-selected="false" type="button"><span>↗</span>Drive</button>
+          <button className="mode-tab" data-mode="drive" role="tab" aria-selected="false" type="button"><span>D</span>Drive</button>
           <button className="mode-tab" data-mode="taxi" role="tab" aria-selected="false" type="button"><span>▰</span>Taxi</button>
           <button className="mode-tab" data-mode="walk" role="tab" aria-selected="false" type="button"><span>●</span>Walk</button>
           <button className="mode-tab active" data-mode="transit" role="tab" aria-selected="true" type="button"><span>▣</span>Transit</button>
@@ -226,7 +226,7 @@ export function MapClient() {
 
       <section id="navigation-panel" className="navigation-panel hidden" aria-label="Route guidance">
         <div className="instruction-card">
-          <div id="maneuver-icon" className="maneuver-icon" aria-hidden="true">↑</div>
+          <div id="maneuver-icon" className="maneuver-icon" aria-hidden="true">1</div>
           <div className="instruction-copy"><span id="step-distance">Starting route</span><b id="step-instruction">Continue to the route</b></div>
           <button id="end-navigation" className="end-button" type="button">End guidance</button>
         </div>

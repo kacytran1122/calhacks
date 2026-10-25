@@ -14,10 +14,10 @@ const PAD: {
     label: string;
     glyph: string;
 }[] = [
-    { hold: "forward", label: "Walk forward", glyph: "↑" },
-    { hold: "left", label: "Turn left", glyph: "↺" },
-    { hold: "back", label: "Step back", glyph: "↓" },
-    { hold: "right", label: "Turn right", glyph: "↻" },
+    { hold: "forward", label: "Walk forward", glyph: "F" },
+    { hold: "left", label: "Turn left", glyph: "L" },
+    { hold: "back", label: "Step back", glyph: "B" },
+    { hold: "right", label: "Turn right", glyph: "R" },
 ];
 export function VenueClient() {
     const host = useRef<HTMLDivElement>(null);
@@ -169,13 +169,14 @@ export function VenueClient() {
             </div>)}
         </section>
 
-        <svg className="vn-map" viewBox="0 0 2000 1000" onClick={onMap} role="img" aria-label="Map of the main floor. You’re the arrow; tap anywhere to walk there.">
+        <svg className="vn-map" viewBox="0 0 2000 1000" onClick={onMap} role="img" aria-label="Map of the main floor. Your position is the highlighted marker; tap anywhere to walk there.">
           <path d={outline(FLOOR)} className="floor"/>
           {[...BLOCKED.map((b) => b.poly), ...ROOMS.map((r) => r.poly), STAGE.poly].map((p, i) => (<path key={i} d={outline(p)} className="solid"/>))}
           {trail && <polyline points={trail.map((p) => p.join(",")).join(" ")} className="trail"/>}
           {picked && <circle cx={picked.at[0]} cy={picked.at[1]} r={36} className="goal"/>}
           <g ref={you} transform={`translate(${VIEWS[0]!.at.join(" ")})`}>
-            <path d="M0 -70 L46 46 L0 24 L-46 46 Z" className="you"/>
+            <circle r="42" className="you"/>
+            <circle r="12" className="you-center"/>
           </g>
         </svg>
 
@@ -209,7 +210,7 @@ export function VenueClient() {
         {!ready && <div className="vn-loading">{failed ? "This device can’t show the 3D view (WebGL is unavailable)." : "Opening the doors…"}</div>}
       </div>
 
-      <p className="vn-help">Drag to look around. Walk with W A S D or the arrow keys (Shift to hurry), tap the floor or the map to walk there, or pick a destination and S’mile walks you over.</p>
+      <p className="vn-help">Drag to look around. Walk with W A S D or the direction keys (Shift to hurry), tap the floor or the map to walk there, or pick a destination and S’mile walks you over.</p>
       <p className="vn-source">
         This conceptual tour is based on a Cal Hacks 13.0 floor plan, not a measured building survey. Tables, booths, rooms and virtual routes are approximate, and the height, roof and windows are illustrative. The mezzanine is not included. Please confirm the current venue layout and accessible routes with event staff; this preview is not an accessibility or emergency-navigation guide.
       </p>

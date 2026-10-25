@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   ensureState();
   try {
     const args = { from: b.from, to: b.to, startsAt: b.startsAt, fromState: b.fromState, toState: b.toState, fromAirport, toAirport, departDate: b.departDate, sourceUrl, snapshotId: b.snapshotId, timeoutMs: b.snapshotId ? 30_000 : 4_500 };
-    const result = await runAgent(flightPriceCall(`flight:${b.from.lat.toFixed(1)},${b.from.lon.toFixed(1)}→${b.to.lat.toFixed(1)},${b.to.lon.toFixed(1)}`), () => checkFlightPrice(args));
+    const result = await runAgent(flightPriceCall(`flight:${b.from.lat.toFixed(1)},${b.from.lon.toFixed(1)}:${b.to.lat.toFixed(1)},${b.to.lon.toFixed(1)}`), () => checkFlightPrice(args));
     return NextResponse.json(result);
   } catch (e) {
     return fail(e);

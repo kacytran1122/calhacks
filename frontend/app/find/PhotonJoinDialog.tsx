@@ -147,7 +147,7 @@ export function PhotonJoinDialog({
   return (
     <>
       <button ref={triggerRef} type="button" className={`fd-photon-trigger ${triggerClassName}`.trim()} onClick={launch}>
-        {triggerLabel} <span aria-hidden="true">→</span>
+        {triggerLabel}
       </button>
       {open && createPortal(
         <div className="fd-photon-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>

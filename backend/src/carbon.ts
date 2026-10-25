@@ -159,7 +159,7 @@ export function estimateCarbon(mode: CarbonMode, ctx: CarbonContext): CarbonEsti
         kg: round1(kg),
         miles: round1(airMiles + groundMiles),
         factor: f,
-        basis: `${a.code}→${b.code} great-circle distance, plus rides to and from the nearest airports (straight line × ${ROAD_DETOUR})`,
+        basis: `${a.code} to ${b.code} great-circle distance, plus rides to and from the nearest airports (straight line × ${ROAD_DETOUR})`,
         formula: `${factorText(f)} × ${airMiles} mi flown + ${factorText(FACTORS.rideshare)} × ${groundMiles} mi of airport rides = ${kgText(kg)}`,
       };
     }

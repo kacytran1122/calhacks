@@ -19,11 +19,28 @@ function navigation(segment = vehicle(), otherSegments = [prepareSegment({ mode:
   const finalReceipt = { open: vi.fn((context) => { finalOpened = true; return context; }), isOpen: () => finalOpened };
   const setActiveLeg = vi.fn((index) => { state.activeLeg = index; state.legProgress = 0; });
   const loadRoutes = vi.fn(async () => {});
+  const completionFetch = vi.fn(async () => new Response(JSON.stringify({ connected: true, needsHuman: true }), { status: 201, headers: { "content-type": "application/json" } }));
   const map = { setView: vi.fn(), panTo: vi.fn() };
   const snippet = runtime.slice(runtime.indexOf("function checkoutCompletedRide("), runtime.indexOf("function resetRoutes("));
-  const dependencies = { state, ui, rideCheckout: checkout, tripReceipt: finalReceipt, assignRideLegIds, rideCompletionDescriptor, ridePaymentMode, rideNearArrival, projectOnPath, setActiveLeg, focusLeg: vi.fn(), loadRoutes, map, collapsePlanner: vi.fn(), showToast: vi.fn(), metersText: String, arrivalText: String, instructionFor: () => ({ icon: "B", text: "Ride to your stop" }), routeProgress: () => 0, renderLegList: vi.fn(), renderProgressOnMap: vi.fn(), clearProgressLayers: vi.fn(), renderRoutes: vi.fn() };
+  const dependencies = { state, ui, rideCheckout: checkout, tripReceipt: finalReceipt, assignRideLegIds, rideCompletionDescriptor, ridePaymentMode, rideNearArrival, projectOnPath, setActiveLeg, focusLeg: vi.fn(), loadRoutes, map, collapsePlanner: vi.fn(), showToast: vi.fn(), metersText: String, arrivalText: String, instructionFor: () => ({ icon: "B", text: "Ride to your stop" }), routeProgress: () => 0, renderLegList: vi.fn(), renderProgressOnMap: vi.fn(), clearProgressLayers: vi.fn(), renderRoutes: vi.fn(), fetch: completionFetch };
   const functions = new Function(...Object.keys(dependencies), `${snippet}\nreturn {completeNavigationStep,updateNavigation,startNavigation,endNavigation};`)(...Object.values(dependencies));
-  return { state, checkout, finalReceipt, setActiveLeg, loadRoutes, map, ...functions, acknowledge: (outcome = {}) => { opened = false; checkout.open.mock.calls.at(-1)![0].onContinue(outcome); }, dismiss: (outcome = {}) => { opened = false; checkout.open.mock.calls.at(-1)![0].onDismiss(outcome); }, acknowledgeFinal: () => { finalOpened = false; finalReceipt.open.mock.calls.at(-1)![0].onContinue(); }, dismissFinal: (outcome = {}) => { finalOpened = false; finalReceipt.open.mock.calls.at(-1)![0].onDismiss(outcome); } };
+  return {
+    state,
+    checkout,
+    finalReceipt,
+    setActiveLeg,
+    loadRoutes,
+    map,
+    completionFetch,
+    ...functions,
+    acknowledge: (outcome = {}) => { opened = false; checkout.open.mock.calls.at(-1)![0].onContinue(outcome); },
+    dismiss: (outcome = {}) => { opened = false; checkout.open.mock.calls.at(-1)![0].onDismiss(outcome); },
+    acknowledgeFinal: async () => {
+      finalOpened = false;
+      await finalReceipt.open.mock.calls.at(-1)![0].onContinue();
+    },
+    dismissFinal: (outcome = {}) => { finalOpened = false; finalReceipt.open.mock.calls.at(-1)![0].onDismiss(outcome); },
+  };
 }
 
 test("only bus, rail, train, and taxi vehicle legs can request checkout", () => {
@@ -97,7 +114,7 @@ test("still on board returns to the same ride without payment or advancement and
   expect(app.state.completedRideLegs.size).toBe(0);
 });
 
-test("Finish requires vehicle confirmation, while walking finishes without checkout", () => {
+test("Finish requires vehicle confirmation, while walking finishes without checkout", async () => {
   const ride = navigation(vehicle("rail"), []);
   ride.completeNavigationStep();
   expect(ride.state.navigating).toBe(true);
@@ -105,14 +122,17 @@ test("Finish requires vehicle confirmation, while walking finishes without check
   ride.acknowledge();
   expect(ride.state.navigating).toBe(true);
   expect(ride.finalReceipt.open).toHaveBeenCalledTimes(1);
-  ride.acknowledgeFinal();
+  await ride.acknowledgeFinal();
   expect(ride.state.navigating).toBe(false);
+  expect(ride.completionFetch).toHaveBeenCalledTimes(1);
+  expect(ride.completionFetch).toHaveBeenCalledWith("/api/map/trip-completion", expect.objectContaining({ method: "POST", credentials: "same-origin", keepalive: true }));
   const walk = navigation(vehicle("walk"), []);
   walk.completeNavigationStep();
   expect(walk.checkout.open).not.toHaveBeenCalled();
   expect(walk.finalReceipt.open).toHaveBeenCalledTimes(1);
-  walk.acknowledgeFinal();
+  await walk.acknowledgeFinal();
   expect(walk.state.navigating).toBe(false);
+  expect(walk.completionFetch).toHaveBeenCalledTimes(1);
 });
 
 test("End guidance cancels navigation without claiming vehicle completion or opening checkout", () => {
@@ -127,11 +147,12 @@ test("End guidance cancels navigation without claiming vehicle completion or ope
   expect(app.state.completedRideLegs.size).toBe(0);
   expect(app.checkout.open).not.toHaveBeenCalled();
   expect(app.finalReceipt.open).not.toHaveBeenCalled();
+  expect(app.completionFetch).not.toHaveBeenCalled();
   const page = readFileSync(path.resolve(here, "../../frontend/app/map/MapClient.tsx"), "utf8");
   expect(page).toMatch(/id="end-navigation"[^>]*>End guidance</);
 });
 
-test("Finish trip summarizes confirmed rides in journey order, including an unpaid train but no unused alternative", () => {
+test("Finish trip summarizes confirmed rides in journey order, including an unpaid train but no unused alternative", async () => {
   const train = { ...vehicle("rail"), rideLegId: "train-confirmed", label: "Blue Line" };
   const walk = vehicle("walk");
   const app = navigation(vehicle(), [train, walk]);
@@ -153,11 +174,11 @@ test("Finish trip summarizes confirmed rides in journey order, including an unpa
     { legId: "train-confirmed", mode: "train", service: "Blue Line", from: start.name, to: end.name },
   ]);
   expect(app.state.navigating).toBe(true);
-  app.acknowledgeFinal();
+  await app.acknowledgeFinal();
   expect(app.state.navigating).toBe(false);
 });
 
-test("a walking-only trip reaches a final summary with no vehicle charges", () => {
+test("a walking-only trip reaches a final summary with no vehicle charges", async () => {
   const app = navigation(vehicle("walk"), []);
   app.completeNavigationStep();
   expect(app.checkout.open).not.toHaveBeenCalled();
@@ -166,11 +187,11 @@ test("a walking-only trip reaches a final summary with no vehicle charges", () =
   app.updateNavigation({ ...end, accuracy: 10 });
   expect(app.finalReceipt.open).toHaveBeenCalledTimes(1);
   expect(app.state.navigating).toBe(true);
-  app.acknowledgeFinal();
+  await app.acknowledgeFinal();
   expect(app.state.navigating).toBe(false);
 });
 
-test("returning from a final-summary error keeps navigation and permits an explicit Finish trip retry", () => {
+test("returning from a final-summary error keeps navigation and permits an explicit Finish trip retry", async () => {
   const app = navigation(vehicle("walk"), []);
   app.completeNavigationStep();
   const first = app.finalReceipt.open.mock.calls[0][0];
@@ -181,8 +202,26 @@ test("returning from a final-summary error keeps navigation and permits an expli
   expect(app.state.navigating).toBe(true);
   app.completeNavigationStep();
   expect(app.finalReceipt.open).toHaveBeenCalledTimes(2);
-  app.acknowledgeFinal();
+  await app.acknowledgeFinal();
   expect(app.state.navigating).toBe(false);
+});
+
+test("a failed post-trip save keeps guidance retryable until completion is recorded", async () => {
+  const app = navigation(vehicle("walk"), []);
+  app.completionFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: "Temporarily unavailable" }), { status: 503, headers: { "content-type": "application/json" } }));
+  app.completeNavigationStep();
+  expect(app.finalReceipt.open).toHaveBeenCalledTimes(1);
+  await app.acknowledgeFinal();
+  expect(app.completionFetch).toHaveBeenCalledTimes(1);
+  expect(app.state.navigating).toBe(true);
+  expect(app.state.journeyFinalized).toBe(false);
+
+  app.completeNavigationStep();
+  expect(app.finalReceipt.open).toHaveBeenCalledTimes(2);
+  await app.acknowledgeFinal();
+  expect(app.completionFetch).toHaveBeenCalledTimes(2);
+  expect(app.state.navigating).toBe(false);
+  expect(app.state.journeyFinalized).toBe(true);
 });
 
 test("an ambiguous final-summary dismissal preserves lost ownership and attempt flags for retry", () => {
@@ -242,11 +281,11 @@ test("End guidance and resuming the same journey retain confirmed receipts and o
   expect(app.finalReceipt.open.mock.calls[0][0]).toMatchObject({ journeyId: "session", from: start.name, to: end.name, legs: [{ expectedReceiptId: "ride_sim_preserved" }] });
 });
 
-test("starting again after a verified final receipt creates a fresh journey and payable leg IDs", () => {
+test("starting again after a verified final receipt creates a fresh journey and payable leg IDs", async () => {
   const app = navigation(vehicle(), []);
   app.completeNavigationStep();
   app.acknowledge({ receipt: { id: "ride_sim_first-journey" }, attempted: true });
-  app.acknowledgeFinal();
+  await app.acknowledgeFinal();
   expect(app.state.journeyFinalized).toBe(true);
   app.startNavigation();
   expect(app.state.paymentSession).not.toBe("session");
@@ -278,7 +317,7 @@ test("ride IDs survive going back and alternative taxi paths retain one ID", () 
   expect(departures[0]).not.toBe(departures[1]);
 });
 
-test("a twenty-turn taxi journey with intermediate waypoints creates one payable vehicle leg", () => {
+test("a twenty-turn taxi journey with intermediate waypoints creates one payable vehicle leg", async () => {
   const middle = { name: "Intermediate stop", lat: 41.885, lng: -87.63 };
   const turns = Array.from({ length: 20 }, (_, index) => ({ name: `Street ${index}`, duration: 30, distance: 80, geometry: { coordinates: [[start.lng + index * .001, start.lat], [start.lng + (index + 1) * .001, start.lat]] } }));
   const route = { duration: 600, distance: 1600, geometry: { coordinates: turns.flatMap((step) => step.geometry.coordinates) }, legs: [{ duration: 300, distance: 800, steps: turns.slice(0, 10) }, { duration: 300, distance: 800, steps: turns.slice(10) }] };
@@ -294,7 +333,7 @@ test("a twenty-turn taxi journey with intermediate waypoints creates one payable
   expect(app.checkout.open).toHaveBeenCalledTimes(1);
   app.acknowledge();
   expect(app.finalReceipt.open).toHaveBeenCalledTimes(1);
-  app.acknowledgeFinal();
+  await app.acknowledgeFinal();
   expect(app.state.navigating).toBe(false);
   app.completeNavigationStep(true);
   expect(app.checkout.open).toHaveBeenCalledTimes(1);

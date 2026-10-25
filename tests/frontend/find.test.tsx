@@ -302,7 +302,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
     event: { name: event.name, startsAt: event.startsAt },
     evidence: [
       { id: "fare", kind: "fare", source: "Bright Data", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { fares: [{ mode: "bus", amountUsd: 10.75, link: "https://example.com/fare", quote: "$10.75 total fare" }] } },
-      { id: "guide", kind: "route_guide", source: "Live routing", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", durationMinutes: 55, sourceUrl: "https://example.com/route", fareUrl: "https://example.com/fare", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }, { mode: "flight", title: "Combined trip via LAX → SFO", durationText: "About 4 hr door to door", durationMinutes: 240, sourceUrl: "https://www.google.com/travel/flights/", fareUrl: "https://www.google.com/travel/flights/", sourceQuote: "Estimated door-to-door flight time; verify the current itinerary.", steps: [{ instruction: "Take the ground connection to LAX.", detail: "Allow time for security." }, { instruction: "Fly to SFO, then take the final ground connection.", detail: "Check Google Flights and the destination transit route." }] }] } },
+      { id: "guide", kind: "route_guide", source: "Live routing", status: "ok", provenance: "live", fetchedAt: "2026-10-24T00:00:00Z", data: { options: [{ mode: "bus", title: "Bus to LAX", durationText: "55 minutes", durationMinutes: 55, sourceUrl: "https://example.com/route", fareUrl: "https://example.com/fare", sourceQuote: "Take the airport bus to LAX", steps: [{ instruction: "Walk to the UCLA transit stop.", detail: "Use the Westwood entrance." }, { instruction: "Take the airport bus to LAX.", detail: "Confirm the live departure before leaving." }] }, { mode: "flight", title: "Combined trip via LAX to SFO", durationText: "About 4 hr door to door", durationMinutes: 240, sourceUrl: "https://www.google.com/travel/flights/", fareUrl: "https://www.google.com/travel/flights/", sourceQuote: "Estimated door-to-door flight time; verify the current itinerary.", steps: [{ instruction: "Take the ground connection to LAX.", detail: "Allow time for security." }, { instruction: "Fly to SFO, then take the final ground connection.", detail: "Check Google Flights and the destination transit route." }] }] } },
     ],
     routes: {
       options: [
@@ -357,7 +357,7 @@ test("shows the best route first with detailed steps, total cost, and alternativ
   expect(screen.queryByText(/Route data sources/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Open data source/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/This route remains visible for comparison/i)).not.toBeInTheDocument();
-  const flightRoute = Array.from(document.querySelectorAll("details.fd-route-card")).find((card) => card.textContent?.includes("Combined trip via LAX → SFO"))!;
+  const flightRoute = Array.from(document.querySelectorAll("details.fd-route-card")).find((card) => card.textContent?.includes("Combined trip via LAX to SFO"))!;
   expect(within(flightRoute).getByRole("button", { name: /Open step-by-step route/, hidden: true })).toBeInTheDocument();
   expect(within(flightRoute).getByRole("link", { name: /Check Fare/, hidden: true })).toHaveAttribute("href", "https://www.google.com/travel/flights/");
   const beforeHref = window.location.href;
@@ -416,7 +416,7 @@ test("keeps detailed transit visible while its fare is being verified", async ()
   expect(screen.queryByText(/Bright Data did not respond/i)).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "A stop on the way" })).not.toBeInTheDocument();
   expect(screen.queryByText(/No route fits organizer policy/i)).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Search public-transit alternatives ↗" })).toHaveAttribute("href", expect.stringContaining("travelmode=transit"));
+  expect(screen.getByRole("link", { name: "Search public-transit alternatives" })).toHaveAttribute("href", expect.stringContaining("travelmode=transit"));
 });
 
 test("binds an official fare to the exact live itinerary it covers", async () => {

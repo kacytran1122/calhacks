@@ -135,7 +135,7 @@ export function applyPriceWatch(state: State, results: { tripId: string; estimat
       ? `Price check for ${event.name}: the ${trip.mode} is now predicted at about ${fmt(predicted.cents)} (likely ${predicted.range}), ${Math.abs(movePct)}% ${dir} the ${fmt(trip.quoteCents)} on your trip. This is a model estimate, not a fare. ${movePct > 0 ? "If the fare at booking is higher, you'll be asked to approve the exact new amount (R7)." : "Nothing changes unless you re-plan."}`
       : liveCents === undefined
       ? `Price forecast for ${event.name}: about ${fmt(predicted.cents)} (likely ${predicted.range}), ${Math.abs(movePct)}% ${dir} the ${fmt(baselineCents)} reference. Open Google Flights to check the current fare.`
-      : `Google Flights price check for ${event.name}: ${fmt(liveCents)} was observed for ${flight!.live.fromAirport}→${flight!.live.toAirport} on ${flight!.live.departDate}, ${Math.abs(movePct)}% ${dir} the previous ${fmt(baselineCents)} reference. The trained forecast is ${predicted.range}. Open Google Flights to confirm the fare before booking.`;
+      : `Google Flights price check for ${event.name}: ${fmt(liveCents)} was observed for ${flight!.live.fromAirport} to ${flight!.live.toAirport} on ${flight!.live.departDate}, ${Math.abs(movePct)}% ${dir} the previous ${fmt(baselineCents)} reference. The trained forecast is ${predicted.range}. Open Google Flights to confirm the fare before booking.`;
     const n = notify(
       state,
       trip,

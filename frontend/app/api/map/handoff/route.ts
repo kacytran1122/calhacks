@@ -1,4 +1,4 @@
-import { loadState, PhotonHandoffStorageUnavailable, resolvePhotonMapHandoff } from "@smile/core";
+import { loadState, PHOTON_MAP_COMPLETION_COOKIE, PhotonHandoffStorageUnavailable, resolvePhotonMapHandoff } from "@smile/core";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +12,8 @@ const unavailable = () => NextResponse.json(
   { error: "This secure map link is invalid or expired." },
   { status: 404, headers },
 );
+
+const secureCookie = (request: Request) => new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() === "https";
 
 /**
  * Validated bootstrap for `/map?handoff=<opaque>`.
@@ -33,7 +35,7 @@ export async function GET(request: Request) {
     if (!trip || !traveler || !event) return unavailable();
 
     const destinationQuery = [event.venue, event.city].filter(Boolean).join(", ");
-    return NextResponse.json({
+    const response = NextResponse.json({
       tripId: trip.id,
       mode: trip.mode,
       includeSelfDrive: trip.includeSelfDrive ?? trip.mode === "drive",
@@ -55,6 +57,15 @@ export async function GET(request: Request) {
       },
       expiresAt: handoff.expiresAt,
     }, { headers });
+    response.cookies.set(PHOTON_MAP_COMPLETION_COOKIE, tokens[0]!, {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: secureCookie(request),
+      path: "/api/map/trip-completion",
+      expires: new Date(handoff.expiresAt),
+      maxAge: Math.max(1, Math.ceil((new Date(handoff.expiresAt).getTime() - Date.now()) / 1_000)),
+    });
+    return response;
   } catch (error) {
     if (error instanceof PhotonHandoffStorageUnavailable) {
       return NextResponse.json({ error: "Secure map access is temporarily unavailable." }, { status: 503, headers: { ...headers, "Retry-After": "5" } });

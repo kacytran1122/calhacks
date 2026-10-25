@@ -283,7 +283,7 @@ export function mountRideCheckout() {
       ui.title.textContent = `Have you left this ${leg.mode}?`;
       ui.completedLabel.textContent = `Yes, I have left this ${leg.mode}.`;
       ui.service.textContent = state.leg.service;
-      ui.journey.textContent = `${state.leg.from} → ${state.leg.to}`;
+      ui.journey.textContent = `${state.leg.from} to ${state.leg.to}`;
       ui.preview.textContent = leg.preview
         ? "Route preview only. This is not a confirmed ride, and GPS proximity is not proof that you rode or left a vehicle."
         : "GPS proximity can suggest arrival, but it cannot prove you have left the vehicle. Confirm this yourself below.";

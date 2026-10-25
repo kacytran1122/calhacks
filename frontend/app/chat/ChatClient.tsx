@@ -106,7 +106,7 @@ export function ChatClient() {
             <p className="pj-status" role="status">Checking your trip link…</p>
           ) : !credentials ? (
             <div className="pj-gate">
-              <span className="pj-gate-icon" aria-hidden="true">↗</span>
+              <span className="pj-gate-icon" aria-hidden="true">@</span>
               <h2>Plan a trip first</h2>
               <p>Your current trip result creates a private, expiring QR. No contact details are collected.</p>
               <a className="pj-button primary" href="/finding-events">Find an event and plan my trip</a>
@@ -132,7 +132,7 @@ export function ChatClient() {
             </div>
           ) : (
             <div className="pj-gate">
-              <span className="pj-gate-icon" aria-hidden="true">↗</span>
+              <span className="pj-gate-icon" aria-hidden="true">@</span>
               <h2>Create your Messages QR</h2>
               <p>No phone number or email address is requested. The QR opens your private conversation with your saved event, destination, and current route already connected.</p>
               {error && <p className="pj-error" role="alert">{error}</p>}

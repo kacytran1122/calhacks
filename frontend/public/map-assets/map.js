@@ -1,5 +1,5 @@
 import { assignRideLegIds, decodePolyline, distanceMeters, greatCirclePoints, itineraryDurationSeconds, onwardTransitTime, partialPath, prepareSegment, projectOnPath, rideCompletionDescriptor, rideNearArrival, ridePaymentMode, taxiJourneySegment, transitRoutePattern, usableTransitItineraries, userMapInteraction } from "./route-utils.js?v=6";
-import { mountRideCheckout } from "./ride-checkout.js?v=1";
+import { mountRideCheckout } from "./ride-checkout.js?v=2";
 import { mountTripReceipt } from "./trip-receipt.js?v=1";
 
 const $ = (selector) => document.querySelector(selector);
@@ -138,6 +138,8 @@ function localDateTime(date = new Date(Date.now() + 10 * 60_000)) {
 function collapsePlanner(collapsed = true) {
   ui.planner.classList.toggle("collapsed", collapsed);
   ui.togglePlanner.setAttribute("aria-expanded", String(!collapsed));
+  ui.togglePlanner.setAttribute("aria-label", collapsed ? "Expand route planner" : "Collapse route planner");
+  ui.togglePlanner.textContent = collapsed ? "Show" : "Hide";
   ui.plannerSummary.classList.toggle("hidden", !collapsed || !state.destination);
 }
 
@@ -156,9 +158,9 @@ function updatePlannerState() {
   const start = effectiveStart();
   const ready = Boolean(start && state.destination && state.waypoints.every((item) => item.place));
   ui.plan.disabled = !ready;
-  ui.plannerTitle.textContent = state.destination ? `${start?.name || "Choose start"} → ${state.destination.name}` : "Choose start and destination";
+  ui.plannerTitle.textContent = state.destination ? `${start?.name || "Choose start"} to ${state.destination.name}` : "Choose start and destination";
   ui.summaryText.textContent = state.destination
-    ? `${start?.name || "Start"} → ${state.destination.name}${state.waypoints.length ? ` · ${state.waypoints.length} stop${state.waypoints.length > 1 ? "s" : ""}` : ""}`
+    ? `${start?.name || "Start"} to ${state.destination.name}${state.waypoints.length ? ` · ${state.waypoints.length} stop${state.waypoints.length > 1 ? "s" : ""}` : ""}`
     : "";
 }
 
@@ -180,7 +182,7 @@ function renderWaypoints() {
       <span class="point-node waypoint-node" aria-hidden="true"></span>
       <label><small>Stop ${index + 1}</small><input autocomplete="off" enterkeyhint="search" value="${escapeHtml(waypoint.place?.name || "")}" placeholder="Search stop" aria-label="Stop ${index + 1}" /></label>
       <span class="waypoint-actions">
-        <button type="button" data-action="up" aria-label="Move stop ${index + 1} up">↑</button>
+        <button type="button" data-action="up" aria-label="Move stop ${index + 1} earlier">Earlier</button>
         <button type="button" data-action="remove" aria-label="Remove stop ${index + 1}">×</button>
       </span>
     </div>`).join("");
@@ -313,7 +315,7 @@ async function searchPlaces(query) {
     }
     ui.results.innerHTML = places.map((place, index) => {
       const name = place.name || place.display_name.split(",")[0];
-      return `<button class="search-result" type="button" data-index="${index}"><span class="result-pin">↗</span><div><b>${escapeHtml(name)}</b><span>${escapeHtml(place.display_name)}</span></div></button>`;
+      return `<button class="search-result" type="button" data-index="${index}"><span class="result-pin">●</span><div><b>${escapeHtml(name)}</b><span>${escapeHtml(place.display_name)}</span></div></button>`;
     }).join("");
     $$(".search-result").forEach((button) => button.addEventListener("click", () => {
       const result = places[Number(button.dataset.index)];
@@ -373,7 +375,7 @@ function modeMeta(rawMode, agency, line) {
   const raw = String(rawMode || "").toUpperCase();
   if (raw === "WALK") return { mode: "walk", icon: "●", name: "Walk" };
   if (raw === "BIKE") return { mode: "bike", icon: "◆", name: "Bike" };
-  if (raw === "CAR") return { mode: "drive", icon: "↗", name: "Drive" };
+  if (raw === "CAR") return { mode: "drive", icon: "D", name: "Drive" };
   if (raw === "TAXI" || raw === "RIDESHARE") return { mode: "taxi", icon: "T", name: "Taxi" };
   if (raw === "BUS" || raw === "COACH") return { mode: "bus", icon: "▣", name: line ? `Bus ${line}` : "Bus" };
   if (raw === "SUBWAY" && /Bay Area Rapid Transit/i.test(agency || "")) return { mode: "rail", icon: "B", name: line ? `BART ${line}` : "BART" };
@@ -612,8 +614,8 @@ async function flightRoute(from, to, time) {
     live: false,
   });
   const flight = prepareSegment({
-    ...modeMeta("FLIGHT", null, `${departure.code} → ${arrival.code}`),
-    label: `Flight ${departure.code} → ${arrival.code}`,
+    ...modeMeta("FLIGHT", null, `${departure.code} to ${arrival.code}`),
+    label: `Flight ${departure.code} to ${arrival.code}`,
     from: departure,
     to: arrival,
     points: greatCirclePoints(departure, arrival),
@@ -624,7 +626,7 @@ async function flightRoute(from, to, time) {
   });
   const date = (ui.departure.value || new Date().toISOString()).slice(0, 10);
   return prepareItinerary({
-    title: `Fly ${departure.code} → ${arrival.code}`,
+    title: `Fly ${departure.code} to ${arrival.code}`,
     segments: [...groundOut, airport, flight, ...groundIn],
     source: "Ground routes: live transit with OpenStreetMap fallback · Flight path and duration: great-circle estimate",
     sourceUrl: `https://www.google.com/travel/flights?hl=en&curr=USD&q=Flights%20from%20${departure.code}%20to%20${arrival.code}%20on%20${date}`,
@@ -638,7 +640,7 @@ function prepareItinerary(route) {
   const summary = route.segments
     .map((segment) => segment.stepNumber ? segment.name : segment.label)
     .filter((label, index, labels) => label && (index === 0 || label !== labels[index - 1]))
-    .join(" → ");
+    .join(" then ");
   const liveLegs = route.segments.filter((segment) => segment.live).length;
   return { ...route, duration, distance, summary, liveLegs };
 }
@@ -696,7 +698,7 @@ async function loadRoutes(options = {}) {
   ui.options.innerHTML = "";
   ui.legList.innerHTML = "";
   ui.start.disabled = true;
-  ui.destinationName.textContent = `${points[0].name} → ${points.at(-1).name}`;
+  ui.destinationName.textContent = `${points[0].name} to ${points.at(-1).name}`;
   ui.destinationAddress.textContent = state.waypoints.length ? `${state.waypoints.length} planned stop${state.waypoints.length > 1 ? "s" : ""}` : points.at(-1).address || "";
   ui.destinationLabel.textContent = points.at(-1).name;
   ui.routeKicker.textContent = state.mode === "transit" ? "Multimodal transit" : state.mode === "flight" ? "Airport journey" : "Route options";
@@ -803,7 +805,7 @@ function renderRoutes() {
   }).join("");
   $$(".route-option").forEach((button) => button.addEventListener("click", () => selectRoute(Number(button.dataset.route))));
   renderLegList();
-  ui.routeSource.innerHTML = `${escapeHtml(selected.source)} · <a href="${escapeHtml(selected.sourceUrl)}" target="_blank" rel="noreferrer">source ↗</a>`;
+  ui.routeSource.innerHTML = `${escapeHtml(selected.source)} · <a href="${escapeHtml(selected.sourceUrl)}" target="_blank" rel="noreferrer">source</a>`;
   ui.start.disabled = false;
   ui.start.textContent = `Start trip · ${durationText(selected.duration)}`;
   const allPoints = selected.segments.flatMap((segment) => segment.points);
@@ -840,7 +842,7 @@ function focusLeg(index) {
 
 function instructionFor(segment) {
   if (!segment) return { icon: "●", text: "You have arrived" };
-  return { icon: segment.icon || "↑", text: segment.instruction || `${segment.label} to ${segment.to?.name || "the next stop"}` };
+  return { icon: segment.stepNumber ? String(segment.stepNumber) : segment.icon || "•", text: segment.instruction || `${segment.label} to ${segment.to?.name || "the next stop"}` };
 }
 
 function routeProgress(route) {
@@ -908,6 +910,26 @@ function checkoutCompletedRide(segment, onContinue) {
   return true;
 }
 
+async function recordPostTripCompletion() {
+  try {
+    const response = await fetch("/api/map/trip-completion", { method: "POST", credentials: "same-origin", keepalive: true, headers: { Accept: "application/json" } });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showToast(body.error || "Post-trip review could not be saved. Finish the route again when connected.", 6500);
+      return false;
+    }
+    if (body.connected) {
+      showToast(body.needsHuman
+        ? "Trip completion was recorded. An organizer will verify attendance before reimbursement review."
+        : "Trip completion was recorded for post-trip review.", 6500);
+    }
+    return true;
+  } catch {
+    showToast("Post-trip review could not be saved. Finish the route again when connected.", 6500);
+    return false;
+  }
+}
+
 function finishJourney() {
   if (rideCheckout.isOpen() || tripReceipt.isOpen()) return;
   const route = state.routes[state.selectedRoute];
@@ -921,9 +943,11 @@ function finishJourney() {
     legs: [...state.completedRideDescriptors.values()].map((leg) => ({ ...leg })),
     hasPaymentAttempt: state.hasPaymentAttempt,
     sessionLost: state.receiptSessionLost,
-    onContinue: () => {
+    onContinue: async () => {
       if (resolved || state.paymentSession !== session) return;
       resolved = true;
+      const recorded = await recordPostTripCompletion();
+      if (!recorded || state.paymentSession !== session) return;
       state.journeyFinalized = true;
       endNavigation();
     },
@@ -1012,7 +1036,7 @@ function updateNavigation(position) {
   ui.currentStreet.textContent = segment.label;
   ui.progressPercent.textContent = `${Math.round(overall * 100)}%`;
   ui.overallProgress.style.width = `${Math.round(overall * 100)}%`;
-  ui.activeLegSummary.textContent = `Step ${state.activeLeg + 1} of ${route.segments.length} · ${segment.live ? "Live timing" : "Scheduled or estimated timing"} · ${segment.from?.name || "Start"} → ${segment.to?.name || "Next point"}`;
+  ui.activeLegSummary.textContent = `Step ${state.activeLeg + 1} of ${route.segments.length} · ${segment.live ? "Live timing" : "Scheduled or estimated timing"} · ${segment.from?.name || "Start"} to ${segment.to?.name || "Next point"}`;
   ui.previousLeg.disabled = state.activeLeg === 0;
   ui.nextLeg.textContent = state.activeLeg === route.segments.length - 1 ? "Finish trip" : "Next step";
   renderLegList(state.activeLeg);

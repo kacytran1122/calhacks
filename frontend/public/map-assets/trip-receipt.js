@@ -100,7 +100,7 @@ export function mountTripReceipt() {
       const service = document.createElement("b");
       service.textContent = `${leg.service} · ${leg.mode}`;
       const journey = document.createElement("small");
-      journey.textContent = `Planned: ${leg.from} → ${leg.to}`;
+      journey.textContent = `Planned: ${leg.from} to ${leg.to}`;
       const status = document.createElement("span");
       status.textContent = leg.status === "demo_receipt_recorded" ? `Demo receipt recorded · ${usd(leg.amountCents)}` : "No payment recorded";
       item.append(service, journey, status);
@@ -202,7 +202,7 @@ export function mountTripReceipt() {
     const lines = ["S’mile consolidated trip demo receipt", "SIMULATION ONLY — NO FUNDS MOVED", "", `Summary reference: ${receipt.id}`, `Journey: ${receipt.journeyId}`, `Planned start: ${receipt.from}`, `Planned destination: ${receipt.to}`, `Created: ${receipt.createdAt}`, `Recorded demo total: ${usd(receipt.totalRecordedCents)} USD`, ""];
     if (receipt.totalRecordedCents === 0) lines.push("No simulated payments recorded. This is not the actual cost of the journey.", "");
     receipt.legs.forEach((leg, index) => {
-      lines.push(`${index + 1}. ${leg.service} (${leg.mode})`, `Planned: ${leg.from} → ${leg.to}`, leg.status === "demo_receipt_recorded" ? `Demo receipt recorded: ${usd(leg.amountCents)} USD · Receipt ${leg.receiptId}` : "No payment recorded", "");
+      lines.push(`${index + 1}. ${leg.service} (${leg.mode})`, `Planned: ${leg.from} to ${leg.to}`, leg.status === "demo_receipt_recorded" ? `Demo receipt recorded: ${usd(leg.amountCents)} USD · Receipt ${leg.receiptId}` : "No payment recorded", "");
     });
     lines.push("The total sums saved demo receipts only. Missing records are not free or paid rides.", "This summary creates no additional payment. No real Visa API was used.", "No funds were charged, transferred, or paid to an operator.", "This is not an operator receipt, does not validate a ticket, and is not valid for reimbursement.", "Completion was confirmed by the traveler. GPS and operator proof were not collected.");
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" }));
@@ -248,7 +248,7 @@ export function mountTripReceipt() {
       state.phase = "checking";
       state.previousFocus = document.activeElement;
       state.revision += 1;
-      ui.journey.textContent = `${context.from} → ${context.to}`;
+      ui.journey.textContent = `${context.from} to ${context.to}`;
       update();
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.setAttribute("open", "");

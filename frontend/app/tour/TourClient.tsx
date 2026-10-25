@@ -552,10 +552,10 @@ export function TourClient() {
 
       <div className={styles.dpad} aria-label="Movement controls">
         {[
-          ["ArrowUp", "↑", "Move forward", styles.up],
-          ["ArrowLeft", "←", "Turn left", styles.left],
-          ["ArrowDown", "↓", "Move backward", styles.down],
-          ["ArrowRight", "→", "Turn right", styles.right],
+          ["ArrowUp", "F", "Move forward", styles.up],
+          ["ArrowLeft", "L", "Turn left", styles.left],
+          ["ArrowDown", "B", "Move backward", styles.down],
+          ["ArrowRight", "R", "Turn right", styles.right],
         ].map(([code, symbol, label, position]) => (
           <button
             className={position}
@@ -579,7 +579,7 @@ export function TourClient() {
         <br />
         <span className={styles.role}>{activeRoom.role}</span>
         <br />
-        <span>WASD / arrows to walk · mouse to look · Shift to move faster · Esc releases mouse</span>
+        <span>WASD / direction keys to walk · mouse to look · Shift to move faster · Esc releases mouse</span>
       </div>
     </main>
   );

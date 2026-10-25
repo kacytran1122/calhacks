@@ -78,3 +78,55 @@ test("close readiness surfaces unresolved work without changing the books", () =
   assert.equal(report.ready, false);
   assert.ok(report.issues.length > 0);
 });
+
+test("close readiness ignores unusable card authorization evidence", () => {
+  const { state } = buildSeed();
+  const baseline = closeReadiness(state);
+  const common = {
+    tripId: state.trips[0]!.id,
+    kind: "card_auth" as const,
+    source: "malformed authorization feed",
+    fetchedAt: "2026-10-24T12:03:00Z",
+    provenance: "live" as const,
+  };
+  state.evidence.push(
+    { ...common, id: "EV-auth-error-a", status: "error", data: { result: "approved", currency: "USD", amountCents: 1_000, idempotencyKey: "a".repeat(32) } },
+    { ...common, id: "EV-auth-error-b", status: "blocked", data: { result: "approved", currency: "USD", amountCents: 1_000, idempotencyKey: "a".repeat(32) } },
+    { ...common, id: "EV-auth-cad", status: "ok", data: { result: "approved", currency: "CAD", amountCents: 1_000, idempotencyKey: "b".repeat(32) } },
+    { ...common, id: "EV-auth-string", status: "ok", data: { result: "approved", currency: "USD", amountCents: "1000", idempotencyKey: "c".repeat(32) } },
+    { ...common, id: "EV-auth-bad-key-a", status: "ok", data: { result: "approved", currency: "USD", amountCents: 1_000, idempotencyKey: "not-a-valid-key" } },
+    { ...common, id: "EV-auth-bad-key-b", status: "ok", data: { result: "approved", currency: "USD", amountCents: 1_000, idempotencyKey: "not-a-valid-key" } },
+  );
+
+  const report = closeReadiness(state);
+  assert.equal(report.authorizedCents, baseline.authorizedCents);
+  assert.equal(report.duplicateAuthorizations, baseline.duplicateAuthorizations);
+  assert.equal(Number.isSafeInteger(report.authorizedCents), true);
+});
+
+test("close readiness totals and de-duplicates only valid approved USD authorizations", () => {
+  const { state } = buildSeed();
+  const baseline = closeReadiness(state);
+  const key = "d".repeat(32);
+  state.evidence.push(
+    { id: "EV-auth-valid-a", tripId: state.trips[0]!.id, kind: "card_auth", source: "authorization feed", fetchedAt: "2026-10-24T12:03:00Z", status: "ok", provenance: "live", data: { result: "approved", currency: "USD", amountCents: 1_000, idempotencyKey: key } },
+    { id: "EV-auth-valid-b", tripId: state.trips[1]!.id, kind: "card_auth", source: "authorization feed", fetchedAt: "2026-10-24T12:04:00Z", status: "ok", provenance: "live", data: { result: "approved", currency: "usd", amountCents: 1_500, idempotencyKey: key } },
+  );
+
+  const report = closeReadiness(state);
+  assert.equal(report.authorizedCents, baseline.authorizedCents + 2_500);
+  assert.equal(report.duplicateAuthorizations, baseline.duplicateAuthorizations + 1);
+});
+
+test("close readiness fails closed when valid authorization totals overflow safe cents", () => {
+  const { state } = buildSeed();
+  state.evidence.push(
+    { id: "EV-auth-overflow-a", tripId: state.trips[0]!.id, kind: "card_auth", source: "authorization feed", fetchedAt: "2026-10-24T12:03:00Z", status: "ok", provenance: "live", data: { result: "approved", currency: "USD", amountCents: Number.MAX_SAFE_INTEGER, idempotencyKey: "e".repeat(32) } },
+    { id: "EV-auth-overflow-b", tripId: state.trips[1]!.id, kind: "card_auth", source: "authorization feed", fetchedAt: "2026-10-24T12:04:00Z", status: "ok", provenance: "live", data: { result: "approved", currency: "USD", amountCents: 1, idempotencyKey: "f".repeat(32) } },
+  );
+
+  const report = closeReadiness(state);
+  assert.equal(Number.isSafeInteger(report.authorizedCents), true);
+  assert.equal(report.ready, false);
+  assert.ok(report.issues.some((issue) => /authorized card total exceeds the safe integer cents range/i.test(issue)));
+});

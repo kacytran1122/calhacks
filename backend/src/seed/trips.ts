@@ -182,7 +182,7 @@ export function buildSeed(): { state: State; answerKey: Record<string, AnswerKey
       school: davis, method: "out_of_pocket", quote: 2400, bankLines: null,
       cardAuth: { amount: 2750, currency: "USD", declined: "amount_exceeds_mandate" },
       receipt: { amount: 2750 },
-      key: { expected: "hold_price_changed", needsHuman: true, payCents: 0, plant: "Fare rose $24.00→$27.50 after approval; the mandate declined it, traveler paid personally" },
+      key: { expected: "hold_price_changed", needsHuman: true, payCents: 0, plant: "Fare rose from $24.00 to $27.50 after approval; the mandate declined it, traveler paid personally" },
     },
     2: {
       school: stanford, method: "out_of_pocket", mode: "rideshare", merchant: "rideshare", quote: 3820, bankLines: null, cardAuth: null,

@@ -10,7 +10,7 @@ import { compareRoutes } from "./agents/route";
 import { scoutEvent, type LensHints } from "./agents/scout";
 import { createMandate } from "../visa/visaSim";
 import { postEntry, type JournalLine } from "../hyphenate/ledger";
-import { fmt, sum } from "./money";
+import { fmt } from "./money";
 import { assertNotSelfApproval, authorize, PermissionDenied } from "./permissions";
 import { capFor, POLICY } from "../hyphenate/policy";
 import type { State } from "./store";
@@ -20,9 +20,25 @@ import { bindApproval } from "../hyphenate/financeControls";
 
 const recon: Actor = { kind: "agent", id: "reconciler" };
 const orch: Actor = { kind: "agent", id: "orchestrator" };
+const INVALID_REFUND_TOPIC = "invalid_refund_evidence_review";
 
-const charged = (state: State, tripId: string): Cents =>
-  sum(state.evidence.filter((e) => e.tripId === tripId && e.kind === "bank_line").map((e) => Number(e.data.amountCents)));
+const charged = (state: State, tripId: string): Cents => {
+  const amounts = state.evidence
+    .filter((e) => e.tripId === tripId
+      && e.kind === "bank_line"
+      && e.status === "ok"
+      && String(e.data.currency ?? "").toUpperCase() === "USD"
+      && typeof e.data.amountCents === "number"
+      && Number.isSafeInteger(e.data.amountCents)
+      && e.data.amountCents > 0)
+    .map((e) => e.data.amountCents as Cents);
+  let total = 0;
+  for (const amount of amounts) {
+    if (!Number.isSafeInteger(total + amount)) return 0;
+    total += amount;
+  }
+  return total;
+};
 
 function post(state: State, trip: Trip, memo: string, lines: JournalLine[], refs: string[], by: Actor = recon) {
   return postEntry(state, {
@@ -73,16 +89,29 @@ export function applyDecision(state: State, trip: Trip, d: ReturnType<typeof dec
   const card = charged(state, trip.id);
 
   if (d.code === "recover_refund") {
+    const refund = state.evidence.find((e) => e.tripId === trip.id
+      && e.kind === "refund"
+      && d.refs.includes(e.id)
+      && e.status === "ok"
+      && e.data.processed === false
+      && String(e.data.currency ?? "").toUpperCase() === "USD"
+      && typeof e.data.amountCents === "number"
+      && Number.isSafeInteger(e.data.amountCents)
+      && e.data.amountCents > 0
+      && e.data.amountCents === -d.payCents);
+    if (!refund) throw new Error("the exact valid pending refund evidence is missing");
     post(state, trip, `Card refund reverses travel grant (R11)`, [dr("2100", -d.payCents), cr("5100", -d.payCents)], d.refs);
-    const refund = state.evidence.find((e) => e.tripId === trip.id && e.kind === "refund");
-    if (refund) refund.data.processed = true;
-    trip.state = "closed";
+    refund.data.processed = true;
+    trip.state = state.evidence.some((e) => e.tripId === trip.id && e.kind === "refund" && e.data.processed === false) ? "reimbursed" : "closed";
     return;
   }
   if (d.needsHuman) {
-    if (trip.method === "virtual_card" && card > 0) post(state, trip, `Parked in suspense pending ${askedOf} — ${d.code}`, [dr("1300", card), cr("2100", card)], d.refs);
+    const pendingRefundHold = trip.state === "reimbursed"
+      && d.code === "require_payment_evidence"
+      && state.evidence.some((e) => e.tripId === trip.id && e.kind === "refund" && e.data.processed === false && d.refs.includes(e.id));
+    if (!pendingRefundHold && trip.method === "virtual_card" && card > 0) post(state, trip, `Parked in suspense pending ${askedOf} — ${d.code}`, [dr("1300", card), cr("2100", card)], d.refs);
     trip.state = "needs_human";
-    ask(state, trip, "reconcile", askedOf ?? "controller", d.question ?? "Review needed", options ?? [{ id: "approve", label: "Approve" }, { id: "reject", label: "Reject" }], { code: d.code });
+    ask(state, trip, "reconcile", askedOf ?? "controller", d.question ?? "Review needed", options ?? [{ id: "approve", label: "Approve" }, { id: "reject", label: "Reject" }], { code: d.code, ...(pendingRefundHold ? { topic: INVALID_REFUND_TOPIC } : {}) });
     return;
   }
   if (d.code === "deny_no_show") {
@@ -120,6 +149,197 @@ export async function tick(state: State, opts: { explainWithClaude?: boolean; li
   return done;
 }
 
+const MAP_COMPLETION_TOPIC = "authenticated_map_completion";
+const UNBOOKED_COMPLETION_TOPIC = "unbooked_map_completion_review";
+
+function unbookedCompletionDecision(state: State, trip: Trip, completionId: string, attendanceId: string, stateAtCompletion: string, at: string): ReturnType<typeof decide> {
+  return {
+    code: "require_payment_evidence",
+    payCents: 0,
+    reasons: [
+      `Map guidance was finished while the trip was ${stateAtCompletion}; there is no completed booking authorization to reconcile.`,
+      "A check-in or organizer attendance response does not replace traveler approval, an operator receipt, or a bank settlement.",
+      "A controller must keep the trip unpaid unless valid approval and payment evidence are attached and reviewed.",
+    ],
+    refs: [completionId, attendanceId, ...state.evidence.filter((e) => e.tripId === trip.id && ["quote", "card_auth", "bank_line", "receipt"].includes(e.kind)).map((e) => e.id)],
+    needsHuman: true,
+    question: "This route was completed before a booked authorization existed. Keep it unpaid unless finance receives valid approval and payment evidence?",
+    askedOf: "controller",
+    options: [{ id: "reject", label: "Do not reimburse without evidence" }],
+    decidedAt: at,
+    decidedBy: "reconciler",
+  };
+}
+
+function applyUnbookedCompletionDecision(state: State, trip: Trip, decision: ReturnType<typeof decide>) {
+  const { askedOf, options, ...stored } = decision;
+  trip.decision = stored;
+  trip.state = "needs_human";
+  appendAudit(state, {
+    actor: recon,
+    action: "decision.made",
+    subject: trip.id,
+    reason: `${decision.code}: ${decision.reasons.join(" ")}`,
+    refs: decision.refs,
+    at: decision.decidedAt,
+  });
+  ask(
+    state,
+    trip,
+    "reconcile",
+    askedOf ?? "controller",
+    decision.question ?? "Keep this unbooked trip unpaid pending evidence review?",
+    options ?? [{ id: "reject", label: "Do not reimburse without evidence" }],
+    { code: decision.code, topic: UNBOOKED_COMPLETION_TOPIC },
+  );
+}
+
+export interface MapTripCompletionScope {
+  tripId: string;
+  travelerId: string;
+}
+
+/**
+ * Records a traveler's authenticated map-finish signal without pretending it is
+ * a receipt, settlement, or venue check-in. Missing attendance evidence is sent
+ * to an organizer before the ordinary reconciler is allowed to decide payment.
+ */
+function completeTripFromMapMutating(state: State, scope: MapTripCompletionScope, now = new Date()) {
+  const trip = state.trips.find((candidate) => candidate.id === scope.tripId && candidate.travelerId === scope.travelerId);
+  if (!trip || !trip.id.startsWith("TR-L")) throw new PermissionDenied("the map handoff is not authorized for this live trip");
+
+  const existing = state.evidence.find((e) => e.tripId === trip.id && e.kind === "trip_completion");
+  if (existing) {
+    return {
+      replayed: true,
+      tripState: trip.state,
+      decisionCode: trip.decision?.code,
+      needsHuman: trip.state === "needs_human",
+      evidenceId: existing.id,
+    };
+  }
+  if (!(["planned", "pre_approved", "booked"] as const).includes(trip.state as "planned" | "pre_approved" | "booked"))
+    throw new Error("only an active live trip can be completed from the map");
+
+  const at = now.toISOString();
+  const tripStateAtCompletion = trip.state;
+  const completion = {
+    id: `EV-${trip.id}-map-completion`,
+    tripId: trip.id,
+    kind: "trip_completion" as const,
+    source: "Authenticated Photon map handoff",
+    fetchedAt: at,
+    status: "ok" as const,
+    provenance: "live" as const,
+    data: {
+      signal: "route_guidance_finished",
+      attestedBy: "traveler_browser",
+      reimbursementEvidence: false,
+      operatorReceipt: false,
+      bankSettlement: false,
+      venueCheckin: false,
+      tripStateAtCompletion,
+    },
+    note: "This proves only that authenticated route guidance was finished. It is not proof of travel, attendance, purchase, or payment.",
+  };
+  state.evidence.push(completion);
+  trip.submittedAt = at;
+  appendAudit(state, {
+    actor: { kind: "human", id: trip.travelerId, role: "traveler" },
+    action: "trip.map_completed",
+    subject: trip.id,
+    reason: "Authenticated route guidance finished; recorded as a non-financial signal and sent to post-trip controls",
+    refs: [completion.id],
+    at,
+  });
+
+  const staleFinancialItems = state.inbox.filter((item) => item.tripId === trip.id && item.kind !== "notice" && item.status === "open");
+  for (const item of staleFinancialItems) {
+    item.status = "answered";
+    item.answer = { by: "agent:orchestrator", option: "closed", note: "Closed after authenticated post-trip completion", at };
+  }
+  const mandate = state.mandates.find((candidate) => candidate.id === trip.mandateId);
+  if (mandate && (mandate.status === "pending" || mandate.status === "approved")) mandate.status = "void";
+  if (staleFinancialItems.length || mandate?.status === "void") {
+    appendAudit(state, {
+      actor: orch,
+      action: "pretrip_work.closed_after_trip",
+      subject: trip.id,
+      reason: "Closed stale pre-trip approval and exception work after authenticated post-trip completion; it cannot authorize a later charge or payout",
+      refs: [...staleFinancialItems.map((item) => item.id), ...(mandate ? [mandate.id] : [])],
+      at,
+    });
+  }
+
+  const attendance = state.evidence.find((e) => e.tripId === trip.id && e.kind === "checkin" && e.status === "ok" && ["present", "checked_in", "absent"].includes(String(e.data.result)));
+  if (attendance) {
+    trip.state = "submitted";
+    const unbooked = tripStateAtCompletion !== "booked";
+    const decision = unbooked
+      ? unbookedCompletionDecision(state, trip, completion.id, attendance.id, tripStateAtCompletion, at)
+      : decide(state, trip, now);
+    if (unbooked) applyUnbookedCompletionDecision(state, trip, decision);
+    else applyDecision(state, trip, decision);
+    return { replayed: false, tripState: trip.state, decisionCode: decision.code, needsHuman: decision.needsHuman, evidenceId: completion.id };
+  }
+
+  const event = state.events.find((candidate) => candidate.id === trip.eventId);
+  const decision: Decision = {
+    code: "require_checkin",
+    payCents: 0,
+    reasons: [
+      "The authenticated traveler finished the map route, but that app action is not venue attendance evidence.",
+      "No operator receipt, bank settlement, or venue check-in is inferred from map progress or from a Visa simulation receipt.",
+      "An organizer must confirm attendance before the financial reconciler evaluates reimbursement.",
+    ],
+    refs: [completion.id],
+    needsHuman: true,
+    question: `Can you confirm that this traveler attended ${event?.name ?? "the event"}? Finishing map guidance alone is not attendance proof.`,
+    decidedAt: at,
+    decidedBy: "reconciler",
+  };
+  trip.decision = decision;
+  trip.state = "needs_human";
+  appendAudit(state, {
+    actor: recon,
+    action: "decision.made",
+    subject: trip.id,
+    reason: `${decision.code}: ${decision.reasons.join(" ")}`,
+    refs: decision.refs,
+    at,
+  });
+  ask(
+    state,
+    trip,
+    "reconcile",
+    "organizer",
+    decision.question!,
+    [
+      { id: "approve", label: "Confirm attendance" },
+      { id: "reject", label: "Could not confirm attendance" },
+    ],
+    { code: decision.code, topic: MAP_COMPLETION_TOPIC },
+  );
+  return { replayed: false, tripState: trip.state, decisionCode: decision.code, needsHuman: true, evidenceId: completion.id };
+}
+
+/**
+ * The state store deliberately persists authorization and ledger audit failures.
+ * Keep the map-completion unit atomic so one of those failures cannot leave the
+ * completion marker behind and make a later retry look successful.
+ */
+export function completeTripFromMap(state: State, scope: MapTripCompletionScope, now = new Date()) {
+  const before = structuredClone(state);
+  try {
+    return completeTripFromMapMutating(state, scope, now);
+  } catch (error) {
+    const target = state as unknown as Record<string, unknown>;
+    for (const key of Object.keys(target)) delete target[key];
+    Object.assign(target, before);
+    throw error;
+  }
+}
+
 export interface Answerer {
   id: string;
   role: HumanRole;
@@ -131,6 +351,7 @@ export function answer(state: State, itemId: string, who: Answerer, option: stri
   const trip = state.trips.find((t) => t.id === item.tripId)!;
   const actor: Actor = { kind: "human", id: who.id, role: who.role };
   authorize(state, actor, "approve", trip.id);
+  if (item.kind === "mandate_approval" && trip.state !== "planned") throw new Error("this trip is no longer awaiting mandate approval");
 
   const roleOk = who.role === item.askedOf || who.role === "controller";
   const travelerOk = item.askedOf !== "traveler" || who.id === trip.travelerId || who.role === "controller";
@@ -138,6 +359,7 @@ export function answer(state: State, itemId: string, who: Answerer, option: stri
     appendAudit(state, { actor, action: "permission.denied", subject: trip.id, reason: `${who.id} (${who.role}) can't answer a question for ${item.askedOf}` });
     throw new PermissionDenied(`this question is for the ${item.askedOf}`);
   }
+  if (!item.options.some((candidate) => candidate.id === option)) throw new Error("answer option is not available for this question");
   if (item.kind === "notice") {
     item.status = "answered";
     item.answer = { by: who.id, option, note, at: new Date().toISOString() };
@@ -149,11 +371,62 @@ export function answer(state: State, itemId: string, who: Answerer, option: stri
 
   item.status = "answered";
   item.answer = { by: who.id, option, note, at: new Date().toISOString() };
-  trip.approvals.push({ by: who.id, role: who.role, at: item.answer.at, subject: item.kind === "mandate_approval" ? "mandate" : "reimbursement", decision: option === "reject" ? "reject" : "approve", note });
   appendAudit(state, { actor, action: "human.answered", subject: trip.id, reason: `${option}${note ? ` — "${note}"` : ""}`, refs: [item.id, who.id] });
+
+  if (item.meta.topic === MAP_COMPLETION_TOPIC) return resolveMapCompletionAttendance(state, trip, item, who, option);
+  if (item.meta.topic === UNBOOKED_COMPLETION_TOPIC) {
+    trip.state = "denied";
+    return { tripId: trip.id, outcome: "kept unpaid pending valid booking and payment evidence" };
+  }
+  if (item.meta.topic === INVALID_REFUND_TOPIC) {
+    trip.state = "closed";
+    return { tripId: trip.id, outcome: "invalid refund retained as evidence and left unposted" };
+  }
+
+  trip.approvals.push({ by: who.id, role: who.role, at: item.answer.at, subject: item.kind === "mandate_approval" ? "mandate" : "reimbursement", decision: option === "reject" ? "reject" : "approve", note });
 
   if (item.kind === "mandate_approval") return resolveMandate(state, trip, item, who, option);
   return resolveReconcile(state, trip, item, option);
+}
+
+function resolveMapCompletionAttendance(state: State, trip: Trip, item: InboxItem, who: Answerer, option: string) {
+  const completion = state.evidence.find((e) => e.tripId === trip.id && e.kind === "trip_completion");
+  if (!completion) throw new Error("the authenticated map completion evidence is missing");
+  const result = option === "approve" ? "present" : "absent";
+  const attendanceId = `EV-${trip.id}-organizer-attendance`;
+  if (!state.evidence.some((e) => e.id === attendanceId)) {
+    state.evidence.push({
+      id: attendanceId,
+      tripId: trip.id,
+      kind: "checkin",
+      source: "Organizer post-trip confirmation",
+      fetchedAt: item.answer!.at,
+      status: "ok",
+      provenance: "live",
+      data: { result, confirmedBy: who.id, confirmationRole: who.role, mapCompletionEvidenceId: completion.id },
+      note: "Human attendance confirmation. This is separate from the map signal and from any Visa simulation receipt.",
+    });
+  }
+  appendAudit(state, {
+    actor: { kind: "human", id: who.id, role: who.role },
+    action: "attendance.confirmed",
+    subject: trip.id,
+    reason: result === "present" ? "Organizer confirmed event attendance" : "Organizer could not confirm event attendance",
+    refs: [item.id, completion.id, attendanceId],
+    at: item.answer!.at,
+  });
+  trip.state = "submitted";
+  const stateAtCompletion = String(completion.data.tripStateAtCompletion ?? "booked");
+  const unbooked = stateAtCompletion !== "booked";
+  const decision: ReturnType<typeof decide> = unbooked
+    ? unbookedCompletionDecision(state, trip, completion.id, attendanceId, stateAtCompletion, item.answer!.at)
+    : decide(state, trip, new Date(item.answer!.at));
+  if (unbooked) applyUnbookedCompletionDecision(state, trip, decision);
+  else applyDecision(state, trip, decision);
+  return {
+    tripId: trip.id,
+    outcome: decision.needsHuman ? `sent for ${decision.code} review` : decision.code,
+  };
 }
 
 function resolveMandate(state: State, trip: Trip, item: InboxItem, who: Answerer, option: string) {
@@ -202,7 +475,7 @@ function resolveReconcile(state: State, trip: Trip, item: InboxItem, option: str
     trip.state = "reimbursed";
   } else {
     if (parked) post(state, trip, `Cleared suspense: ${item.askedOf} answered "${option}" — recoverable from traveler`, [dr("1200", card), cr("1300", card)], refs);
-    if (d.code === "require_checkin") {
+    if (d.code === "require_checkin" && !state.evidence.some((e) => e.tripId === trip.id && e.kind === "checkin" && e.status === "ok" && (e.data.result === "present" || e.data.result === "checked_in"))) {
       const ev = state.events.find((e) => e.id === trip.eventId);
       state.noShows.push({ travelerId: trip.travelerId, eventId: trip.eventId, date: (ev?.startsAt ?? "").slice(0, 10), tripId: trip.id });
     }
@@ -317,7 +590,7 @@ async function createTripPlan(state: State, args: Omit<PlanTripArgs, "requestKey
       appendAudit(state, { actor: orch, action: "plan.awaiting_fare", subject: trip.id, reason: "Live routes were found without an auditable total fare; no payment mandate was created", refs: g.evidence.map((e) => e.id) });
       return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: null };
     }
-    const q = ask(state, trip, "reconcile", "controller", `No option for ${g.homeLabel ?? args.zip} → ${event.name} fits the ${fmt(routes.cap)} cap (R1). Approve an exception?`, [{ id: "approve", label: "Approve exception" }, { id: "reject", label: "Decline" }], {});
+    const q = ask(state, trip, "reconcile", "controller", `No option from ${g.homeLabel ?? args.zip} to ${event.name} fits the ${fmt(routes.cap)} cap (R1). Approve an exception?`, [{ id: "approve", label: "Approve exception" }, { id: "reject", label: "Decline" }], {});
     return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, carpool, inbox: q };
   }
   trip.mode = routes.pick.mode;
