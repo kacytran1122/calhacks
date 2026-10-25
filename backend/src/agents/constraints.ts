@@ -10,7 +10,7 @@ export const TravelConstraintsSchema = z.object({
   timezone: z.string().max(80).nullable(),
   followUpQuestion: z.string().max(300).nullable(),
 });
-export const TravelConstraintsPlanSchema = TravelConstraintsSchema.extend({ raw: z.string().min(1).max(1_500) });
+export const TravelConstraintsPlanSchema = TravelConstraintsSchema.extend({ raw: z.string().min(1).max(5_000) });
 
 export type TravelConstraints = z.infer<typeof TravelConstraintsSchema>;
 

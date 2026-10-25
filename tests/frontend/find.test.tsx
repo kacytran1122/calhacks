@@ -197,6 +197,64 @@ test("Claude constraint step asks one follow-up when a requirement is unclear", 
   expect(screen.getByRole("button", { name: "Answer and compare routes" })).toBeDisabled();
 });
 
+test("keeps earlier clarification answers and opens an empty field for each new question", async () => {
+  const event = {
+    key: "uci",
+    source: "luma",
+    name: "UCI Build Night",
+    startsAt: "2026-10-25T17:00:00Z",
+    city: "Irvine, CA",
+    locationPrecision: "exact",
+    url: "https://lu.ma/uci",
+    kind: "tech",
+    distanceMiles: 4,
+    fetchedAt: "2026-10-24T00:00:00Z",
+    via: "direct",
+  };
+  const constraintBodies: string[] = [];
+  const questions = [
+    "Which UCI building should S’mile use?",
+    "What date should you arrive?",
+    "Which time zone should S’mile use?",
+  ];
+  const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "/api/constraints") {
+      constraintBodies.push(String(init?.body));
+      const question = questions[constraintBodies.length - 1];
+      return response({ status: "needs_clarification", summary: "Need arrival details", destination: null, arriveBy: null, departAfter: null, timezone: null, followUpQuestion: question, parsedBy: "claude" });
+    }
+    return response({ ...result, events: [event] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<FindClient initialZip="92697" />);
+
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+  await user.click(await screen.findByRole("button", { name: "Plan my trip" }));
+  await user.type(screen.getByLabelText("Your maximum travel budget in dollars"), "100");
+  await user.type(screen.getByLabelText("Travel timing and destination requirements"), "I need to be at UCI by 10");
+  await user.click(screen.getByRole("button", { name: "Compare ways to get there" }));
+
+  const answer = await screen.findByLabelText("Answer Claude’s travel requirement question");
+  await user.type(answer, "Donald Bren Hall");
+  await user.click(screen.getByRole("button", { name: "Answer and compare routes" }));
+
+  expect(await screen.findByText("What date should you arrive?")).toBeVisible();
+  expect(screen.getByText("Donald Bren Hall")).toBeVisible();
+  expect(screen.getByLabelText("Answer Claude’s travel requirement question")).toHaveValue("");
+  await user.type(screen.getByLabelText("Answer Claude’s travel requirement question"), "October 25 at 10 AM");
+  await user.click(screen.getByRole("button", { name: "Answer and compare routes" }));
+
+  expect(await screen.findByText("Which time zone should S’mile use?")).toBeVisible();
+  expect(screen.getByText("Donald Bren Hall")).toBeVisible();
+  expect(screen.getByText("October 25 at 10 AM")).toBeVisible();
+  expect(screen.getByLabelText("Answer Claude’s travel requirement question")).toHaveValue("");
+  expect(constraintBodies[1]).toContain("Which UCI building should S’mile use?");
+  expect(constraintBodies[1]).toContain("Donald Bren Hall");
+  expect(constraintBodies[2]).toContain("Donald Bren Hall");
+  expect(constraintBodies[2]).toContain("October 25 at 10 AM");
+});
+
 test("shows the best route first with detailed steps, total cost, and alternatives", async () => {
   const event = {
     key: "lax-event",

@@ -54,6 +54,7 @@ type ConstraintReview = {
   followUpQuestion: string | null;
   parsedBy: "claude" | "rules";
 };
+type ConstraintAnswer = { question: string; answer: string };
 type RouteOption = { mode: string; costCents: number; costSource: string; pMiss: number; history: { trips: number; late: number }; withinCap: boolean; withinBudget: boolean };
 type RouteGuide = { mode: string; title: string; durationText: string | null; sourceUrl: string; sourceQuote: string; steps: { instruction: string; detail: string | null }[] };
 type FareItem = { mode: string; amountUsd: number; link: string; quote: string; routeTitle?: string; provider?: string; priceScope?: "route_total" | "published_ticket" | "day_pass"; fees?: "included" | "not_applicable" | "not_stated" };
@@ -446,6 +447,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
   const [budgetUsd, setBudgetUsd] = useState("");
   const [constraintText, setConstraintText] = useState("");
   const [constraintAnswer, setConstraintAnswer] = useState("");
+  const [constraintAnswers, setConstraintAnswers] = useState<ConstraintAnswer[]>([]);
   const [constraintReview, setConstraintReview] = useState<ConstraintReview | null>(null);
   const [reviewedConstraintText, setReviewedConstraintText] = useState("");
   const [includeSelfDrive, setIncludeSelfDrive] = useState(true);
@@ -468,7 +470,17 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
 
   const doPlan = () =>
     run("plan", async () => {
-      const rawConstraint = [constraintText.trim(), constraintAnswer.trim() ? `Additional detail: ${constraintAnswer.trim()}` : ""].filter(Boolean).join("\n");
+      const activeQuestion = constraintReview?.status === "needs_clarification"
+        ? constraintReview.followUpQuestion ?? "What exact place, date, time, and time zone should S’mile use?"
+        : null;
+      const submittedAnswer = constraintAnswer.trim();
+      const completedAnswers = submittedAnswer && activeQuestion
+        ? [...constraintAnswers, { question: activeQuestion, answer: submittedAnswer }]
+        : constraintAnswers;
+      const rawConstraint = [
+        constraintText.trim(),
+        ...completedAnswers.map(({ question, answer }) => `Follow-up question: ${question}\nTraveler's answer: ${answer}`),
+      ].filter(Boolean).join("\n\n");
       let reviewed = constraintReview;
       if (rawConstraint && (!reviewed || reviewedConstraintText !== rawConstraint)) {
         reviewed = await api<ConstraintReview>("/api/constraints", {
@@ -480,6 +492,10 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
         });
         setConstraintReview(reviewed);
         setReviewedConstraintText(rawConstraint);
+      }
+      if (submittedAnswer && activeQuestion) {
+        setConstraintAnswers(completedAnswers);
+        setConstraintAnswer("");
       }
       if (reviewed?.status === "needs_clarification") return;
       const p = await api<Plan>("/api/plan", {
@@ -575,17 +591,28 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
                 setConstraintText(e.target.value);
                 setConstraintReview(null);
                 setConstraintAnswer("");
+                setConstraintAnswers([]);
                 setReviewedConstraintText("");
               }}
               placeholder="For example: I need to arrive at SFO by 10:00 PM PT on October 25, or be at UCI by 10:00 AM PT."
               aria-label="Travel timing and destination requirements"
             />
           </label>
+          {constraintAnswers.length > 0 && (
+            <div className="fd-constraint-history" aria-label="Previous travel requirement answers">
+              {constraintAnswers.map(({ question, answer }, index) => (
+                <div key={`${question}-${index}`}>
+                  <span>{question}</span>
+                  <p>{answer}</p>
+                </div>
+              ))}
+            </div>
+          )}
           {constraintReview?.status === "needs_clarification" && (
             <div className="fd-constraint-question" role="status">
               <b>One detail before S’mile plans</b>
               <p>{constraintReview.followUpQuestion ?? "What exact place, date, time, and time zone should S’mile use?"}</p>
-              <input className="dk-in" value={constraintAnswer} onChange={(e) => setConstraintAnswer(e.target.value)} placeholder="Type your answer" aria-label="Answer Claude’s travel requirement question" />
+              <textarea key={constraintReview.followUpQuestion} className="dk-in" rows={2} maxLength={500} value={constraintAnswer} onChange={(e) => setConstraintAnswer(e.target.value)} placeholder="Type your answer" aria-label="Answer Claude’s travel requirement question" />
             </div>
           )}
           {constraintReview?.status === "ready" && <div className="fd-constraint-ready"><b>Claude understood</b><span>{constraintReview.summary}</span></div>}
