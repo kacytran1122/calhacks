@@ -27,7 +27,14 @@ materials = {
     "steel": ([0.38, 0.41, 0.43, 1.0], 0.28, 0.82),
     "concrete": ([0.58, 0.57, 0.54, 1.0], 0.95, 0.0),
     "accent": ([0.08, 0.27, 0.57, 1.0], 0.45, 0.0),
+    "cyan": ([0.18, 0.76, 0.92, 1.0], 0.38, 0.0),
+    "white": ([0.94, 0.95, 0.93, 1.0], 0.72, 0.0),
+    "wood": ([0.48, 0.25, 0.10, 1.0], 0.66, 0.0),
+    "screen": ([0.025, 0.07, 0.12, 1.0], 0.18, 0.18),
+    "warm": ([1.0, 0.58, 0.14, 1.0], 0.40, 0.0),
+    "red": ([0.66, 0.08, 0.10, 1.0], 0.52, 0.0),
     "landscape": ([0.18, 0.34, 0.18, 1.0], 1.0, 0.0),
+    "plant": ([0.10, 0.44, 0.20, 1.0], 0.96, 0.0),
     "path": ([0.53, 0.49, 0.43, 1.0], 1.0, 0.0),
 }
 
@@ -180,49 +187,137 @@ def chair(cx, cz, angle=0.0):
     box("frame", cx, cz+0.18, 0.45, 0.08, 0.48, 0.95, angle)
 
 
-# Entrance & check-in counter.
-event_table(-10.0, -4.9, 3.4, 0.85, 1.0, "accent")
-box("accent", -10.0, -5.25, 2.4, 0.10, 1.15, 1.75)
+def laptop(cx, cz, angle=0.0, y=0.83):
+    """Small open laptop silhouette for hacking and workshop tables."""
+    box("frame", cx, cz, 0.46, 0.34, y, y+0.035, angle)
+    ca, sa = math.cos(angle), math.sin(angle)
+    sx, sz = cx - 0.14 * sa, cz + 0.14 * ca
+    box("screen", sx, sz, 0.46, 0.035, y+0.03, y+0.37, angle)
 
-# Sponsor Galleria: compact booth counters with branded blue back panels.
+
+def monitor(cx, cz, angle=0.0, y=0.88):
+    box("steel", cx, cz, 0.08, 0.08, y, y+0.45, angle)
+    box("screen", cx, cz, 0.82, 0.08, y+0.40, y+0.92, angle)
+    box("cyan", cx, cz-0.046, 0.66, 0.015, y+0.48, y+0.80, angle)
+
+
+def planter(cx, cz, y=0.1):
+    box("concrete", cx, cz, 0.72, 0.72, y, y+0.55)
+    box("plant", cx, cz, 0.48, 0.48, y+0.55, y+1.20)
+
+
+def stanchion(cx, cz):
+    box("steel", cx, cz, 0.10, 0.10, 0.12, 1.05)
+    box("frame", cx, cz, 0.32, 0.32, 0.10, 0.17)
+
+
+# Entrance & check-in: welcome carpet, staffed-style counters, information
+# screens, and an empty queue system (no people).
+box("accent", -10.0, -5.7, 4.7, 1.35, 0.285, 0.315)
+for cx in (-11.2, -8.8):
+    event_table(cx, -4.7, 2.05, 0.85, 1.0, "accent")
+    box("cyan", cx, -5.14, 1.35, 0.08, 1.08, 1.48)
+    monitor(cx, -4.62, math.pi, 1.02)
+for cx, cz in [(-11.4,-6.1),(-8.6,-6.1),(-11.4,-5.35),(-8.6,-5.35)]:
+    stanchion(cx, cz)
+wall("cyan", -11.4,-5.35,-8.6,-5.35,0.88,0.94,0.055)
+planter(-12.6, -4.8)
+
+# Sponsor Galleria: individual branded booths, demo monitors, counters, and
+# a blue route through the gallery matching the sketch's sponsor corridor.
+box("accent", -3.7, 2.3, 0.55, 9.7, 0.285, 0.31, -0.36)
+booth_colors = ["accent", "cyan", "red", "warm", "accent"]
 for i, (cx, cz) in enumerate([(-5.8,3.4),(-5.8,1.6),(-5.8,-.2),(-3.8,5.5),(-1.4,5.5)]):
-    event_table(cx, cz, 1.45, 0.58, 0.78, "accent")
-    box("accent", cx, cz+0.34, 1.45, 0.08, 0.85, 1.68)
+    color = booth_colors[i]
+    event_table(cx, cz, 1.6, 0.62, 0.82, "white")
+    box(color, cx, cz+0.36, 1.7, 0.10, 0.88, 2.35)
+    box("white", cx, cz+0.29, 1.25, 0.04, 1.72, 2.12)
+    monitor(cx, cz-0.05, 0.0, 0.84)
+    box("frame", cx, cz+0.40, 1.9, 0.08, 2.35, 2.50)
 
-# Food service row at the north side of the Collins area.
+# Food service row: buffet counters, warming trays, overhead menu band,
+# beverage station, and standing café tables.
+box("warm", 9.9, 8.40, 8.1, 0.12, 2.05, 2.42)
 for cx in (7.2, 9.9, 12.6):
-    event_table(cx, 7.8, 2.1, 0.9, 0.92, "concrete")
-    box("accent", cx, 8.28, 1.45, 0.08, 1.0, 1.55)
+    event_table(cx, 7.8, 2.1, 0.9, 0.92, "white")
+    box("warm", cx, 8.28, 1.45, 0.08, 1.0, 1.55)
+    for dx in (-0.52, 0, 0.52):
+        box("steel", cx+dx, 7.72, 0.38, 0.44, 0.94, 1.02)
+box("steel", 14.1, 7.8, 1.0, 0.95, 0.28, 1.85)
+box("cyan", 14.1, 7.28, 0.72, 0.06, 1.05, 1.62)
+for cx in (7.5, 10.2, 12.9):
+    box("wood", cx, 6.25, 1.05, 1.05, 1.02, 1.12)
+    box("steel", cx, 6.25, 0.12, 0.12, 0.28, 1.02)
 
 # Collins Room hacking tables and chairs.
 for cz in (-1.4, 1.1, 3.6, 6.0):
-    event_table(11.2, cz, 5.2, 0.95, 0.78, "concrete")
+    event_table(11.2, cz, 5.2, 0.95, 0.78, "white")
     for cx in (9.4, 11.2, 13.0):
         chair(cx, cz-0.78)
         chair(cx, cz+0.78, math.pi)
+        laptop(cx, cz-0.23, 0.0)
+        laptop(cx, cz+0.23, math.pi)
+    box("accent", 11.2, cz, 1.05, 0.20, 0.80, 0.87)
+box("screen", 15.68, 2.8, 0.08, 3.4, 1.15, 2.85)
+box("cyan", 15.63, 2.8, 0.02, 2.85, 1.40, 2.58)
 
 # Founders' Room hacking setup.
 for cz in (-10.2, -7.9, -5.7):
-    event_table(2.0, cz, 5.7, 0.88, 0.78, "concrete")
+    event_table(2.0, cz, 5.7, 0.88, 0.78, "wood")
     for cx in (-0.1, 2.0, 4.1):
         chair(cx, cz-0.72)
         chair(cx, cz+0.72, math.pi)
+        laptop(cx, cz-0.20, 0.0)
+        laptop(cx, cz+0.20, math.pi)
+box("white", 6.82, -8.1, 0.08, 3.5, 1.0, 2.75)
+for x in (5.0, 5.7):
+    box("accent", x, -11.5, 0.55, 1.35, 0.34, 0.72)
 
-# Restroom wayfinding panels.
+# Restrooms: clear wayfinding, privacy partitions, sinks and mirrors.
 box("accent", 0.2, -0.94, 0.9, 0.08, 1.45, 2.35)
 box("accent", 2.6, -0.94, 0.9, 0.08, 1.45, 2.35)
+for x in (0.15, 1.35, 2.55):
+    box("white", x, -2.75, 0.95, 1.35, 0.28, 2.25)
+for x in (0.4, 1.7, 3.0):
+    box("white", x, -1.30, 0.78, 0.42, 0.70, 0.88)
+    box("glass", x, -1.53, 0.72, 0.04, 1.12, 2.05)
 
-# Second-floor workshop tables.
+# Second-floor workshop classroom: presenter stage, screen, podium, and
+# laptop-equipped learning tables arranged toward the teaching wall.
+box("wood", 2.0, 4.45, 5.9, 1.25, 4.22, 4.42)
+box("screen", 2.0, 5.10, 4.5, 0.08, 5.05, 7.10)
+box("cyan", 2.0, 5.04, 3.95, 0.02, 5.32, 6.82)
+box("accent", -0.25, 4.35, 0.85, 0.65, 4.42, 5.62)
 for cz in (-3.6, -1.0, 1.6, 4.0):
-    event_table(-0.8, cz, 5.5, 0.95, 4.95, "concrete", 4.22)
+    event_table(-0.8, cz, 5.5, 0.95, 4.95, "white", 4.22)
     for cx in (-2.8, -0.8, 1.2):
         box("frame", cx, cz-0.75, 0.45, 0.45, 4.52, 4.62)
         box("frame", cx, cz+0.75, 0.45, 0.45, 4.52, 4.62)
+        laptop(cx, cz-0.18, 0.0, 5.0)
 
-# Northeast networking zone with standing-height tables.
+# Northeast networking patio: cocktail tables, lounge benches, planters, and
+# a warm overhead light canopy that makes the social role obvious.
 for cx, cz in [(5.4,5.0),(8.1,5.0),(10.8,5.0),(6.8,8.0),(9.6,8.0),(12.0,9.6)]:
-    box("concrete", cx, cz, 1.15, 1.15, 5.52, 5.62)
+    box("wood", cx, cz, 1.15, 1.15, 5.52, 5.62)
     box("steel", cx, cz, 0.12, 0.12, 4.25, 5.52)
+for cx, cz, sx, sz in [(5.1,10.2,2.8,.72),(9.0,10.2,2.8,.72),(12.7,6.4,.72,2.8)]:
+    box("accent", cx, cz, sx, sz, 4.58, 4.96)
+    box("frame", cx, cz, sx, sz, 4.25, 4.58)
+for cx, cz in [(4.0,3.6),(13.0,3.7),(4.1,10.5),(13.0,10.5)]:
+    planter(cx, cz, 4.22)
+for z in (4.1, 7.1, 10.1):
+    wall("warm", 3.6,z,13.2,z,7.05,7.12,0.035)
+
+# First-floor patios: outdoor hacking tables, shade frames, and planting.
+for cx, cz in [(20.5,0.2),(20.5,4.0),(20.5,7.6),(6.0,-14.6),(10.7,-14.6),(15.2,-14.6)]:
+    event_table(cx, cz, 3.2, 0.9, 0.82, "wood")
+    laptop(cx-0.75, cz, 0.0)
+    laptop(cx+0.75, cz, math.pi)
+for cx, cz in [(18.0,-3.0),(23.0,-3.0),(18.0,10.0),(23.0,10.0),(3.2,-18.1),(18.1,-18.1)]:
+    planter(cx, cz)
+for cx, cz in [(20.5,2.0),(10.7,-14.6)]:
+    box("steel", cx, cz, 0.12, 0.12, 0.10, 2.75)
+    box("cyan", cx, cz, 5.2, 3.1, 2.68, 2.78)
 
 
 def pack_f32(values):
@@ -339,7 +434,7 @@ body{background:#dce6ef}canvas{display:block}
 .place{width:100%;text-align:left;border:0;border-radius:9px;background:transparent;padding:8px 9px;color:#263850;cursor:pointer}.place:hover{background:#eaf5fa}.place small{display:block;color:#718093;margin-top:2px}
 #labels{position:fixed;inset:0;pointer-events:none}.tag{position:absolute;transform:translate(-50%,-50%);pointer-events:auto;border:1px solid #fff;background:#173f7ae8;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:750;box-shadow:0 6px 18px #0a1e3850;cursor:pointer;white-space:nowrap}.tag:after{content:"";position:absolute;left:50%;top:100%;height:12px;border-left:2px solid #173f7acc}.tag:hover{background:#0e2c59}
 .hud{display:none;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#0f2138dd;color:#fff;padding:11px 15px;border-radius:12px;box-shadow:0 8px 28px #0005;text-align:center;backdrop-filter:blur(10px)}
-.hud b{color:#85e5fa}.crosshair{display:none;position:fixed;left:50%;top:50%;width:12px;height:12px;margin:-6px}.crosshair:before,.crosshair:after{content:"";position:absolute;background:#fff;box-shadow:0 0 2px #000}.crosshair:before{width:12px;height:2px;top:5px}.crosshair:after{height:12px;width:2px;left:5px}
+.hud b{color:#85e5fa}.hud .role{display:inline-block;max-width:520px;margin-top:3px;font-size:12px;color:#dce8f5}.crosshair{display:none;position:fixed;left:50%;top:50%;width:12px;height:12px;margin:-6px}.crosshair:before,.crosshair:after{content:"";position:absolute;background:#fff;box-shadow:0 0 2px #000}.crosshair:before{width:12px;height:2px;top:5px}.crosshair:after{height:12px;width:2px;left:5px}
 .welcome{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:linear-gradient(135deg,#0d2440e8,#173f7ad9);padding:24px;backdrop-filter:blur(8px)}.welcome-card{max-width:540px;background:#fffef7;padding:30px;border-radius:22px;box-shadow:0 24px 80px #06162a88;text-align:center}.welcome .eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#55718f;font-weight:800}.welcome h2{font-size:30px;line-height:1.05;margin:10px 0}.welcome p{color:#5a6674;line-height:1.55}.welcome .button{font-size:16px;padding:14px 20px;margin-top:10px}.welcome-note{font-size:11px}
 .dpad{display:none;position:fixed;z-index:10;left:18px;bottom:18px;grid-template-columns:46px 46px 46px;grid-template-rows:42px 42px;gap:5px;pointer-events:auto}.dpad button{border:1px solid #ffffff88;background:#102b4fd9;color:white;border-radius:10px;font-size:20px;box-shadow:0 5px 18px #0018;touch-action:none;user-select:none}.dpad button:active,.dpad button.active{background:#60d9f7;color:#0b2746}.dpad .up{grid-column:2}.dpad .left{grid-column:1}.dpad .down{grid-column:2}.dpad .right{grid-column:3}
 body.immersive .places,body.immersive #labels{display:none}body.immersive .hud,body.immersive .crosshair{display:block}body.immersive .dpad{display:grid}body.immersive .brand{opacity:.16;transition:opacity .2s}body.immersive .brand:hover{opacity:1}
@@ -351,7 +446,7 @@ body.immersive .places,body.immersive #labels{display:none}body.immersive .hud,b
 <div class="actions"><select id="jump" aria-label="Jump to a place"><option value="">Jump to a place…</option></select><button class="button" id="exterior">Exterior view</button><button class="button primary" id="immerse">Start walking</button></div></header>
 <aside class="places"><h2>Explore places</h2><div id="placeList"></div></aside>
 <div class="dpad" aria-label="Movement controls"><button class="up" data-key="ArrowUp" aria-label="Move forward">↑</button><button class="left" data-key="ArrowLeft" aria-label="Turn left">←</button><button class="down" data-key="ArrowDown" aria-label="Move backward">↓</button><button class="right" data-key="ArrowRight" aria-label="Turn right">→</button></div>
-<div class="crosshair"></div><div class="hud"><b id="zone">Entrance & Check-in</b><br><span id="walkHint">WASD / arrows to walk · mouse to look · Shift to move faster · Esc releases mouse</span></div>
+<div class="crosshair"></div><div class="hud"><b id="zone">Entrance & Check-in</b><br><span class="role" id="zoneRole">Welcome desks, information screens and queueing</span><br><span id="walkHint">WASD / arrows to walk · mouse to look · Shift to move faster · Esc releases mouse</span></div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
 <script type="module">
 import * as THREE from 'three';
@@ -359,17 +454,17 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 
 const rooms=[
- {name:"Entrance & Check-in",floor:"First floor",p:[-10,1.4,-7.6],v:[-12.0,-3.8],a:-1.57},
- {name:"Sponsors Galleria",floor:"First floor",p:[-5.1,1.5,1.7],v:[-3.3,1.7]},
- {name:"Food",floor:"First floor",p:[8.6,1.4,8.1],v:[9.8,6.0]},
- {name:"Hacking Area — Collins Room",floor:"First floor",p:[10.5,1.5,2.7],v:[7.0,2.5]},
- {name:"Hacking Area — Collins Patio",floor:"First floor · outdoors",p:[20.5,1.2,4.0],v:[18.3,4.0]},
- {name:"Hacking Area — Founders’ Room",floor:"First floor",p:[2.1,1.5,-8.1],v:[-1.2,-8.1]},
- {name:"Hacking Area — Founders’ Patio",floor:"First floor · outdoors",p:[10.7,1.2,-15.1],v:[10.7,-12.2]},
- {name:"Restrooms",floor:"First floor",p:[1.7,1.5,-2.2],v:[1.7,-4.1]},
- {name:"Stairs to Second Floor",floor:"East side",p:[17.5,2.3,-.5],v:[17.5,-2.7]},
- {name:"Workshops",floor:"Second floor",p:[.7,5.6,0],v:[-4.2,0]},
- {name:"Networking — Northeast Patio",floor:"Second floor",p:[8.4,5.6,7.2],v:[4.2,7.1]}
+ {name:"Entrance & Check-in",floor:"First floor",role:"Welcome desks, information screens and queueing",p:[-10,1.4,-7.6],v:[-12.0,-3.8],a:-1.57},
+ {name:"Sponsors Galleria",floor:"First floor",role:"Branded demo booths, monitors and sponsor corridor",p:[-5.1,1.5,1.7],v:[-3.3,1.7]},
+ {name:"Food",floor:"First floor",role:"Buffet counters, menu band, drink station and café tables",p:[8.6,1.4,8.1],v:[9.8,6.0]},
+ {name:"Hacking Area — Collins Room",floor:"First floor",role:"Laptop workstations, shared power and presentation display",p:[10.5,1.5,2.7],v:[7.0,2.5]},
+ {name:"Hacking Area — Collins Patio",floor:"First floor · outdoors",role:"Shaded outdoor hacking tables and planting",p:[20.5,1.2,4.0],v:[18.3,4.0]},
+ {name:"Hacking Area — Founders’ Room",floor:"First floor",role:"Team tables, laptops, whiteboard and lounge seating",p:[2.1,1.5,-8.1],v:[-1.2,-8.1]},
+ {name:"Hacking Area — Founders’ Patio",floor:"First floor · outdoors",role:"Outdoor worktables beneath a shade canopy",p:[10.7,1.2,-15.1],v:[10.7,-12.2]},
+ {name:"Restrooms",floor:"First floor",role:"Wayfinding, privacy partitions, sinks and mirrors",p:[1.7,1.5,-2.2],v:[1.7,-4.1]},
+ {name:"Stairs to Second Floor",floor:"East side",role:"Exterior stair connecting both event levels",p:[17.5,2.3,-.5],v:[17.5,-2.7]},
+ {name:"Workshops",floor:"Second floor",role:"Teaching stage, projection screen and classroom tables",p:[.7,5.6,0],v:[-4.2,0]},
+ {name:"Networking — Northeast Patio",floor:"Second floor",role:"Cocktail tables, lounge seating, planters and warm lights",p:[8.4,5.6,7.2],v:[4.2,7.1]}
 ];
 const scene=new THREE.Scene();scene.background=new THREE.Color(0xdce6ef);scene.fog=new THREE.Fog(0xdce6ef,58,108);
 const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.08,220);camera.position.set(-10,1.72,-5.9);
@@ -381,7 +476,7 @@ const bytes=Uint8Array.from(atob("__MODEL__"),c=>c.charCodeAt(0));new GLTFLoader
 const labels=document.querySelector("#labels"),list=document.querySelector("#placeList"),jump=document.querySelector("#jump");
 rooms.forEach((r,i)=>{
  const tag=document.createElement("button");tag.className="tag";tag.textContent=r.name;tag.onclick=()=>focusRoom(i);labels.appendChild(tag);r.tag=tag;
- const row=document.createElement("button");row.className="place";row.innerHTML=r.name+"<small>"+r.floor+"</small>";row.onclick=()=>focusRoom(i);list.appendChild(row);
+ const row=document.createElement("button");row.className="place";row.innerHTML=r.name+"<small>"+r.floor+" · "+r.role+"</small>";row.onclick=()=>focusRoom(i);list.appendChild(row);
  const option=document.createElement("option");option.value=i;option.textContent=r.name;jump.appendChild(option);
 });
 function focusRoom(i){
@@ -431,6 +526,7 @@ function updateWalk(dt){
  }else camera.position.y=onSecond?5.72:1.72;
  let nearest=rooms[0],dist=1e9;for(const r of rooms){const dy=Math.abs(camera.position.y-r.p[1]);const d=Math.hypot(camera.position.x-r.p[0],camera.position.z-r.p[2])+dy*2;if(d<dist){dist=d;nearest=r}}
  document.querySelector("#zone").textContent=nearest.name;
+ document.querySelector("#zoneRole").textContent=nearest.role;
 }
 function projectLabels(){
  const w=innerWidth,h=innerHeight;
