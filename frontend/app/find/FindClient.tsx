@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { SmileWord } from "@/components/landing/Smile";
+import { TripInsights } from "./TripInsights";
 
 type Listing = {
   key: string;
@@ -538,6 +539,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
 
   const stops = plan?.evidence.find((e) => e.kind === "stop");
   const weather = plan?.evidence.find((e) => e.kind === "weather");
+  const homeGeo = plan?.evidence.find((e) => e.kind === "geocode");
   const fare = plan?.evidence.find((e) => e.kind === "fare");
   const routeGuide = plan?.evidence.find((e) => e.kind === "route_guide");
   const constraint = plan?.evidence.find((e) => e.kind === "traveler_constraint");
@@ -681,6 +683,12 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
             </section>
           )}
           {weather && <p className="dk-mut">Weather at kickoff: {weather.status === "ok" ? `${weather.data.summary}, ${weather.data.tempF}°F` : weather.note}</p>}
+
+          <TripInsights
+            from={originCoordinates ?? (homeGeo?.status === "ok" && typeof homeGeo.data.lat === "number" && typeof homeGeo.data.lon === "number" ? { lat: homeGeo.data.lat, lon: homeGeo.data.lon } : undefined)}
+            to={event.lat !== undefined && event.lon !== undefined ? { lat: event.lat, lon: event.lon } : undefined}
+            startsAt={event.startsAt}
+          />
 
           <h3>Buddies on your route</h3>
           {plan.buddies.length ? (
