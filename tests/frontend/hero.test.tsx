@@ -73,4 +73,16 @@ describe("landing origin picker", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=61401"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  test("keeps precise coordinates when reverse geocoding is unavailable", async () => {
+    const getCurrentPosition = vi.fn((success: PositionCallback) => success({ coords: { latitude: 33.6405, longitude: -117.8443 } } as GeolocationPosition));
+    vi.stubGlobal("navigator", { ...navigator, geolocation: { getCurrentPosition } });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "lookup unavailable" }), { status: 502 })));
+    const user = userEvent.setup();
+    render(<HeroView onNavigate={push} />);
+    await user.type(screen.getByLabelText("Home ZIP code"), "61401");
+    await user.click(screen.getByRole("button", { name: /find trips/i }));
+    await user.click(screen.getByRole("button", { name: "Allow location" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/find?zip=61401&origin=Current%20location&gps=1&lat=33.6405&lon=-117.8443"));
+  });
 });

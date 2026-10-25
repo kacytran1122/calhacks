@@ -191,6 +191,7 @@ export function FindClient({ initialZip, initialOrigin, initialLat, initialLon }
       if (coordinates) {
         p.set("lat", String(coordinates.lat));
         p.set("lon", String(coordinates.lon));
+        p.set("originLabel", originLabel || "Current location");
       }
       if (query) p.set("q", query);
       setRes(await api<Discover>(`/api/events?${p}`));

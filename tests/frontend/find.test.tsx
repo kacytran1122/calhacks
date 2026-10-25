@@ -74,6 +74,21 @@ test("resolves a place label to precise coordinates before discovering events", 
   expect(String(fetcher.mock.calls[1]?.[0])).toContain("lon=-118.4469");
 });
 
+test("uses precise browser coordinates and labels them as the current location", async () => {
+  const fetcher = vi.fn(() => response({ ...result, origin: { zip: "61401", label: "Current location" } }));
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<FindClient initialZip="61401" initialOrigin="Current location" initialLat={33.6405} initialLon={-117.8443} />);
+
+  await user.click(screen.getByRole("button", { name: "Update nearby events" }));
+
+  const request = String(fetcher.mock.calls[0]?.[0]);
+  expect(request).toContain("lat=33.6405");
+  expect(request).toContain("lon=-117.8443");
+  expect(request).toContain("originLabel=Current+location");
+  expect(await screen.findByText(/events within 200 mi of Current location/)).toBeVisible();
+});
+
 test("switches between miles and kilometers without changing the search radius", async () => {
   vi.stubGlobal("fetch", vi.fn(() => response(result)));
   const user = userEvent.setup();

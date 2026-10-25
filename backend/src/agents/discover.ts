@@ -5,6 +5,7 @@ import { fetchDevpost, fetchLuma, fetchMlh, type SourceResult } from "../integra
 export interface DiscoverOptions {
   zip: string;
   originCoordinates?: { lat: number; lon: number };
+  originLabel?: string;
   radiusMiles?: number;
   query?: string;
   kinds?: EventListing["kind"][];
@@ -104,7 +105,12 @@ export async function discoverEvents(opts: DiscoverOptions): Promise<DiscoverRes
 
   const home = await zipToPoint(opts.zip);
   if (home.status !== "ok") throw new Error(`couldn't find ZIP ${opts.zip} (${home.status}${home.error ? `: ${home.error}` : ""})`);
-  const origin = { zip: opts.zip, label: home.label, lat: opts.originCoordinates?.lat ?? home.lat!, lon: opts.originCoordinates?.lon ?? home.lon! };
+  const origin = {
+    zip: opts.zip,
+    label: opts.originCoordinates ? opts.originLabel?.trim() || "Current location" : home.label,
+    lat: opts.originCoordinates?.lat ?? home.lat!,
+    lon: opts.originCoordinates?.lon ?? home.lon!,
+  };
 
   const hubs = HUBS.filter((h) => {
     const d = haversineMiles(origin, h);

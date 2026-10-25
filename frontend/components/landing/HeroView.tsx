@@ -69,12 +69,16 @@ export function HeroView({ onNavigate }: { onNavigate: (href: string) => void })
     setLocating(true);
     try {
       const position = await new Promise<GeolocationPosition>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 12_000, maximumAge: 300_000 }),
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }),
       );
-      const response = await fetch(`/api/location/resolve?lat=${encodeURIComponent(position.coords.latitude)}&lon=${encodeURIComponent(position.coords.longitude)}`);
-      const result = (await response.json()) as { zip?: string; label?: string; error?: string };
-      if (!response.ok || !result.zip) throw new Error(result.error ?? "We couldn’t match your location to a ZIP code.");
-      onNavigate(findUrl({ zip: result.zip, label: result.label ?? "Current location" }, { lat: position.coords.latitude, lon: position.coords.longitude }));
+      const coordinates = { lat: position.coords.latitude, lon: position.coords.longitude };
+      let currentOrigin = pendingOrigin ? { ...pendingOrigin, label: "Current location" } : null;
+      try {
+        const response = await fetch(`/api/location/resolve?lat=${encodeURIComponent(coordinates.lat)}&lon=${encodeURIComponent(coordinates.lon)}`);
+        const result = (await response.json()) as { zip?: string; label?: string };
+        if (response.ok && result.zip) currentOrigin = { zip: result.zip, label: result.label ?? "Current location" };
+      } catch {}
+      if (currentOrigin) onNavigate(findUrl(currentOrigin, coordinates));
     } catch {
       if (pendingOrigin) onNavigate(findUrl(pendingOrigin));
     } finally {
