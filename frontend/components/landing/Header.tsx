@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { SmileWord } from "./Smile";
 
 const LINKS = [
-  { href: "#why", label: "Why s’mile" },
+  { href: "#journey", label: "The journey" },
   { href: "#how", label: "How it works" },
   { href: "#lens", label: "Extension" },
   { href: "#faq", label: "FAQ" },
@@ -55,7 +55,7 @@ export function Header() {
           ))}
         </nav>
         <div className="top-r">
-          <a className="btn btn-primary" href="#approve">
+          <a className="btn btn-primary" href="#plan">
             Plan a trip
           </a>
           <button className="burger" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} aria-controls="mnav" onClick={() => setOpen(!open)}>
@@ -71,7 +71,7 @@ export function Header() {
             {l.label}
           </a>
         ))}
-        <a className="mnav-cta" href="#approve" onClick={() => setOpen(false)}>
+        <a className="mnav-cta" href="#plan" onClick={() => setOpen(false)}>
           Plan a trip
         </a>
       </nav>

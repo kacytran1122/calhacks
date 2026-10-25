@@ -9,8 +9,9 @@ export function Cta() {
         <h2 className="disp" style={{ fontSize: "clamp(56px,8.5vw,128px)" }}>
           Add <Smile /> to <em>your trip.</em>
         </h2>
-        <a className="cta-btn" href="/landing">
-          Get started
+        <p className="cta-sub">Start with where you are. We’ll help with every mile after that.</p>
+        <a className="cta-btn" href="#plan">
+          Plan my event trip
         </a>
       </div>
     </section>
@@ -25,8 +26,9 @@ export function Footer() {
           <b>
             <SmileWord size="footer" />
           </b>
-          , Every mile ends in a smile.
+          <span className="footer-line">Every mile ends in a smile.</span>
         </span>
+        <nav className="footer-links" aria-label="Footer"><a href="/privacy">Privacy</a><a href="/support">Support</a></nav>
       </div>
     </footer>
   );

@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import { PhoneChat } from "./PhoneChat";
-import { Smile } from "./Smile";
 import type { TravelOrigin } from "@/lib/travelSession";
 
 type OriginMode = "zip" | "city";
@@ -85,17 +84,15 @@ export function HeroView({ onNavigate }: { onNavigate: (origin: TravelOrigin) =>
   };
 
   return (
-    <section className="hero">
+    <section className="hero" id="plan">
       <div className="wrap hero-grid">
         <div className="hero-l">
+          <div className="hero-eyebrow"><span /> Event travel, from plan to proof</div>
           <h1 className="disp" style={{ marginTop: 22 }}>
-            Every mile ends in a{" "}
-            <em>
-              <Smile />.
-            </em>
+            Make the event.<br />Enjoy every <em>mile.</em>
           </h1>
           <div className="hero-sub">
-            <p className="lede">Choose how far you’ll go and what you’ll spend. S’mile finds the event, plans the route, asks before booking, then hands clean evidence to the organizer’s finance desk.</p>
+            <p className="lede">Discover an event worth the trip. Compare the fastest complete route, travel with clear step-by-step guidance, and keep every approval and receipt connected.</p>
             <div className="origin-head">
               <span>Start from</span>
               <div className="origin-modes" role="group" aria-label="Choose how to enter your starting location">
@@ -116,9 +113,12 @@ export function HeroView({ onNavigate }: { onNavigate: (origin: TravelOrigin) =>
             <p className={`note origin-note${message?.kind === "error" ? " error" : ""}`} aria-live="polite">
               {message?.text ?? (mode === "zip" ? "Use the ZIP where your trip begins." : "Enter a city, a state, or both for a more precise match.")}
             </p>
+            <div className="hero-proof" aria-label="What S’mile includes">
+              <span>Fastest route first</span><span>Door-to-door steps</span><span>No automatic charges</span>
+            </div>
           </div>
         </div>
-        <div className="hero-r" aria-hidden="true">
+        <div className="hero-r" aria-label="Preview of a private S’mile travel conversation">
           <div className="phone">
             <div className="ph-scr">
               <div className="ph-notch" />
