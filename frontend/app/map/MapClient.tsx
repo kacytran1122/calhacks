@@ -53,7 +53,7 @@ export function MapClient() {
         setPreparing(false);
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
         if (!window.L) await load("/map-assets/leaflet.js");
-        if (!cancelled) await load(`/map-assets/map.js?v=6`, true);
+        if (!cancelled) await load(`/map-assets/map.js?v=7`, true);
       } catch (cause) {
         if (!cancelled) {
           setPreparing(false);

@@ -58,6 +58,7 @@ const state = {
 const map = L.map("map", { zoomControl: false, attributionControl: true, preferCanvas: true }).setView([37.7749, -122.4194], 11);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
+  referrerPolicy: "strict-origin",
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
 
