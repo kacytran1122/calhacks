@@ -365,7 +365,11 @@ export async function processMessage(photon: PhotonClient, config: Config, messa
         body: {
           spaceId: message.space.id,
           senderId: agent.id,
-          content: { type: "text", format: "plain", text: `Open your route: ${mapUrl}\n\nThis link is scoped to one trip and expires in 12 hours. Don’t forward it.` },
+          content: {
+            type: "text",
+            format: "plain",
+            text: `TRIP UPDATE\n\nYour current step-by-step route is ready:\n${mapUrl}\n\nSave or pin this message for quick access. Message @smile status, @smile trip, or @smile location for the latest saved update. This secure, trip-specific link expires in 12 hours; please do not forward it.`,
+          },
         },
       }, "Photon did not accept the map link.");
     }

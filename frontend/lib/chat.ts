@@ -183,14 +183,14 @@ async function respond(chatId: string, r: Room, from: string, text: string, appr
       const b = buddiesOf(r, name);
       out.push(bot(r, b.length ? `@${me} you’re riding with ${list(b)}.` : `@${me} no buddies on your route yet. I’ll say when someone joins.`));
     } else {
-      out.push(bot(r, `@${me} send me your home ZIP and, if you have it, the event link. For example: @smile 95616 https://lu.ma/your-event`));
+      out.push(bot(r, `@${me} choose an event and create your trip at https://smilefromhereto.work/finding-events. Then return here and message @smile to open your route.`));
     }
     return out;
   }
 
   try {
     if (!mem.url) {
-      out.push(bot(r, `@${me} please send the event website so I can plan the right trip for you.`));
+      out.push(bot(r, `@${me} choose the event at https://smilefromhereto.work/finding-events so its destination and schedule are securely attached to this conversation.`));
       return out;
     }
     const prepared = await prepareChatTravel(mem, text, { origin: mem.zip });

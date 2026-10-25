@@ -6,6 +6,7 @@ import test, { type TestContext } from "node:test";
 import {
   claimPhotonTripHandoff,
   createPhotonTripHandoff,
+  photonTripBinding,
   PhotonHandoffError,
   resolvePhotonMapHandoff,
 } from "../../backend/src/photonHandoff";
@@ -53,12 +54,22 @@ test("has no fallback line or handoff secret", (t) => {
 
 test("first direct sender claims the code, safe retries reuse it, and another sender is refused", (t) => {
   const runtime = fixture(t);
+  assert.equal(photonTripBinding(identity, runtime), null);
   const join = createPhotonTripHandoff({ tripId: "TR-L-test", travelerId: "T-test" }, runtime);
   const first = claimPhotonTripHandoff(join.starterMessage, identity, runtime);
   assert.equal(first.kind, "ready");
   if (first.kind !== "ready") return;
   assert.equal(first.reused, false);
   assert.match(first.mapPath, /^\/map\?handoff=phm1_[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(first.scope, {
+    tripId: "TR-L-test",
+    travelerId: "T-test",
+    boundAt: "2026-10-25T12:00:00.000Z",
+    mapPath: first.mapPath,
+    expiresAt: "2026-10-26T00:00:00.000Z",
+  });
+  assert.deepEqual(photonTripBinding(identity, runtime), first.scope);
+  assert.equal(photonTripBinding({ ...identity, senderId: "human_2" }, runtime), null);
   const token = new URL(`https://smilefromhereto.work${first.mapPath}`).searchParams.get("handoff")!;
   assert.deepEqual(resolvePhotonMapHandoff(token, runtime), {
     tripId: "TR-L-test",
@@ -94,6 +105,26 @@ test("distinguishes ordinary chat, malformed route commands, claim expiry, and m
   if (claimed.kind !== "ready") return;
   const token = new URL(`https://smilefromhereto.work${claimed.mapPath}`).searchParams.get("handoff")!;
   assert.equal(resolvePhotonMapHandoff(token, { ...freshRuntime, now: () => new Date("2026-10-26T00:00:00.000Z") }), null);
+  assert.deepEqual(photonTripBinding(identity, { ...freshRuntime, now: () => new Date("2026-10-26T00:00:00.000Z") }), {
+    tripId: "TR-L-fresh",
+    travelerId: "T-fresh",
+    boundAt: "2026-10-25T12:00:00.000Z",
+  });
+});
+
+test("a newer QR replaces the direct conversation binding with the latest trip", (t) => {
+  const runtime = fixture(t);
+  const first = createPhotonTripHandoff({ tripId: "TR-L-first", travelerId: "T-first" }, runtime);
+  assert.equal(claimPhotonTripHandoff(first.starterMessage, identity, runtime).kind, "ready");
+
+  const later = { ...runtime, now: () => new Date("2026-10-25T12:05:00.000Z") };
+  const second = createPhotonTripHandoff({ tripId: "TR-L-second", travelerId: "T-second" }, later);
+  assert.equal(claimPhotonTripHandoff(second.starterMessage, identity, later).kind, "ready");
+  const binding = photonTripBinding(identity, later);
+  assert.equal(binding?.tripId, "TR-L-second");
+  assert.equal(binding?.travelerId, "T-second");
+  assert.equal(binding?.boundAt, "2026-10-25T12:05:00.000Z");
+  assert.match(binding?.mapPath ?? "", /^\/map\?handoff=phm1_/);
 });
 
 test("refuses ephemeral Vercel storage instead of pretending the handoff is durable", () => {

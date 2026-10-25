@@ -42,6 +42,7 @@ export {
   claimPhotonTripHandoff,
   createPhotonTripHandoff,
   photonHandoffFingerprint,
+  photonTripBinding,
   resolvePhotonMapHandoff,
   PHOTON_HANDOFF_MAP_TOKEN_PATTERN,
   PhotonHandoffError,
@@ -50,4 +51,5 @@ export {
   type PhotonHandoffIdentity,
   type PhotonHandoffJoinResult,
   type PhotonMapHandoff,
+  type PhotonTripBinding,
 } from "./photonHandoff";

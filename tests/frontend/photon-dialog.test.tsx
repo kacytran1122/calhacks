@@ -50,7 +50,10 @@ test("creates the prefilled Photon-line QR immediately and sends no contact data
   expect(qr?.querySelector("title")).toHaveTextContent("Open @smile in Messages with the route request filled in");
   expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", messageUrl);
   expect(screen.getByText(starterMessage)).toBeVisible();
-  expect(screen.getByText(/iMessage cannot open a website tab automatically/i)).toBeVisible();
+  expect(screen.getByText(/saved event, destination, and current route are already connected/i)).toBeVisible();
+  expect(screen.getByText(/professional trip update and secure map link/i)).toBeVisible();
+  expect(screen.getByText(/save or pin that reply/i)).toBeVisible();
+  expect(screen.getByText(/@smile status, @smile trip, or @smile location/i)).toBeVisible();
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
 

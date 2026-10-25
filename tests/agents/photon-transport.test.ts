@@ -140,7 +140,13 @@ test("delivers a validated opaque map handoff in the same direct chat", async (t
   assert.equal(f.sent.length, 2);
   assert.doesNotMatch(f.sent[0]!.body.content.text, /phm1_|https?:/);
   assert.match(f.sent[1]!.body.content.text, new RegExp(`${f.config.webUrl}/map\\?handoff=${token}`));
+  assert.match(f.sent[1]!.body.content.text, /^TRIP UPDATE/);
+  assert.match(f.sent[1]!.body.content.text, /save or pin this message/i);
+  assert.match(f.sent[1]!.body.content.text, /@smile status, @smile trip, or @smile location/i);
+  assert.doesNotMatch(f.sent[1]!.body.content.text, /changes will be posted/i);
   assert.match(f.sent[1]!.body.content.text, /expires in 12 hours/i);
+  assert.equal(f.sent[1]!.body.content.text.match(/https?:\/\//g)?.length, 1);
+  assert.doesNotMatch(f.sent[1]!.body.content.text, /live direction|lu\.ma/i);
   assert.deepEqual(f.sent.map((message) => message.headers["idempotency-key"]), ["smile:msg_1:room:0", "smile:msg_1:map:0"]);
   assert.ok(f.sent.every((message) => message.body.spaceId === "direct_1"));
   assert.equal(f.spaces.length, 0);

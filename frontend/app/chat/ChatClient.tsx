@@ -88,11 +88,11 @@ export function ChatClient() {
         <div className="pj-copy">
           <p className="pj-kicker">Your route, sent privately</p>
           <h1 id="photon-title">Message <em>@smile</em><br />from iMessage.</h1>
-          <p className="pj-lede">Scan one QR to open your private @smile conversation. The route request is already filled in, and this website never asks for your phone number or email address.</p>
+          <p className="pj-lede">Scan one QR to open your private @smile conversation. Your saved event, destination, and current route are connected automatically, and this website never asks for your phone number or email address.</p>
           <ol className="pj-steps" aria-label="How it works">
             <li><span>1</span><div><b>Create the secure QR</b><small>It contains a short-lived code for this trip, not your trip token.</small></div></li>
             <li><span>2</span><div><b>Scan and send</b><small>The message begins with @smile so the assistant can respond.</small></div></li>
-            <li><span>3</span><div><b>Tap the route link</b><small>iMessage cannot open a browser tab automatically; @smile replies with the secure map link.</small></div></li>
+            <li><span>3</span><div><b>Receive your trip update</b><small>@smile replies with your current route and secure map link. Save or pin the reply for quick access.</small></div></li>
           </ol>
         </div>
 
@@ -117,24 +117,24 @@ export function ChatClient() {
               <div className="pj-ready-copy">
                 <p className="pj-kicker">Your secure QR is ready</p>
                 <h2>Scan, then send the message.</h2>
-                <p>Send the filled-in request within 15 minutes. @smile will reply with your secure map link.</p>
+                <p>Send the filled-in request within 15 minutes. Your event, destination, and current route are already connected; @smile will reply with a professional trip update and secure map link.</p>
               </div>
               <figure className="pj-qr" aria-label="QR code that opens a private @smile conversation in Messages">
                 <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#201f1d" title="Open @smile in Messages with the route request filled in" />
               </figure>
               <a className="pj-button primary" href={result.messageUrl}>Open Messages</a>
               <div className="pj-message">
-                <small>The QR fills in this private request</small>
+                <small>Your connected trip request</small>
                 <code>{result.starterMessage}</code>
                 <button type="button" onClick={copy}>{copied ? "Copied" : "Copy message"}</button>
               </div>
-              <p className="pj-warning"><b>One final tap:</b> browsers cannot be opened automatically after an iMessage. Tap the secure route link in @smile’s reply.</p>
+              <p className="pj-warning"><b>Keep it handy:</b> save or pin @smile’s trip update. Message @smile status, @smile trip, or @smile location whenever you need the latest saved update.</p>
             </div>
           ) : (
             <div className="pj-gate">
               <span className="pj-gate-icon" aria-hidden="true">↗</span>
               <h2>Create your Messages QR</h2>
-              <p>No phone number or email address is requested. The QR opens your private conversation with an @smile route request ready to send.</p>
+              <p>No phone number or email address is requested. The QR opens your private conversation with your saved event, destination, and current route already connected.</p>
               {error && <p className="pj-error" role="alert">{error}</p>}
               <button className="pj-button primary" type="button" disabled={loading} onClick={() => void requestQr()}>
                 {loading ? "Creating secure QR…" : error ? "Try again" : "Create Messages QR"}

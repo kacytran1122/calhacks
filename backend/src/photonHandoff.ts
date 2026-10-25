@@ -26,6 +26,15 @@ CREATE TABLE IF NOT EXISTS photon_handoffs (
 );
 CREATE INDEX IF NOT EXISTS photon_handoffs_map_token ON photon_handoffs(map_token_hash);
 CREATE INDEX IF NOT EXISTS photon_handoffs_expiry ON photon_handoffs(code_expires_at, map_expires_at);
+CREATE TABLE IF NOT EXISTS photon_trip_bindings (
+  identity_hash TEXT PRIMARY KEY,
+  code_hash TEXT NOT NULL,
+  trip_id TEXT NOT NULL,
+  traveler_id TEXT NOT NULL,
+  bound_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS photon_trip_bindings_trip ON photon_trip_bindings(trip_id, traveler_id);
 `;
 
 export class PhotonHandoffError extends Error {
@@ -57,10 +66,19 @@ export type PhotonHandoffIdentity = {
   senderId: string;
 };
 
+/** Server-only trip context bound to one direct Photon conversation. */
+export type PhotonTripBinding = {
+  tripId: string;
+  travelerId: string;
+  boundAt: string;
+  mapPath?: string;
+  expiresAt?: string;
+};
+
 export type PhotonHandoffClaim =
   | { kind: "none" }
   | { kind: "invalid" | "expired" | "used" }
-  | { kind: "ready"; mapPath: string; expiresAt: string; reused: boolean };
+  | { kind: "ready"; mapPath: string; expiresAt: string; reused: boolean; scope: PhotonTripBinding };
 
 export type PhotonMapHandoff = {
   tripId: string;
@@ -81,6 +99,15 @@ type Row = {
   code_expires_at: number;
   claimed_at: number | null;
   claimed_by_hash: string | null;
+  map_token_hash: string | null;
+  map_expires_at: number | null;
+};
+
+type BindingRow = {
+  code_hash: string;
+  trip_id: string;
+  traveler_id: string;
+  bound_at: number;
   map_token_hash: string | null;
   map_expires_at: number | null;
 };
@@ -149,13 +176,47 @@ function identityHash(secret: string, identity: PhotonHandoffIdentity): string {
     .digest("hex");
 }
 
-function mapToken(secret: string, code: string, claimant: string): string {
+function mapToken(secret: string, codeKey: string, claimant: string): string {
   const value = createHmac("sha256", secret)
     .update("smile-photon-map-v1\0")
-    .update(code).update("\0")
+    .update(codeKey).update("\0")
     .update(claimant)
     .digest("base64url");
   return `phm1_${value}`;
+}
+
+function saveBinding(db: DatabaseSync, claimant: string, codeHash: string, row: Pick<Row, "trip_id" | "traveler_id">, now: number): void {
+  db.prepare(`
+    INSERT INTO photon_trip_bindings (identity_hash, code_hash, trip_id, traveler_id, bound_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(identity_hash) DO UPDATE SET
+      code_hash = excluded.code_hash,
+      trip_id = excluded.trip_id,
+      traveler_id = excluded.traveler_id,
+      bound_at = CASE
+        WHEN photon_trip_bindings.code_hash = excluded.code_hash THEN photon_trip_bindings.bound_at
+        ELSE excluded.bound_at
+      END,
+      updated_at = excluded.updated_at
+  `).run(claimant, codeHash, row.trip_id, row.traveler_id, now, now);
+}
+
+function bindingFromRow(secret: string, claimant: string, row: BindingRow, now: number): PhotonTripBinding {
+  const currentToken = mapToken(secret, row.code_hash, claimant);
+  const activeMap = Boolean(
+    row.map_expires_at
+    && row.map_expires_at > now
+    && row.map_token_hash === sha256(currentToken),
+  );
+  return {
+    tripId: row.trip_id,
+    travelerId: row.traveler_id,
+    boundAt: new Date(row.bound_at).toISOString(),
+    ...(activeMap ? {
+      mapPath: `/map?handoff=${currentToken}`,
+      expiresAt: new Date(row.map_expires_at!).toISOString(),
+    } : {}),
+  };
 }
 
 function codeFromMessage(text: string): { kind: "none" | "invalid" | "code"; code?: string } {
@@ -222,14 +283,18 @@ export function claimPhotonTripHandoff(
   const secret = secretFrom(env);
   const claimant = identityHash(secret, identity);
   const code = parsed.code!;
-  const token = mapToken(secret, code, claimant);
+  const codeHash = sha256(code);
+  // New claims derive the bearer from the non-reversible code hash, allowing the
+  // same direct conversation to recover its active route without storing a raw bearer.
+  const token = mapToken(secret, codeHash, claimant);
+  const legacyToken = mapToken(secret, code, claimant);
   const tokenHash = sha256(token);
   const now = (runtime.now ?? (() => new Date()))().getTime();
   const db = open(runtime);
   try {
     db.exec("BEGIN IMMEDIATE");
     const row = db.prepare("SELECT trip_id, traveler_id, code_expires_at, claimed_at, claimed_by_hash, map_token_hash, map_expires_at FROM photon_handoffs WHERE code_hash = ?")
-      .get(sha256(code)) as Row | undefined;
+      .get(codeHash) as Row | undefined;
     if (!row) {
       db.exec("COMMIT");
       return { kind: "invalid" };
@@ -239,12 +304,30 @@ export function claimPhotonTripHandoff(
         db.exec("COMMIT");
         return { kind: "used" };
       }
-      if (!row.map_expires_at || row.map_expires_at <= now || row.map_token_hash !== tokenHash) {
+      const replayToken = row.map_token_hash === tokenHash
+        ? token
+        : row.map_token_hash === sha256(legacyToken)
+          ? legacyToken
+          : undefined;
+      if (!row.map_expires_at || row.map_expires_at <= now || !replayToken) {
         db.exec("COMMIT");
         return { kind: "expired" };
       }
+      saveBinding(db, claimant, codeHash, row, now);
       db.exec("COMMIT");
-      return { kind: "ready", mapPath: `/map?handoff=${token}`, expiresAt: new Date(row.map_expires_at).toISOString(), reused: true };
+      return {
+        kind: "ready",
+        mapPath: `/map?handoff=${replayToken}`,
+        expiresAt: new Date(row.map_expires_at).toISOString(),
+        reused: true,
+        scope: {
+          tripId: row.trip_id,
+          travelerId: row.traveler_id,
+          boundAt: new Date(row.claimed_at).toISOString(),
+          mapPath: `/map?handoff=${replayToken}`,
+          expiresAt: new Date(row.map_expires_at).toISOString(),
+        },
+      };
     }
     if (row.code_expires_at <= now) {
       db.exec("COMMIT");
@@ -252,11 +335,50 @@ export function claimPhotonTripHandoff(
     }
     const mapExpiresAt = now + MAP_TTL_MS;
     db.prepare("UPDATE photon_handoffs SET claimed_at = ?, claimed_by_hash = ?, map_token_hash = ?, map_expires_at = ? WHERE code_hash = ? AND claimed_at IS NULL")
-      .run(now, claimant, tokenHash, mapExpiresAt, sha256(code));
+      .run(now, claimant, tokenHash, mapExpiresAt, codeHash);
+    saveBinding(db, claimant, codeHash, row, now);
     db.exec("COMMIT");
-    return { kind: "ready", mapPath: `/map?handoff=${token}`, expiresAt: new Date(mapExpiresAt).toISOString(), reused: false };
+    const mapPath = `/map?handoff=${token}`;
+    return {
+      kind: "ready",
+      mapPath,
+      expiresAt: new Date(mapExpiresAt).toISOString(),
+      reused: false,
+      scope: {
+        tripId: row.trip_id,
+        travelerId: row.traveler_id,
+        boundAt: new Date(now).toISOString(),
+        mapPath,
+        expiresAt: new Date(mapExpiresAt).toISOString(),
+      },
+    };
   } catch (error) {
     try { db.exec("ROLLBACK"); } catch { /* the transaction may already be closed */ }
+    if (error instanceof PhotonHandoffError) throw error;
+    throw new PhotonHandoffStorageUnavailable();
+  } finally {
+    db.close();
+  }
+}
+
+/** Recover the latest trip bound to this direct Photon conversation. */
+export function photonTripBinding(
+  identity: PhotonHandoffIdentity,
+  runtime: HandoffRuntime = {},
+): PhotonTripBinding | null {
+  const secret = secretFrom(runtime.env ?? process.env);
+  const claimant = identityHash(secret, identity);
+  const now = (runtime.now ?? (() => new Date()))().getTime();
+  const db = open(runtime);
+  try {
+    const row = db.prepare(`
+      SELECT b.code_hash, b.trip_id, b.traveler_id, b.bound_at, h.map_token_hash, h.map_expires_at
+      FROM photon_trip_bindings b
+      LEFT JOIN photon_handoffs h ON h.code_hash = b.code_hash
+      WHERE b.identity_hash = ?
+    `).get(claimant) as BindingRow | undefined;
+    return row ? bindingFromRow(secret, claimant, row, now) : null;
+  } catch (error) {
     if (error instanceof PhotonHandoffError) throw error;
     throw new PhotonHandoffStorageUnavailable();
   } finally {

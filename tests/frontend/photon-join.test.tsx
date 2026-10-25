@@ -41,7 +41,9 @@ test("creates a prefilled Photon-line Messages QR without collecting a phone num
   expect(qr?.querySelector("title")).toHaveTextContent("Open @smile in Messages with the route request filled in");
   expect(screen.getByRole("link", { name: "Open Messages" })).toHaveAttribute("href", messageUrl);
   expect(screen.getByText(starterMessage)).toBeVisible();
-  expect(screen.getByText(/cannot be opened automatically after an iMessage/i)).toBeVisible();
+  expect(screen.getByText(/event, destination, and current route are already connected/i)).toBeVisible();
+  expect(screen.getByText(/save or pin @smile’s trip update/i)).toBeVisible();
+  expect(screen.getByText(/@smile status, @smile trip, or @smile location/i)).toBeVisible();
   expect(fetcher).toHaveBeenCalledTimes(1);
   const [, request] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
   expect(JSON.parse(String(request.body))).toEqual({ tripId: "TR-L-test", tripToken: "private-trip-token" });

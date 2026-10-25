@@ -66,32 +66,56 @@ test("only @smile mentions trigger a response including punctuation and case var
     const response = await POST(request(body({ spaceId: "direct-with-mention", messageId: hash(text), text })));
     const result = await response.json();
     assert.equal(result.replies.length, 1);
-    assert.match(result.replies[0].text, /home ZIP/);
+    assert.match(result.replies[0].text, /https:\/\/smilefromhereto\.work\/finding-events/);
+    assert.doesNotMatch(result.replies[0].text, /lu\.ma|luma/i);
     assert.equal(result.replies[0].approvalPath, undefined);
   }
 });
 
 test("claims a trip QR before general chat and returns only an opaque same-site map handoff", async () => {
   configure();
-  const join = core.createPhotonTripHandoff({ tripId: "TR-L-map-test", travelerId: "T-map-test" });
+  if (!core.hasState()) core.saveState(core.buildSeed().state);
+  const state = core.loadState();
+  const trip = state.trips[0]!;
+  const event = state.events.find((candidate) => candidate.id === trip.eventId)!;
+  const join = core.createPhotonTripHandoff({ tripId: trip.id, travelerId: trip.travelerId });
   const firstValue = body({ spaceId: "handoff-direct", messageId: "handoff-first", senderId: "handoff-human", text: join.starterMessage });
   const firstResponse = await POST(request(firstValue));
   assert.equal(firstResponse.status, 200);
   const first = await firstResponse.json();
   assert.equal(first.replies.length, 1);
-  assert.match(first.replies[0].text, /secure route link is ready/i);
+  assert.match(first.replies[0].text, /trip is connected/i);
+  assert.match(first.replies[0].text, new RegExp(`Event: ${event.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(first.replies[0].text, new RegExp(`Destination: ${event.venue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(first.replies[0].text, /Starts:/);
+  assert.match(first.replies[0].text, /Current route:/);
+  assert.match(first.replies[0].text, /Trip status:/);
+  assert.match(first.replies[0].text, /Pin the route message/);
   assert.match(first.replies[0].mapPath, /^\/map\?handoff=phm1_[A-Za-z0-9_-]{43}$/);
-  assert.doesNotMatch(JSON.stringify(first), /TR-L-map-test|T-map-test|SMILE-/);
+  assert.equal(JSON.stringify(first).includes(trip.id), false);
+  assert.equal(JSON.stringify(first).includes(trip.travelerId), false);
+  assert.doesNotMatch(JSON.stringify(first), /SMILE-|lu\.ma|luma/i);
   const token = new URL(`https://smilefromhereto.work${first.replies[0].mapPath}`).searchParams.get("handoff");
   assert.deepEqual(core.resolvePhotonMapHandoff(token), {
-    tripId: "TR-L-map-test",
-    travelerId: "T-map-test",
+    tripId: trip.id,
+    travelerId: trip.travelerId,
     expiresAt: core.resolvePhotonMapHandoff(token)?.expiresAt,
   });
 
   const replay = await (await POST(request({ ...firstValue, messageId: "handoff-replay" }))).json();
   assert.equal(replay.replies[0].mapPath, first.replies[0].mapPath);
-  assert.match(replay.replies[0].text, /ready again/i);
+  assert.match(replay.replies[0].text, /connected again/i);
+
+  for (const [index, text] of ["@smile status", "@smile trip", "@smile location"].entries()) {
+    const update = await (await POST(request({ ...firstValue, messageId: `handoff-update-${index}`, text }))).json();
+    assert.match(update.replies[0].text, /^Trip update/);
+    assert.match(update.replies[0].text, new RegExp(event.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(update.replies[0].text, new RegExp(event.city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.equal(update.replies[0].mapPath, first.replies[0].mapPath);
+    assert.equal(JSON.stringify(update).includes(trip.id), false);
+    assert.equal(JSON.stringify(update).includes(trip.travelerId), false);
+    assert.doesNotMatch(JSON.stringify(update), /lu\.ma|luma/i);
+  }
 
   const stolen = await (await POST(request({ ...firstValue, messageId: "handoff-stolen", senderId: "someone-else" }))).json();
   assert.equal(stolen.replies[0].mapPath, undefined);
@@ -122,7 +146,7 @@ test("persists sender-only preferences and answers across store restart and keep
   configure();
   const first = body({ spaceId: "memory", messageId: "first-answer", text: "@smile my ZIP is 61401, my budget is $220 and I cannot drive" });
   const response = await POST(request(first));
-  assert.match((await response.json()).replies[0].text, /event website/);
+  assert.match((await response.json()).replies[0].text, /https:\/\/smilefromhereto\.work\/finding-events/);
   await POST(request({ ...first, messageId: "follow-up", text: "@smile I must arrive by 10 PM PST on October 26, 2026" }));
   await POST(request({ ...first, senderId: "another-person", messageId: "different-person", text: "@smile help me too" }));
   const roomId = `photon:${hash([first.projectId, first.spaceId])}`;
@@ -139,7 +163,7 @@ test("persists sender-only preferences and answers across store restart and keep
   assert.equal(new Map(data.memory).get(otherSender)?.zip, undefined);
   assert.notEqual(initialsOf(sender), initialsOf(otherSender));
   const differentDirect = await POST(request({ ...first, spaceId: "different-direct", messageId: "different-direct", text: "@smile help" }));
-  assert.match((await differentDirect.json()).replies[0].text, /home ZIP/);
+  assert.match((await differentDirect.json()).replies[0].text, /https:\/\/smilefromhereto\.work\/finding-events/);
 });
 
 test("bounds history while preserving room listings, plans and sender memory", async () => {

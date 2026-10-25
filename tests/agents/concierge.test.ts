@@ -65,6 +65,8 @@ test("a reply with a dollar amount no tool computed is replaced by a code-writte
   assert.equal(out.by, "code");
   assert.match(out.note ?? "", /\$25\.00 did not come from a tool/);
   assert.doesNotMatch(out.reply, /\$25/);
+  assert.match(out.reply, /https:\/\/smilefromhereto\.work\/finding-events/);
+  assert.doesNotMatch(out.reply, /lu\.ma/i);
 });
 
 test("amounts that a tool returned may be repeated exactly", () => {

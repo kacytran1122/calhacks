@@ -164,24 +164,24 @@ export function PhotonJoinDialog({
             <button type="button" className="fd-photon-close" aria-label="Close iMessage QR" onClick={close}>×</button>
             <div className="fd-photon-top">
               <span className="fd-photon-orb" aria-hidden="true">☺</span>
-              <div><b>@smile on iMessage</b><small>Your route to {eventName}</small></div>
+              <div><b>@smile on iMessage</b><small>Your connected trip to {eventName}</small></div>
             </div>
 
             {result ? (
               <div className="fd-photon-ready" aria-live="polite">
                 <p className="fd-photon-kicker">Your secure QR is ready</p>
                 <h2 id="photon-dialog-title" ref={headingRef} tabIndex={-1}>Scan, then send the message</h2>
-                <p id="photon-dialog-description">The QR opens your private @smile conversation with a one-time route request already filled in. Send it within 15 minutes.</p>
+                <p id="photon-dialog-description">Your saved event, destination, and current route are already connected to this one-time request. Scan to open your private @smile conversation, then send it within 15 minutes.</p>
                 <figure className="fd-photon-qr" aria-label="QR code that opens a private @smile conversation in Messages">
                   <QRCodeSVG value={result.messageUrl} size={220} level="M" marginSize={2} bgColor="#ffffff" fgColor="#2b1b3d" title="Open @smile in Messages with the route request filled in" />
                 </figure>
                 <a className="dk-btn primary fd-photon-open" href={result.messageUrl}>Open Messages</a>
                 <div className="fd-photon-message">
-                  <small>The QR fills in this private request</small>
+                  <small>Your connected trip request</small>
                   <code>{result.starterMessage}</code>
                   <button type="button" onClick={copyStarter}>{copied ? "Message copied" : "Copy message"}</button>
                 </div>
-                <p className="fd-photon-note"><b>One final tap:</b> iMessage cannot open a website tab automatically. After you send, @smile replies with a secure map link; tap that link to open your route.</p>
+                <p className="fd-photon-note"><b>After you send:</b> @smile replies with a professional trip update and secure map link. Save or pin that reply, then message @smile status, @smile trip, or @smile location whenever you need the latest saved update.</p>
                 {error && <p className="fd-photon-error" role="alert">{error}</p>}
               </div>
             ) : error ? (
@@ -196,7 +196,7 @@ export function PhotonJoinDialog({
               <div className="fd-photon-form" role="status">
                 <p className="fd-photon-kicker">Preparing iMessage</p>
                 <h2 id="photon-dialog-title" ref={headingRef} tabIndex={-1}>Creating your secure QR…</h2>
-                <p id="photon-dialog-description">No phone number or email address is requested. Your trip token stays on the server.</p>
+                <p id="photon-dialog-description">No phone number or email address is requested. Your saved event, destination, and current route stay connected securely on the server.</p>
               </div>
             )}
           </div>

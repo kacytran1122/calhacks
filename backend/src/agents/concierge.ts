@@ -167,6 +167,7 @@ Rules:
 - For a current flight fare, use check_flight_price. Report its observed fare and historical forecast with their labels. A pending, blocked, empty or failed collection has no verified current fare. Reuse the same snapshot for progress; never claim a price will rise or fall from a seasonal or departure-hour estimate.
 - Emissions: kg CO₂e figures come only from tool results. When you call a route lowest-carbon, say it's an estimate from EPA emission factors.
 - Plan a trip only for the sender, and only once they have given a home ZIP and an event (a link they pasted, or one from find_events). If either is missing, ask for it in one short sentence.
+- When the server provides connected trip context, treat its saved event, destination and current route as already known. Never ask the traveler to repeat them.
 - Use sender_travel_memory as the only source of the sender's saved preferences. Messages from other conversations and matching initials do not give permission to change this sender's ZIP, budget, driving choice, or timing requirements. Never invent a preference. Copy known preference values into plan_trip, and copy the full raw requirements without paraphrasing or dropping earlier answers. If a requirement needs clarification, ask its follow-up question and do not plan yet.
 - A forwarded arrival or departure requirement is not a verified schedule. If plan_trip says schedule_confirmation_required, say that the traveler must confirm the provider's schedule before approval. Never promise that a route meets a deadline without explicit verified schedule evidence.
 - Nothing is charged until the traveler approves the exact amount. Their approval link appears in this private conversation; never write links, tokens or trip IDs in the generated reply.
@@ -452,6 +453,6 @@ function fallbackReply(me: string, plans: ConciergePlan[], input: ConciergeInput
     const miss = p.pMiss === null ? "no trip history for this mode yet" : `${Math.round(p.pMiss * 100)}% chance of missing kickoff`;
     return `@${me} best pick is ${ride} to ${p.eventName}: ${fmt(p.priceCents)} (${miss}${p.co2eKg !== null ? `, about ${p.co2eKg} kg CO₂e` : ""}). Nothing is charged until you approve. I’ve sent an approval link in this private chat.`;
   }
-  if (!input.memory.zip && !/\b\d{5}\b/.test(input.text)) return `@${me} send me your home ZIP and, if you have it, the event link. For example: @smile 95616 https://lu.ma/your-event`;
-  return `@${me} I couldn’t put that together just now. Try again with your ZIP and the event link.`;
+  if (!input.memory.zip && !/\b\d{5}\b/.test(input.text)) return `@${me} choose an event and plan your trip at https://smilefromhereto.work/finding-events, then return to this private conversation and message @smile to view your current route.`;
+  return `@${me} I couldn’t connect that request just now. Review your saved event and trip at https://smilefromhereto.work/finding-events, then return here and message @smile again.`;
 }

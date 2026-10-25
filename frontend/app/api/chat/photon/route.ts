@@ -5,18 +5,104 @@ import {
   ChatReplayConflict,
   ChatStorageUnavailable,
   claimPhotonTripHandoff,
+  loadState,
+  photonTripBinding,
   PhotonHandoffStorageUnavailable,
+  type PhotonTripBinding,
 } from "@smile/core";
 import { handleMessage, parseMention } from "@/lib/chat";
+import { ensureState } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+const WEBSITE = "https://smilefromhereto.work";
 
 const same = (a: string, b: string) => {
   const left = createHash("sha256").update(a).digest();
   const right = createHash("sha256").update(b).digest();
   return timingSafeEqual(left, right);
 };
+
+const safeLabel = (value: string | undefined, fallback: string) => {
+  const text = (value ?? "").replace(/https?:\/\/\S+/giu, "").replace(/\s+/g, " ").trim();
+  return text || fallback;
+};
+
+const modeLabel: Record<string, string> = {
+  bus: "Bus",
+  drive: "Drive",
+  flight: "Flight",
+  rideshare: "Rideshare",
+  train: "Train",
+};
+
+const statusLabel: Record<string, string> = {
+  planned: "Planned",
+  pre_approved: "Pre-approved",
+  booked: "Booked",
+  submitted: "Submitted for reimbursement",
+  needs_human: "Needs review",
+  reimbursed: "Reimbursed",
+  denied: "Denied",
+  closed: "Closed",
+};
+
+const eventTimeZone = (longitude?: number) => longitude === undefined || longitude < -115
+  ? "America/Los_Angeles"
+  : longitude < -101
+    ? "America/Denver"
+    : longitude < -87
+      ? "America/Chicago"
+      : "America/New_York";
+
+function tripSummary(binding: PhotonTripBinding, kind: "connected" | "update"): string | null {
+  ensureState();
+  const state = loadState();
+  const trip = state.trips.find((candidate) => candidate.id === binding.tripId && candidate.travelerId === binding.travelerId);
+  if (!trip) return null;
+  const event = state.events.find((candidate) => candidate.id === trip.eventId);
+  if (!event) return null;
+  const destination = [safeLabel(event.venue, "Event venue"), safeLabel(event.city, "")].filter(Boolean).join(", ");
+  const starts = Number.isNaN(Date.parse(event.startsAt))
+    ? "Time to be confirmed"
+    : new Date(event.startsAt).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: eventTimeZone(event.lon),
+      timeZoneName: "short",
+    });
+  const mode = modeLabel[trip.mode] ?? safeLabel(trip.mode, "Route");
+  const route = trip.routeTitle ? `${safeLabel(trip.routeTitle, mode)} (${mode})` : mode;
+  const heading = kind === "connected" ? "Your S’mile trip is connected." : "Trip update";
+  const routeInstruction = binding.mapPath
+    ? "Open the secure step-by-step route in the next message."
+    : `Refresh your secure route from ${WEBSITE}/finding-events.`;
+  return [
+    heading,
+    "",
+    `Event: ${safeLabel(event.name, "Selected event")}`,
+    `Destination: ${destination}`,
+    `Starts: ${starts}`,
+    `Current route: ${route}`,
+    `Trip status: ${statusLabel[trip.state] ?? safeLabel(trip.state, "In progress")}`,
+    "",
+    routeInstruction,
+    "Message @smile status, @smile trip, or @smile location for the latest saved update. Pin the route message in Messages for quick access.",
+  ].join("\n");
+}
+
+const missingTripSummary = (binding: PhotonTripBinding) => [
+  "Your secure S’mile route is connected.",
+  "",
+  binding.mapPath
+    ? "Open the secure step-by-step route in the next message."
+    : `Refresh your secure route from ${WEBSITE}/finding-events.`,
+  "Pin the route message in Messages for quick access.",
+].join("\n");
 
 export async function POST(req: Request) {
   const expected = process.env.PHOTON_BRIDGE_SECRET;
@@ -44,20 +130,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ replies: [] });
 
   const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const identity = {
+    projectId: projectId as string,
+    spaceId: spaceId as string,
+    senderId: senderId as string,
+  };
   try {
-    const handoff = claimPhotonTripHandoff(text as string, {
-      projectId: projectId as string,
-      spaceId: spaceId as string,
-      senderId: senderId as string,
-    });
+    const handoff = claimPhotonTripHandoff(text as string, identity);
     if (handoff.kind !== "none") {
       const id = `photon-handoff-${hash([projectId, spaceId, messageId]).slice(0, 24)}`;
       if (handoff.kind === "ready") {
+        const summary = tripSummary(handoff.scope, "connected") ?? missingTripSummary(handoff.scope);
         return NextResponse.json({ replies: [{
           id,
-          text: handoff.reused
-            ? "Your secure route link is ready again. Tap the link in the next message to open the map."
-            : "Your secure route link is ready. Tap the link in the next message to open the map.",
+          text: handoff.reused ? summary.replace("is connected.", "is connected again.") : summary,
           mapPath: handoff.mapPath,
         }] });
       }
@@ -67,6 +153,16 @@ export async function POST(req: Request) {
         used: "That route code has already been claimed in another conversation. Return to your trip page and create a new Messages QR.",
       } as const;
       return NextResponse.json({ replies: [{ id, text: textByKind[handoff.kind] }] });
+    }
+
+    const binding = photonTripBinding(identity);
+    if (binding) {
+      const id = `photon-trip-update-${hash([projectId, spaceId, messageId]).slice(0, 24)}`;
+      return NextResponse.json({ replies: [{
+        id,
+        text: tripSummary(binding, "update") ?? missingTripSummary(binding),
+        ...(binding.mapPath ? { mapPath: binding.mapPath } : {}),
+      }] });
     }
   } catch (error) {
     if (error instanceof PhotonHandoffStorageUnavailable) {
