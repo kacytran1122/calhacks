@@ -5,6 +5,7 @@ import { readDatasetSnapshot, triggerDataset, unlock } from "./brightdata";
 
 const GOOGLE_FLIGHTS_DATASET = "gd_mhng7wen1rw0a3gvpf";
 const snapshotQueries = new Map<string, { query: string; expires: number }>();
+const pageAttempts = new Map<string, { lastAttempt: number; expires: number }>();
 
 export interface LiveFlightQuote {
   status: FetchStatus;
@@ -264,6 +265,7 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
   const requestedSnapshot = args.snapshotId;
   const queryKey = `${fromAirport}:${toAirport}:${departDate}`;
   for (const [id, binding] of snapshotQueries) if (binding.expires <= started) snapshotQueries.delete(id);
+  for (const [key, attempt] of pageAttempts) if (attempt.expires <= started) pageAttempts.delete(key);
   const existing = requestedSnapshot ? snapshotQueries.get(requestedSnapshot) : undefined;
   if (existing && existing.query !== queryKey) return { ...base, status: "error", via: "validation", ms: 0, note: "This fare collection belongs to a different airport pair or departure date." };
   const trigger = requestedSnapshot
@@ -276,6 +278,7 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
   }
   let collectionState = "starting";
   let datasetNote: string | undefined;
+  let earlyPageFallback = false;
   if (trigger.status === "ok" && snapshotId) {
     let checks = 0;
     while (Date.now() - started < timeoutMs - 700) {
@@ -307,10 +310,19 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
       if (snapshot.status === "error" || snapshot.status === "blocked") {
         return { ...base, status: snapshot.status, snapshotId, collectionState, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: snapshot.error ?? "The live fare collection failed." };
       }
-      if (requestedSnapshot && checks >= 1) break;
+      if (requestedSnapshot && checks >= 1) {
+        const attemptKey = `${requestedSnapshot}:${queryKey}`;
+        const attempt = pageAttempts.get(attemptKey);
+        if (llmAvailable() && timeoutMs - (Date.now() - started) >= 8_000 && (!attempt || Date.now() - attempt.lastAttempt >= 300_000)) {
+          if (pageAttempts.size >= 1_000 && !pageAttempts.has(attemptKey)) pageAttempts.delete(pageAttempts.keys().next().value!);
+          pageAttempts.set(attemptKey, { lastAttempt: Date.now(), expires: Date.now() + 3_600_000 });
+          earlyPageFallback = true;
+        }
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, Math.min(1_200, Math.max(0, timeoutMs - (Date.now() - started) - 700))));
     }
-    if (!datasetNote) return { ...base, status: "timeout", snapshotId, collectionState, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: "The live fare is still being collected. S’mile will keep checking this snapshot." };
+    if (!datasetNote && !earlyPageFallback) return { ...base, status: "timeout", snapshotId, collectionState, via: "Bright Data Google Flights scraper", ms: Date.now() - started, note: "The live fare is still being collected. S’mile will keep checking this snapshot." };
   }
 
   const remaining = datasetNote ? Math.max(8_000, timeoutMs - (Date.now() - started)) : timeoutMs - (Date.now() - started);
@@ -326,13 +338,14 @@ export async function liveGoogleFlightQuote(args: { fromAirport: string; toAirpo
         effort: "low",
       });
       if (extracted.amountUsd && extracted.exactQuote && extracted.fromAirport === fromAirport && extracted.toAirport === toAirport && extracted.departDate === departDate && quoteContainsUsdAmount(extracted.exactQuote, extracted.amountUsd) && text.toLowerCase().includes(extracted.exactQuote.toLowerCase())) {
-        return { ...base, status: "ok", amountUsd: extracted.amountUsd, provider: extracted.provider ?? "Google Flights", scope: extracted.scope ?? "Lowest visible fare for this route and date", via: "Bright Data Web Unlocker → grounded extraction", ms: Date.now() - started, snapshotId, collectionState };
+        return { ...base, status: "ok", amountUsd: extracted.amountUsd, provider: extracted.provider ?? "Google Flights", scope: extracted.scope ?? "Lowest visible fare for this route and date", via: "Bright Data Web Unlocker → grounded extraction", ms: Date.now() - started, snapshotId, collectionState: "ready" };
       }
     } catch {
       // The result below preserves the source failure without inventing a price.
     }
   }
 
+  if (earlyPageFallback) return { ...base, status: "timeout", snapshotId, collectionState, via: "Bright Data Google Flights scraper + Web Unlocker fallback", ms: Date.now() - started, note: "The live page did not yet provide a verifiable fare. S’mile will keep checking the original fare collection." };
   const note = [datasetNote, trigger.error, page.error, page.status === "ok" ? "No exact route-and-date fare could be verified in the returned page." : undefined].filter(Boolean).join("; ");
   return { ...base, status: trigger.status === "timeout" || page.status === "timeout" ? "timeout" : trigger.status === "blocked" || page.status === "blocked" ? "blocked" : "empty", via: "Bright Data Google Flights scraper + Web Unlocker fallback", ms: Date.now() - started, snapshotId, collectionState, note };
 }

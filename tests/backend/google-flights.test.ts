@@ -350,6 +350,64 @@ test("price checking retains the domestic interstate policy", async (t) => {
   assert.equal(await checkFlightPrice({ from, to, startsAt: "2027-01-17T17:00:00Z" }), null);
 });
 
+test("pending collections try the live page early once and throttle repeated polls after failure", async (t) => {
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "test-api-key";
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  process.env.BRIGHTDATA_UNLOCKER_ZONE = "test-unlocker";
+  t.after(() => {
+    if (anthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = anthropic;
+  });
+  let pageAttempts = 0;
+  let unlockedUrl = "";
+  let unboundReady = false;
+  t.mock.method(globalThis, "fetch", async (input, init) => {
+    const url = String(input);
+    if (url.includes("/trigger?")) return new Response(JSON.stringify({ snapshot_id: "s_earlythrottle" }), { status: 200 });
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: unboundReady && url.includes("s_unknownpending") ? "ready" : "running" }), { status: 200 });
+    if (url.includes("/snapshot/s_unknownpending")) return new Response(JSON.stringify([{ price: "$1" }, { url: googleFlightsUrl("JFK", "MIA", "2027-05-12"), price: "$2" }]), { status: 200 });
+    if (url.endsWith("/request")) {
+      pageAttempts += 1;
+      unlockedUrl = (JSON.parse(String(init?.body)) as { url: string }).url;
+      return new Response("", { status: 403 });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  });
+  const args = { fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16" };
+  const first = await liveGoogleFlightQuote({ ...args, timeoutMs: 3_000 });
+  assert.equal(first.status, "timeout");
+  assert.equal(pageAttempts, 0);
+  const resume = { ...args, snapshotId: first.snapshotId, timeoutMs: 30_000 };
+  const attempted = await liveGoogleFlightQuote(resume);
+  assert.equal(pageAttempts, 1);
+  assert.equal(attempted.status, "timeout");
+  assert.equal(attempted.collectionState, "running");
+  assert.equal(attempted.snapshotId, first.snapshotId);
+  assert.equal(attempted.amountUsd, undefined);
+  const started = Date.now();
+  const throttled = await liveGoogleFlightQuote(resume);
+  assert.equal(throttled.status, "timeout");
+  assert.equal(pageAttempts, 1);
+  assert.ok(Date.now() - started < 500);
+  const unbound = await liveGoogleFlightQuote({ ...resume, snapshotId: "s_unknownpending" });
+  assert.equal(unbound.status, "timeout");
+  assert.equal(pageAttempts, 2);
+  assert.equal(unlockedUrl, googleFlightsUrl(args.fromAirport, args.toAirport, args.departDate));
+  assert.equal((await liveGoogleFlightQuote({ ...resume, snapshotId: "s_unknownpending" })).status, "timeout");
+  assert.equal(pageAttempts, 2);
+  unboundReady = true;
+  const unrelated = await liveGoogleFlightQuote({ ...resume, snapshotId: "s_unknownpending" });
+  assert.notEqual(unrelated.status, "ok");
+  assert.equal(unrelated.amountUsd, undefined);
+  assert.match(unrelated.note ?? "", /without a verifiable USD fare/);
+  assert.equal(pageAttempts, 3);
+  const later = Date.now() + 300_001;
+  t.mock.method(Date, "now", () => later);
+  assert.equal((await liveGoogleFlightQuote(resume)).status, "timeout");
+  assert.equal(pageAttempts, 4);
+});
+
 test("page extraction verifies the route, date, and complete quoted price before publishing a fare", async (t) => {
   const anthropic = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = "test-api-key";
@@ -360,11 +418,17 @@ test("page extraction verifies the route, date, and complete quoted price before
     else process.env.ANTHROPIC_API_KEY = anthropic;
   });
   let extracted = { amountUsd: 109, exactQuote: "$1090", fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16", provider: "Example airline", scope: "One adult one-way economy" };
+  let state = "ready";
+  let pageAttempts = 0;
   t.mock.method(globalThis, "fetch", async (input) => {
     const url = String(input);
-    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: "ready" }), { status: 200 });
+    if (url.includes("/trigger?")) return new Response(JSON.stringify({ snapshot_id: "s_earlyverified" }), { status: 200 });
+    if (url.includes("/progress/")) return new Response(JSON.stringify({ status: state }), { status: 200 });
     if (url.includes("/snapshot/")) return new Response("[]", { status: 200 });
-    if (url.endsWith("/request")) return new Response("Google Flights. ORD to SEA, January 16, 2027. One adult, economy, one-way. Lowest current bookable ticket $1090. Other flights $1990. ".repeat(3), { status: 200 });
+    if (url.endsWith("/request")) {
+      pageAttempts += 1;
+      return new Response("Google Flights. ORD to SEA, January 16, 2027. One adult, economy, one-way. Lowest current bookable ticket $1090. Other flights $1990. ".repeat(3), { status: 200 });
+    }
     if (url.includes("api.anthropic.com")) return new Response(JSON.stringify({ id: "msg_test", type: "message", role: "assistant", model: "test", content: [{ type: "text", text: JSON.stringify(extracted) }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 100, output_tokens: 100 } }), { status: 200, headers: { "Content-Type": "application/json" } });
     throw new Error(`Unexpected fetch ${url}`);
   });
@@ -379,4 +443,21 @@ test("page extraction verifies the route, date, and complete quoted price before
   assert.equal(accepted.status, "ok");
   assert.equal(accepted.amountUsd, 1090);
   assert.match(accepted.via, /grounded extraction/);
+  state = "running";
+  const before = pageAttempts;
+  const initial = await liveGoogleFlightQuote({ fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16", timeoutMs: 3_000 });
+  assert.equal(initial.status, "timeout");
+  assert.equal(pageAttempts, before);
+  const early = await liveGoogleFlightQuote({ fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16", snapshotId: initial.snapshotId, timeoutMs: 30_000 });
+  assert.equal(early.status, "ok");
+  assert.equal(early.amountUsd, 1090);
+  assert.equal(early.collectionState, "ready");
+  assert.equal(early.snapshotId, initial.snapshotId);
+  assert.equal(pageAttempts, before + 1);
+  assert.equal(state, "running");
+  const afterRestart = await liveGoogleFlightQuote({ fromAirport: "ORD", toAirport: "SEA", departDate: "2027-01-16", snapshotId: "s_afterrestartverified", timeoutMs: 30_000 });
+  assert.equal(afterRestart.status, "ok");
+  assert.equal(afterRestart.amountUsd, 1090);
+  assert.equal(afterRestart.collectionState, "ready");
+  assert.equal(pageAttempts, before + 2);
 });
