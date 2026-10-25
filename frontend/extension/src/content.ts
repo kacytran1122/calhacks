@@ -165,6 +165,7 @@ function createPlanner(events: EventChoice[]) {
 
   function renderResults(plan: RoutePlan) {
     if (!root) return;
+    const shell = root.querySelector<HTMLElement>(".shell");
     const icon = (mode: string) => mode === "drive" ? "⌁" : mode === "train" ? "▰" : "▣";
     const routes = plan.routes.map((route) => {
       const fastest = route.id === plan.fastestRouteId;
@@ -172,6 +173,7 @@ function createPlanner(events: EventChoice[]) {
     }).join("");
     const eventImage = plan.event.imageUrl || new URL("/favicon.ico", plan.event.url).href;
     root.querySelector<HTMLElement>(".body")!.innerHTML = `<div class="summary"><img src="${esc(eventImage)}" alt="${esc(`${plan.event.name} artwork`)}"><div class="summary-copy"><b>${esc(plan.event.name)}</b><span>${esc(plan.originLabel)} → ${esc(plan.destinationLabel)}</span></div></div>${routes ? `<div class="agent-note"><b>Your S’mile route agent mapped the handoffs.</b>Follow the street, stop, line, direction, and transfer details below. The fastest live option is first, with practical backups after it.</div>` : ""}${routes || `<div class="error">No route is available right now. ${esc(plan.messages.join(" "))}</div>`}${plan.messages.length && routes ? `<div class="note">${esc(plan.messages.join(" "))}</div>` : ""}<button id="again" class="primary again">Change trip details</button>${websiteLink()}`;
+    if (shell) shell.scrollTop = 0;
     root.querySelector<HTMLButtonElement>("#again")!.onclick = renderForm;
   }
 
