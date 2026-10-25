@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
 import { FindClient } from "../../frontend/app/find/FindClient";
 
-const response = (body: unknown) => Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
+const response = (body: unknown) => Promise.resolve({ ok: true, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) } as Response);
 
 const result = {
   origin: { zip: "61401", label: "Galesburg, IL" },

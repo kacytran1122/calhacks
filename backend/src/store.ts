@@ -39,7 +39,7 @@ function backendRoot(): string {
   return process.cwd();
 }
 
-export const DATA_DIR = process.env.SMILE_DATA_DIR ?? path.join(backendRoot(), ".data");
+export const DATA_DIR = process.env.SMILE_DATA_DIR ?? (process.env.VERCEL ? path.join("/tmp", "smile-data") : path.join(backendRoot(), ".data"));
 export const BOOKS_FILE = path.join(DATA_DIR, "books.db");
 
 export class ConcurrentEdit extends Error {}

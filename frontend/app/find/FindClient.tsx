@@ -69,8 +69,17 @@ function displayDistance(miles: number, unit: "mi" | "km") {
 
 async function api<T>(url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  const responseText = await res.text();
+  let json: Record<string, unknown> | null = null;
+  if (responseText) {
+    try {
+      json = JSON.parse(responseText) as Record<string, unknown>;
+    } catch {
+      throw new Error(`S’mile received an unreadable response from ${url} (HTTP ${res.status}). Please try again.`);
+    }
+  }
+  if (!res.ok) throw new Error(typeof json?.error === "string" ? json.error : `S’mile could not complete ${url} (HTTP ${res.status}). Please try again.`);
+  if (!json) throw new Error(`S’mile received an empty response from ${url} (HTTP ${res.status}). Please try again.`);
   return json as T;
 }
 
