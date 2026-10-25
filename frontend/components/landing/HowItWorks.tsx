@@ -16,8 +16,6 @@ const STEPS: { title: string; body: ReactNode; panel: ReactNode; image?: string;
   {
     title: "Origin entered",
     body: "Start with a ZIP or a U.S. city and state. No account, no profile form.",
-    image: "/how/2-start.webp",
-    imageAlt: "Trip setup screen with the selected event and travel details",
     panel: (
       <>
         <div style={{ font: "700 42px/1 var(--font-heading)" }}>Davis, CA</div>
@@ -62,8 +60,6 @@ const STEPS: { title: string; body: ReactNode; panel: ReactNode; image?: string;
   {
     title: "Buddies matched",
     body: "Travelers on your route, matched without exposing profiles.",
-    image: "/how/4-group.webp",
-    imageAlt: "Private Messages handoff for contacting at smile about the trip",
     panel: (
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ display: "flex", paddingLeft: 8 }}>
@@ -126,13 +122,13 @@ export function HowItWorks() {
           </div>
           <div className="how-feature" role="tabpanel" aria-live="polite">
             <div className={`how-picture how-picture-${cur + 1}${s.image ? " has-image" : ""}`}>
-              {s.image ? <img className="how-screen-capture" src={s.image} alt={s.imageAlt ?? ""} /> : <>
-                <span className="how-photo-light" />
-                <span className="how-photo-route" />
-                <span className="how-photo-point p1" />
-                <span className="how-photo-point p2" />
-                <span className="how-photo-point p3" />
-              </>}
+              {s.image ? <img className="how-screen-capture" src={s.image} alt={s.imageAlt ?? ""} /> : (
+                <div className="how-word-frame" aria-hidden="true">
+                  <small>Journey step</small>
+                  <strong>{String(cur + 1).padStart(2, "0")}</strong>
+                  <span>{s.title}</span>
+                </div>
+              )}
               <div className="how-photo-caption"><small>Trip stage</small><b>{s.title}</b></div>
             </div>
             <div className="how-feature-copy">
