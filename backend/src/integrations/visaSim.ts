@@ -20,7 +20,7 @@ export type ChargeResult =
   | { ok: true; authCode: string; amountCents: Cents }
   | { ok: false; reason: "not_approved" | "already_used" | "expired" | "amount_exceeds_mandate" | "wrong_merchant_category"; detail: string };
 
-export function chargeMandate(m: Mandate, amountCents: Cents, merchantCategory: string, now = new Date()): ChargeResult {
+export function checkMandate(m: Mandate, amountCents: Cents, merchantCategory: string, now = new Date()): ChargeResult {
   if (m.status === "consumed") return { ok: false, reason: "already_used", detail: "single-use token already settled" };
   if (m.status !== "approved") return { ok: false, reason: "not_approved", detail: `mandate is ${m.status}` };
   if (now > new Date(m.expiresAt)) return { ok: false, reason: "expired", detail: `expired ${m.expiresAt}` };
@@ -28,6 +28,11 @@ export function chargeMandate(m: Mandate, amountCents: Cents, merchantCategory: 
     return { ok: false, reason: "wrong_merchant_category", detail: `${merchantCategory} ≠ ${m.merchantCategory}` };
   if (amountCents > m.maxCents)
     return { ok: false, reason: "amount_exceeds_mandate", detail: `charge ${amountCents}¢ > approved ${m.maxCents}¢` };
-  m.status = "consumed";
   return { ok: true, authCode: `SIM${randomBytes(3).toString("hex").toUpperCase()}`, amountCents };
+}
+
+export function chargeMandate(m: Mandate, amountCents: Cents, merchantCategory: string, now = new Date()): ChargeResult {
+  const result = checkMandate(m, amountCents, merchantCategory, now);
+  if (result.ok) m.status = "consumed";
+  return result;
 }

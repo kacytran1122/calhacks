@@ -97,7 +97,7 @@ No production deployment occurs without an explicitly configured hosting environ
 | Hyphenate | Organizer finance desk, reconciliation, controls, and accountable handoffs |
 | Photon 2.0 | `@smile` group conversation and private trip-scoped approval links |
 | TigerData | Time-series snapshots for event date and venue changes |
-| Visa | Reviewed, exact-amount travel basket and sandbox authorization boundary |
+| Visa | Reviewed, exact-amount travel basket; signed Visa Acceptance sandbox authorization when configured, capture disabled |
 
 ## Safety boundaries
 

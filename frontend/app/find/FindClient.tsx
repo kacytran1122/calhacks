@@ -481,7 +481,7 @@ function PlanPane({ zip, originText, originCoordinates, maxDistanceMiles, event,
     run("book", async () => {
       const r = await api<{ ok: boolean; detail: string }>("/api/plan/book", { tripId: plan!.trip.id, fareDeltaCents: delta, tripToken: plan!.approvalToken });
       setStage(r.ok ? "booked" : "declined");
-      setMsg(r.ok ? { kind: "ok", text: `Booked on a single-use card for exactly ${fmt(plan!.trip.quoteCents)} (simulated).` } : { kind: "err", text: `The card declined ${r.detail}. You'll be asked to approve the new exact amount.` });
+      setMsg(r.ok ? { kind: "ok", text: `${r.detail}. Capture remains disabled.` } : { kind: "err", text: `The card declined ${r.detail}. You'll be asked to approve the new exact amount.` });
     });
 
   const stops = plan?.evidence.find((e) => e.kind === "stop");

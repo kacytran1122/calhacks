@@ -8,6 +8,7 @@ const checks: Check[] = [
   { name: "Anthropic / Claude", ready: set("ANTHROPIC_API_KEY") || set("ANTHROPIC_AUTH_TOKEN"), detail: "event and receipt extraction, explanations, audit defense" },
   { name: "Bright Data", ready: brightDataReady, detail: "live public event pages, fares, and stops" },
   { name: "TigerData", ready: set("TIGER_DATABASE_URL"), detail: "time-series event snapshots and change detection" },
+  { name: "Visa Acceptance sandbox", ready: set("VA_MERCHANT_ID") && set("VA_MERCHANT_KEY_ID") && set("VA_MERCHANT_SECRET_KEY") && set("VA_TEST_CARD_NUMBER") && set("VA_TEST_CARD_EXPIRATION_MONTH") && set("VA_TEST_CARD_EXPIRATION_YEAR"), detail: "signed exact-amount authorizations with capture disabled" },
   { name: "Photon 2.0", ready: set("PHOTON_PROJECT_ID") && set("PHOTON_API_KEY") && set("SMILE_WEB_URL") && set("PHOTON_BRIDGE_SECRET"), detail: "@smile iMessage transport" },
 ];
 

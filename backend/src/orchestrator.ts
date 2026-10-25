@@ -286,11 +286,11 @@ export async function planTrip(
   return { trip, event, evidence: state.evidence.filter((e) => e.tripId === trip.id), routes, inbox: q };
 }
 
-export function bookTrip(state: State, tripId: string, fareDeltaCents = 0) {
+export async function bookTrip(state: State, tripId: string, fareDeltaCents = 0) {
   const trip = state.trips.find((t) => t.id === tripId);
   if (!trip || trip.state !== "pre_approved") throw new Error("trip isn't pre-approved");
   const amount = trip.quoteCents + fareDeltaCents;
-  const r = chargeTrip(state, tripId, amount, `${trip.mode.toUpperCase()} via S'mile`);
+  const r = await chargeTrip(state, tripId, amount, `${trip.mode.toUpperCase()} via S'mile`);
   if (!r.ok) {
     const m = createMandate({ tripId, maxCents: amount, merchantCategory: state.mandates.find((x) => x.id === trip.mandateId)!.merchantCategory, requestedBy: "agent:policy" });
     state.mandates.push(m);

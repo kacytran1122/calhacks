@@ -109,7 +109,7 @@ export function DeskClient({ initialZip }: { initialZip: string }) {
           <span className={`dk-chip ${i.claude ? "on" : ""}`}>Claude {i.claude ? "on" : "off"}</span>
           <span className={`dk-chip ${i.brightData ? "on" : ""}`}>Bright Data {i.brightData ? "on" : "off"}</span>
           <span className={`dk-chip ${i.photon ? "on" : ""}`}>Photon 2.0 {i.photon ? "ready" : "off"}</span>
-          <span className="dk-chip sim">Visa · simulated</span>
+          <span className={`dk-chip ${i.visa === "sandbox" ? "on" : "sim"}`}>Visa · {i.visa}</span>
         </div>
         <div className="dk-me">
           <b>{snap.user.name}</b> <span className="dk-tag">{snap.user.role}</span>
@@ -340,7 +340,7 @@ export function PlanPanel({ initialZip, busy, run }: { initialZip: string; busy:
       const r = await api<{ ok: boolean; detail: string }>("/api/plan/book", { tripId: plan.trip.id, fareDeltaCents: delta, tripToken: plan.approvalToken });
       setStage(r.ok ? "booked" : "declined");
       return r;
-    }, (r) => ((r as { ok: boolean }).ok ? `Charged ${fmt(plan.trip.quoteCents)} on the single-use token (simulated).` : `Declined: ${(r as { detail: string }).detail}. Re-approval sent to the traveler (R7).`));
+    }, (r) => ((r as { ok: boolean }).ok ? `${(r as { detail: string }).detail}. Capture remains disabled.` : `Declined: ${(r as { detail: string }).detail}. Re-approval sent to the traveler (R7).`));
 
   return (
     <div className="dk-panel dk-wide" id="plan">
@@ -425,7 +425,7 @@ export function PlanPanel({ initialZip, busy, run }: { initialZip: string; busy:
                   </button>
                 </div>
               )}
-              {stage === "booked" && <p className="dk-ok">Booked on a single-use simulated token for exactly {fmt(plan.trip.quoteCents)}.</p>}
+              {stage === "booked" && <p className="dk-ok">Authorized exactly {fmt(plan.trip.quoteCents)} on a single-use token. Capture remains disabled.</p>}
               {stage === "declined" && <p className="dk-warn">The mandate declined the higher fare. The traveler has a new question in “Needs a person” to approve the exact new amount.</p>}
             </div>
           )}
